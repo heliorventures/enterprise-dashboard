@@ -1,0 +1,136 @@
+<section class="page">
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">{{ selectedLabel() }}</p>
+      <h1>Financial and delivery overview</h1>
+    </div>
+    <div class="controls">
+      <label class="field">
+        <span>Company</span>
+        <select [value]="selectedCompany()" (change)="onCompanyChange($event)">
+          <option value="all">All companies</option>
+          @for (company of data()?.companies || []; track company.id) {
+            <option [value]="company.id">{{ company.name }}</option>
+          }
+        </select>
+      </label>
+      <button type="button" class="btn ghost" (click)="load()" [disabled]="loading()">Refresh</button>
+      <button type="button" class="btn primary" (click)="syncTally()" [disabled]="syncing()">
+        {{ syncing() ? 'Syncing…' : 'Sync Tally' }}
+      </button>
+    </div>
+  </header>
+
+  @if (error()) {
+    <p class="banner danger">{{ error() }}</p>
+  }
+
+  @if (loading() && !data()) {
+    <div class="skeleton-grid" aria-hidden="true">
+      <span></span><span></span><span></span><span></span><span></span><span></span>
+    </div>
+  } @else if (data(); as dashboard) {
+    <div class="meta-row">
+      <span class="pill" [class.ok]="dashboard.tally.connected" [class.warn]="!dashboard.tally.connected">
+        <i></i>
+        {{ dashboard.tally.connected ? 'Tally connected' : 'Tally offline' }}
+      </span>
+      <span class="meta">{{ dashboard.companies.length }} companies</span>
+      <span class="meta">{{ dashboard.work.totals.total }} projects</span>
+      @if (dashboard.lastSync) {
+        <span class="meta">Last sync {{ dashboard.lastSync.SyncedAt | date: 'dd MMM, HH:mm' }}</span>
+      }
+      <span class="meta grow">{{ dashboard.tally.message }}</span>
+    </div>
+
+    <section class="kpis">
+      @for (kpi of kpis(); track kpi.key) {
+        <article class="kpi">
+          <p>{{ kpi.label }}</p>
+          <strong class="num" [class.up]="kpi.tone === 'up'" [class.down]="kpi.tone === 'down'" [title]="fullInr(kpi.value)">
+            {{ compactInr(kpi.value) }}
+          </strong>
+        </article>
+      }
+    </section>
+
+    <section class="grid">
+      <article class="panel">
+        <header>
+          <div>
+            <h2>Company financials</h2>
+            <p>Consolidated from Tally ledgers after sync. Figures stay available if Tally is offline.</p>
+          </div>
+        </header>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Company</th>
+                <th>Revenue</th>
+                <th>Expenses</th>
+                <th>Profit</th>
+                <th>Receivables</th>
+                <th>Payables</th>
+                <th>Cash</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of dashboard.companyFinancials; track row.id) {
+                <tr>
+                  <td>
+                    <div class="entity">
+                      <span class="avatar">{{ initials(row.name) }}</span>
+                      <span>
+                        <strong>{{ row.name }}</strong>
+                        <small>{{ row.source === 'sql' ? 'SQL warehouse' : row.source }}</small>
+                      </span>
+                    </div>
+                  </td>
+                  <td class="num" [title]="fullInr(row.revenue)">{{ compactInr(row.revenue) }}</td>
+                  <td class="num" [title]="fullInr(row.expenses)">{{ compactInr(row.expenses) }}</td>
+                  <td class="num" [class.up]="row.profit >= 0" [class.down]="row.profit < 0" [title]="fullInr(row.profit)">{{ compactInr(row.profit) }}</td>
+                  <td class="num" [title]="fullInr(row.receivables)">{{ compactInr(row.receivables) }}</td>
+                  <td class="num" [title]="fullInr(row.payables)">{{ compactInr(row.payables) }}</td>
+                  <td class="num" [title]="fullInr(row.cash)">{{ compactInr(row.cash) }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="panel">
+        <header>
+          <div>
+            <h2>Work status</h2>
+            <p>{{ dashboard.work.totals.onTrack }} on track · {{ dashboard.work.totals.delayed }} delayed · {{ dashboard.work.totals.atRisk }} at risk</p>
+          </div>
+        </header>
+        <ul class="work-list">
+          @for (item of dashboard.work.items; track item.id) {
+            <li>
+              <div class="work-copy">
+                <strong>{{ item.name }}</strong>
+                <small>
+                  {{ item.companyName }}
+                  @if (item.owner) {
+                    · {{ item.owner }}
+                  }
+                  · due {{ item.dueDate | date: 'dd MMM' }}
+                </small>
+                <div class="bar" aria-hidden="true">
+                  <span [style.width.%]="item.progress"></span>
+                </div>
+              </div>
+              <div class="work-meta">
+                <span class="badge" [attr.data-status]="item.status">{{ statusLabel(item.status) | titlecase }}</span>
+                <span class="num">{{ item.progress | number: '1.0-0' }}%</span>
+              </div>
+            </li>
+          }
+        </ul>
+      </article>
+    </section>
+  }
+</section>

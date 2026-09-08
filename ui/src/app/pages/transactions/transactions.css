@@ -1,0 +1,8 @@
+:host {
+  display: block;
+}
+
+.narration {
+  max-width: 260px;
+  white-space: normal;
+}

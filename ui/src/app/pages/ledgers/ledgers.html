@@ -1,0 +1,88 @@
+<section class="grid-page">
+  <header>
+    <p class="eyebrow">Books of account</p>
+    <h1>Ledgers</h1>
+  </header>
+
+  <form class="filter-card" (submit)="apply($event)">
+    <div class="filter-form">
+      <label class="field search">
+        <span>Search</span>
+        <input type="search" [value]="query()" (input)="onQuery($event)" placeholder="Ledger, group or company" />
+      </label>
+      <label class="field compact">
+        <span>Company</span>
+        <select [value]="company()" (change)="onCompany($event)">
+          <option value="all">All companies</option>
+          @for (item of companies(); track item.id) {
+            <option [value]="item.id">{{ item.name }}</option>
+          }
+        </select>
+      </label>
+      <label class="field compact">
+        <span>Group</span>
+        <select [value]="group()" (change)="onGroup($event)">
+          <option value="">All groups</option>
+          @for (name of groups(); track name) {
+            <option [value]="name">{{ name }}</option>
+          }
+        </select>
+      </label>
+      <div class="filter-actions">
+        <button type="button" class="btn ghost" (click)="exportCsv()" [disabled]="exporting()">
+          {{ exporting() ? 'Exporting…' : 'Export' }}
+        </button>
+      </div>
+    </div>
+  </form>
+
+  @if (error()) {
+    <p class="banner">{{ error() }}</p>
+  }
+
+  <article class="grid-card">
+    <div class="grid-toolbar">
+      <div>
+        <h2>Chart of accounts</h2>
+        <p>Closing balances by ledger. Use filters and paging to scan the full extract.</p>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Company</th>
+            <th>Ledger</th>
+            <th>Group</th>
+            <th class="num">Closing balance</th>
+            <th class="num">Dr/Cr</th>
+          </tr>
+        </thead>
+        <tbody>
+          @if (loading()) {
+            <tr><td class="empty" colspan="5">Loading ledgers…</td></tr>
+          } @else if (!items().length) {
+            <tr><td class="empty" colspan="5">No ledgers match the current filters.</td></tr>
+          } @else {
+            @for (row of items(); track row.id) {
+              <tr>
+                <td>{{ row.companyName }}</td>
+                <td><strong>{{ row.name }}</strong></td>
+                <td>{{ row.group }}</td>
+                <td class="num" [title]="fullInr(row.balance)">{{ compactInr(abs(row.balance)) }}</td>
+                <td class="num">{{ drCr(row.balance) }}</td>
+              </tr>
+            }
+          }
+        </tbody>
+      </table>
+    </div>
+    <app-pager
+      [total]="total()"
+      [page]="page()"
+      [pageSize]="pageSize()"
+      (pageChange)="onPage($event)"
+      (pageSizeChange)="onPageSize($event)"
+    />
+  </article>
+</section>

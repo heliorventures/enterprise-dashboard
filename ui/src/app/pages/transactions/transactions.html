@@ -1,0 +1,103 @@
+<section class="grid-page">
+  <header>
+    <p class="eyebrow">Day book</p>
+    <h1>Transactions</h1>
+  </header>
+
+  <form class="filter-card" (submit)="apply($event)">
+    <div class="filter-form">
+      <label class="field search">
+        <span>Search</span>
+        <input type="search" [value]="query()" (input)="onQuery($event)" placeholder="Voucher no, party, narration" />
+      </label>
+      <label class="field compact">
+        <span>Company</span>
+        <select [value]="company()" (change)="onCompany($event)">
+          <option value="all">All companies</option>
+          @for (item of companies(); track item.id) {
+            <option [value]="item.id">{{ item.name }}</option>
+          }
+        </select>
+      </label>
+      <label class="field compact">
+        <span>Voucher type</span>
+        <select [value]="type()" (change)="onType($event)">
+          <option value="">All types</option>
+          @for (name of types(); track name) {
+            <option [value]="name">{{ name }}</option>
+          }
+        </select>
+      </label>
+      <label class="field compact">
+        <span>From</span>
+        <input type="date" [value]="from()" (change)="onFrom($event)" />
+      </label>
+      <label class="field compact">
+        <span>To</span>
+        <input type="date" [value]="to()" (change)="onTo($event)" />
+      </label>
+      <div class="filter-actions">
+        <button type="button" class="btn ghost" (click)="exportCsv()" [disabled]="exporting()">
+          {{ exporting() ? 'Exporting…' : 'Export' }}
+        </button>
+      </div>
+    </div>
+  </form>
+
+  @if (error()) {
+    <p class="banner">{{ error() }}</p>
+  }
+
+  <article class="grid-card">
+    <div class="grid-toolbar">
+      <div>
+        <h2>All vouchers</h2>
+        <p>Every booked transaction. Filter by company, type, and date, then page through the day book.</p>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Voucher</th>
+            <th>Company</th>
+            <th>Party / ledger</th>
+            <th>Project</th>
+            <th>Narration</th>
+            <th class="num">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          @if (loading()) {
+            <tr><td class="empty" colspan="7">Loading transactions…</td></tr>
+          } @else if (!items().length) {
+            <tr><td class="empty" colspan="7">No transactions match the current filters.</td></tr>
+          } @else {
+            @for (row of items(); track row.id) {
+              <tr>
+                <td>{{ row.date | date: 'dd MMM yyyy' }}</td>
+                <td>
+                  <strong>{{ row.type }}</strong>
+                  <small>{{ row.number || '—' }}</small>
+                </td>
+                <td>{{ row.companyName }}</td>
+                <td>{{ row.party || '—' }}</td>
+                <td>{{ row.project || '—' }}</td>
+                <td class="narration">{{ row.narration || '—' }}</td>
+                <td class="num" [title]="fullInr(row.amount)">{{ compactInr(row.amount) }}</td>
+              </tr>
+            }
+          }
+        </tbody>
+      </table>
+    </div>
+    <app-pager
+      [total]="total()"
+      [page]="page()"
+      [pageSize]="pageSize()"
+      (pageChange)="onPage($event)"
+      (pageSizeChange)="onPageSize($event)"
+    />
+  </article>
+</section>
