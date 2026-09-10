@@ -1,0 +1,32 @@
+{
+    admin off
+    auto_https off
+}
+:8080 {
+    encode gzip
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy same-origin
+        X-Frame-Options DENY
+    }
+    handle /healthz {
+        respond "enterprise-dashboard {$RELEASE_TAG}" 200
+    }
+    # Machine endpoint authenticates its Bearer token in Express.
+    handle /api/ingest/tally {
+        reverse_proxy enterprise-dashboard-api:3000
+    }
+    handle {
+        basic_auth {
+            {$DASHBOARD_USER} {$DASHBOARD_PASSWORD_HASH}
+        }
+        handle /api/* {
+            reverse_proxy enterprise-dashboard-api:3000
+        }
+        handle {
+            root * /srv
+            try_files {path} /index.html
+            file_server
+        }
+    }
+}

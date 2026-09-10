@@ -14,7 +14,6 @@ export class Dashboard {
 
   readonly selectedCompany = signal('all');
   readonly loading = signal(true);
-  readonly syncing = signal(false);
   readonly error = signal('');
   readonly data = signal<DashboardData | null>(null);
 
@@ -64,20 +63,6 @@ export class Dashboard {
   onCompanyChange(event: Event) {
     this.selectedCompany.set((event.target as HTMLSelectElement).value);
     this.load();
-  }
-
-  syncTally() {
-    this.syncing.set(true);
-    this.dashboardService.syncTally().subscribe({
-      next: () => {
-        this.syncing.set(false);
-        this.load();
-      },
-      error: (err) => {
-        this.syncing.set(false);
-        this.error.set(err.error?.error || 'Tally sync failed.');
-      },
-    });
   }
 
   statusLabel(status: string) {

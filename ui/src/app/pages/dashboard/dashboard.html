@@ -14,9 +14,8 @@
           }
         </select>
       </label>
-      <button type="button" class="btn ghost" (click)="load()" [disabled]="loading()">Refresh</button>
-      <button type="button" class="btn primary" (click)="syncTally()" [disabled]="syncing()">
-        {{ syncing() ? 'Syncing…' : 'Sync Tally' }}
+      <button type="button" class="btn primary" (click)="load()" [disabled]="loading()">
+        {{ loading() ? 'Refreshing...' : 'Refresh data' }}
       </button>
     </div>
   </header>
@@ -33,7 +32,7 @@
     <div class="meta-row">
       <span class="pill" [class.ok]="dashboard.tally.connected" [class.warn]="!dashboard.tally.connected">
         <i></i>
-        {{ dashboard.tally.connected ? 'Tally connected' : 'Tally offline' }}
+        {{ dashboard.tally.mode === 'push' ? 'Tally sender integration' : (dashboard.tally.connected ? 'Tally connected' : 'Tally offline') }}
       </span>
       <span class="meta">{{ dashboard.companies.length }} companies</span>
       <span class="meta">{{ dashboard.work.totals.total }} projects</span>
@@ -83,7 +82,7 @@
                       <span class="avatar">{{ initials(row.name) }}</span>
                       <span>
                         <strong>{{ row.name }}</strong>
-                        <small>{{ row.source === 'sql' ? 'SQL warehouse' : row.source }}</small>
+                        <small>{{ row.source === 'sql' ? 'PostgreSQL warehouse' : row.source }}</small>
                       </span>
                     </div>
                   </td>

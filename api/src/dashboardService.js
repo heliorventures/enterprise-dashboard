@@ -1,6 +1,7 @@
 const db = require('./db');
 const tally = require('./tally');
-const { syncFromTally } = require('./sync');
+const config = require('./config');
+const { companyFilter } = require('./filters');
 
 function toNumber(value) {
   return Number(value) || 0;
@@ -34,73 +35,73 @@ function projectProgress(project) {
 
 async function getCompanies() {
   const result = await db.query(`
-    SELECT CompanyID, CompanyName, TallyGUID, IsActive
-    FROM dbo.Companies
-    WHERE IsActive = 1
-    ORDER BY CompanyName
+    SELECT "CompanyID", "CompanyName", "TallyGUID", "IsActive"
+    FROM "Companies"
+    WHERE "IsActive" = true
+    ORDER BY "CompanyName"
   `);
-  return result.recordset;
+  return result.rows;
 }
 
 async function companyFinancials(companyId) {
   const result = await db.query(
     `
       SELECT
-        c.CompanyID,
-        c.CompanyName,
-        SUM(CASE WHEN l.GroupCategory LIKE '%Sales%' THEN l.CurrentBalance ELSE 0 END) AS Revenue,
-        SUM(CASE WHEN l.GroupCategory LIKE '%Purchase%' OR l.GroupCategory LIKE '%Expense%' THEN l.CurrentBalance ELSE 0 END) AS Expenses,
-        SUM(CASE WHEN l.GroupCategory LIKE '%Debtor%' THEN l.CurrentBalance ELSE 0 END) AS Receivables,
-        SUM(CASE WHEN l.GroupCategory LIKE '%Creditor%' THEN l.CurrentBalance ELSE 0 END) AS Payables,
-        SUM(CASE WHEN l.GroupCategory LIKE '%Bank%' OR l.GroupCategory LIKE '%Cash%' THEN l.CurrentBalance ELSE 0 END) AS Cash
-      FROM dbo.Companies c
-      LEFT JOIN dbo.Ledgers l ON l.CompanyID = c.CompanyID
-      WHERE c.IsActive = 1
-        AND (@companyId = 0 OR c.CompanyID = @companyId)
-      GROUP BY c.CompanyID, c.CompanyName
-      ORDER BY c.CompanyName
+        c."CompanyID",
+        c."CompanyName",
+        SUM(CASE WHEN l."GroupCategory" ILIKE '%Sales%' THEN l."CurrentBalance" ELSE 0 END) AS "Revenue",
+        SUM(CASE WHEN l."GroupCategory" ILIKE '%Purchase%' OR l."GroupCategory" ILIKE '%Expense%' THEN l."CurrentBalance" ELSE 0 END) AS "Expenses",
+        SUM(CASE WHEN l."GroupCategory" ILIKE '%Debtor%' THEN l."CurrentBalance" ELSE 0 END) AS "Receivables",
+        SUM(CASE WHEN l."GroupCategory" ILIKE '%Creditor%' THEN l."CurrentBalance" ELSE 0 END) AS "Payables",
+        SUM(CASE WHEN l."GroupCategory" ILIKE '%Bank%' OR l."GroupCategory" ILIKE '%Cash%' THEN l."CurrentBalance" ELSE 0 END) AS "Cash"
+      FROM "Companies" c
+      LEFT JOIN "Ledgers" l ON l."CompanyID" = c."CompanyID"
+      WHERE c."IsActive" = true
+        AND ($1 = 0 OR c."CompanyID" = $1)
+      GROUP BY c."CompanyID", c."CompanyName"
+      ORDER BY c."CompanyName"
     `,
-    { companyId: Number(companyId) || 0 }
+    [Number(companyId) || 0]
   );
-  return result.recordset;
+  return result.rows;
 }
 
 async function projectRows(companyId) {
   const result = await db.query(
     `
       SELECT
-        p.ProjectID,
-        p.CompanyID,
-        c.CompanyName,
-        p.ProjectName,
-        p.BudgetedExpense,
-        p.TargetRevenue,
-        p.StartDate,
-        p.EndDate,
-        ISNULL((
-          SELECT SUM(v.Amount)
-          FROM dbo.Vouchers v
-          WHERE v.ProjectID = p.ProjectID
-            AND v.VoucherType IN ('Payment', 'Purchase')
-        ), 0) AS ActualSpend
-      FROM dbo.Projects p
-      INNER JOIN dbo.Companies c ON c.CompanyID = p.CompanyID
-      WHERE c.IsActive = 1
-        AND (@companyId = 0 OR p.CompanyID = @companyId)
-      ORDER BY p.EndDate
+        p."ProjectID",
+        p."CompanyID",
+        c."CompanyName",
+        p."ProjectName",
+        p."BudgetedExpense",
+        p."TargetRevenue",
+        p."StartDate",
+        p."EndDate",
+        COALESCE((
+          SELECT SUM(v."Amount")
+          FROM "Vouchers" v
+          WHERE v."ProjectID" = p."ProjectID"
+            AND v."VoucherType" IN ('Payment', 'Purchase')
+        ), 0) AS "ActualSpend"
+      FROM "Projects" p
+      INNER JOIN "Companies" c ON c."CompanyID" = p."CompanyID"
+      WHERE c."IsActive" = true
+        AND ($1 = 0 OR p."CompanyID" = $1)
+      ORDER BY p."EndDate"
     `,
-    { companyId: Number(companyId) || 0 }
+    [Number(companyId) || 0]
   );
-  return result.recordset;
+  return result.rows;
 }
 
 async function lastSync() {
   const result = await db.query(`
-    SELECT TOP 1 Source, Status, Message, SyncedAt
-    FROM dbo.SyncLog
-    ORDER BY SyncedAt DESC
+    SELECT "Source", "Status", "Message", "SyncedAt"
+    FROM "SyncLog"
+    ORDER BY "SyncedAt" DESC, "SyncID" DESC LIMIT 1
   `);
-  return result.recordset[0] || null;
+  return result.rows[0] || null;
 }
 
 function mapFinance(row) {
@@ -120,9 +121,9 @@ function mapFinance(row) {
 }
 
 async function getDashboard(companyCode = 'all') {
-  const companyId = companyCode === 'all' ? 0 : Number(companyCode);
+  const companyId = companyFilter(companyCode);
   const [tallyStatus, companies, financialRows, projects, sync] = await Promise.all([
-    tally.ping(),
+    config.tallyMode === 'pull' ? tally.ping() : Promise.resolve({ connected: true, mode: 'push', url: '', companies: [], message: 'Receiving snapshots from the Tally sender service' }),
     getCompanies(),
     companyFinancials(companyId),
     projectRows(companyId),
@@ -183,5 +184,4 @@ async function getDashboard(companyCode = 'all') {
 module.exports = {
   getDashboard,
   getCompanies,
-  syncFromTally,
 };

@@ -1,0 +1,119 @@
+(prejoining) {
+    handle /prejoining-api/* {
+        header Cache-Control "private, no-store"
+        header Referrer-Policy "no-referrer"
+        header X-Content-Type-Options "nosniff"
+        request_body {
+            max_size 10MiB
+        }
+        reverse_proxy kabipay-subgraphs:4013
+    }
+}
+
+(announcement_video) {
+    handle /files/announcement-video/* {
+        request_body {
+            max_size 50MiB
+        }
+        reverse_proxy kabipay-subgraphs:4028
+    }
+}
+
+rms.heliorsoft.com {
+    # Keep this line if the existing Caddyfile uses the same Cloudflare origin cert.
+    tls /etc/caddy/certs/origin.pem /etc/caddy/certs/origin.key
+
+    encode gzip
+
+    reverse_proxy rms-app:3000
+}
+
+finance.heliorsoft.com {
+    # Existing HRMS/RMS Cloudflare origin-certificate setup, if covering this domain:
+    # tls /etc/caddy/certs/origin.pem /etc/caddy/certs/origin.key
+    reverse_proxy enterprise-dashboard-ui:8080
+}
+
+api.heliorsoft.com {
+    tls /etc/caddy/certs/origin.pem /etc/caddy/certs/origin.key
+
+    encode gzip
+    import announcement_video
+    import prejoining
+
+    handle /graphql* {
+        reverse_proxy kabipay-gateway:4009
+    }
+
+    handle /auth/* {
+        reverse_proxy kabipay-auth:4001
+    }
+
+    handle /files/employee-document* {
+        reverse_proxy kabipay-subgraphs:4013
+    }
+
+    handle /healthz {
+        reverse_proxy kabipay-auth:4001
+    }
+
+    handle {
+        respond "KabiPay API" 200
+    }
+}
+
+heliorsoft.com, www.heliorsoft.com, *.heliorsoft.com {
+    tls /etc/caddy/certs/origin.pem /etc/caddy/certs/origin.key
+
+    encode gzip
+    import announcement_video
+    import prejoining
+
+    # Keep API routes available on tenant UI subdomains as a fallback.
+    # The primary browser config should still use https://api.heliorsoft.com.
+    handle /graphql* {
+        reverse_proxy kabipay-gateway:4009
+    }
+
+    handle /auth/* {
+        reverse_proxy kabipay-auth:4001
+    }
+
+    handle /files/employee-document* {
+        reverse_proxy kabipay-subgraphs:4013
+    }
+
+    handle /healthz {
+        reverse_proxy kabipay-auth:4001
+    }
+
+    handle {
+        reverse_proxy kabipay-ui:80
+    }
+}
+
+:80 {
+    encode gzip
+    import announcement_video
+    import prejoining
+
+    handle /graphql* {
+        reverse_proxy kabipay-gateway:4009
+    }
+
+    handle /auth/* {
+        reverse_proxy kabipay-auth:4001
+    }
+
+    handle /files/employee-document* {
+        reverse_proxy kabipay-subgraphs:4013
+    }
+
+    handle /healthz {
+        reverse_proxy kabipay-auth:4001
+    }
+
+    handle {
+        reverse_proxy kabipay-ui:80
+    }
+}

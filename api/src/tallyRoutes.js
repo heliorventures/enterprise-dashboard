@@ -155,14 +155,7 @@ function registerTallyRoutes(app) {
     }
   });
 
-  app.post('/api/tally/sync', async (_req, res) => {
-    try {
-      const result = await dashboardService.syncFromTally();
-      res.status(result.connected === false ? 503 : 200).json(result);
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  });
+
 }
 
 module.exports = {

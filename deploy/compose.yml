@@ -1,0 +1,56 @@
+name: enterprise-dashboard
+services:
+  enterprise-dashboard-api:
+    image: enterprise-dashboard-api:${IMAGE_TAG:?IMAGE_TAG is required}
+    env_file:
+      - path: ${APP_SHARED_DIR:?APP_SHARED_DIR is required}/api.env
+        format: raw
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "3000"
+      TALLY_MODE: push
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 6s
+      retries: 12
+      start_period: 10s
+    networks: [private, existing]
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+
+  enterprise-dashboard-ui:
+    image: enterprise-dashboard-ui:${IMAGE_TAG:?IMAGE_TAG is required}
+    environment:
+      RELEASE_TAG: ${IMAGE_TAG}
+    env_file:
+      - path: ${APP_SHARED_DIR}/ui.env
+        format: raw
+    restart: unless-stopped
+    depends_on:
+      enterprise-dashboard-api:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [private, existing]
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+
+networks:
+  private:
+    internal: true
+  existing:
+    external: true
+    name: ${DOCKER_NETWORK:-apps_app-network}

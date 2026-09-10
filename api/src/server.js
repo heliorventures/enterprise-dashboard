@@ -4,29 +4,38 @@ const config = require('./config');
 const db = require('./db');
 const dashboardService = require('./dashboardService');
 const books = require('./books');
-const tally = require('./tally');
+const { timingSafeEqual, createHash } = require('node:crypto');
+const { ingestSnapshot } = require('./ingest');
 const { registerTallyRoutes } = require('./tallyRoutes');
 
 const app = express();
 
 app.use(cors({ origin: ['http://localhost:4200'] }));
+app.disable('x-powered-by');
+app.post('/api/ingest/tally', (req, res, next) => {
+  const supplied = req.headers.authorization || '';
+  const expected = 'Bearer ' + config.ingestToken;
+  const hash = value => createHash('sha256').update(value).digest();
+  if (config.ingestToken.length < 32 || !timingSafeEqual(hash(supplied), hash(expected))) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+}, express.json({ limit: '20mb' }), async (req, res) => {
+  try { res.json(await ingestSnapshot(req.body)); }
+  catch (error) {
+    const status = error.status || (error.code === '23505' ? 409 : 500);
+    if (status === 500) console.error('Tally ingestion failed:', error.code || error.name);
+    res.status(status).json({ error: status === 500 ? 'Snapshot could not be saved; retry with the same batchId' : error.code === '23505' ? 'Company identity conflicts with an existing company' : error.message });
+  }
+});
 app.use(express.json());
 
 app.get('/api/health', async (_req, res) => {
   try {
-    await db.getPool();
-    res.json({
-      ok: true,
-      service: 'api',
-      database: 'connected',
-      tally: {
-        url: tally.tallyUrl(),
-        host: config.tally.host,
-        port: config.tally.port,
-      },
-    });
+    await db.query('SELECT 1 FROM schema_migrations LIMIT 1');
+    res.json({ ok: true, service: 'api', database: 'connected' });
   } catch (error) {
-    res.status(500).json({ ok: false, service: 'api', database: error.message });
+    res.status(503).json({ ok: false, service: 'api', database: 'unavailable' });
   }
 });
 
@@ -35,7 +44,7 @@ app.get('/api/companies', async (_req, res) => {
     const companies = await dashboardService.getCompanies();
     res.json(companies.map((row) => ({ id: String(row.CompanyID), name: row.CompanyName })));
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.status || 500).json({ error: error.status ? error.message : 'Unable to complete request' });
   }
 });
 
@@ -45,7 +54,7 @@ app.get('/api/dashboard', async (req, res) => {
     const dashboard = await dashboardService.getDashboard(company);
     res.json(dashboard);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.status || 500).json({ error: error.status ? error.message : 'Unable to complete request' });
   }
 });
 
@@ -60,7 +69,7 @@ app.get('/api/ledgers', async (req, res) => {
     });
     res.json(result);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.status || 500).json({ error: error.status ? error.message : 'Unable to complete request' });
   }
 });
 
@@ -77,28 +86,27 @@ app.get('/api/vouchers', async (req, res) => {
     });
     res.json(result);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.status || 500).json({ error: error.status ? error.message : 'Unable to complete request' });
   }
 });
 
-registerTallyRoutes(app);
+if (config.tallyMode === 'pull' && !config.production) registerTallyRoutes(app);
+else app.get('/api/tally/status', (_req, res) => res.json({ connected: true, mode: 'push', url: '', companies: [], message: 'Receiving snapshots from the Tally sender service' }));
+app.post('/api/tally/sync', (_req, res) => res.status(405).json({ error: 'Synchronization is initiated by the Tally sender service' }));
+app.use((error, _req, res, _next) => res.status(error.status || 500).json({ error: error.type === 'entity.too.large' ? 'Snapshot exceeds 20 MB' : 'Invalid request' }));
 
 async function start() {
-  await db.getPool();
-  app.listen(config.port, config.host, () => {
-    console.log(`API listening on http://localhost:${config.port}`);
-    console.log(`Tally live data:`);
-    console.log(`  GET  /api/tally/status`);
-    console.log(`  GET  /api/tally/companies`);
-    console.log(`  GET  /api/tally/ledgers?company=Name`);
-    console.log(`  GET  /api/tally/vouchers?company=Name`);
-    console.log(`  GET  /api/tally/financials?company=Name`);
-    console.log(`  POST /api/tally/sync`);
-    console.log(`Tally target ${config.tally.host}:${config.tally.port}`);
+  if (config.production && config.ingestToken.length < 32) throw new Error('TALLY_INGEST_TOKEN must contain at least 32 characters');
+  await db.query('SELECT version FROM schema_migrations LIMIT 1');
+  const server = app.listen(config.port, config.host, () => console.log('API listening on port ' + config.port));
+  for (const signal of ['SIGTERM', 'SIGINT']) process.once(signal, () => {
+    server.close(() => db.close().then(() => process.exit(0)));
+    setTimeout(() => process.exit(1), 10000).unref();
   });
+  return server;
 }
-
-start().catch((error) => {
-  console.error('Failed to start API', error);
-  process.exit(1);
+if (require.main === module) start().catch(error => {
+  console.error('Failed to start API:', error.message);
+  db.close().finally(() => { process.exitCode = 1; });
 });
+module.exports = { app, start };

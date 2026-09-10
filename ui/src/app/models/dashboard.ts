@@ -1,4 +1,5 @@
 export interface TallyStatus {
+  mode?: 'push' | 'pull';
   connected: boolean;
   url: string;
   message: string;
