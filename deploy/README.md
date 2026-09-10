@@ -2,6 +2,8 @@
 
 ## Application and technology
 
+The Windows Tally sender is under [tally-agent](tally-agent/README.md). It runs once, logs company statistics, resumes pending uploads and supports staged large snapshots. Deploy the API migration and UI routing changes before enabling its scheduled job.
+
 Angular 21 / TypeScript 5.9 provides the dashboard, ledger browser and transaction day book. Express 5 on Node.js 22 serves JSON APIs. PostgreSQL stores companies, ledgers, projects, vouchers and import receipts. Caddy serves the compiled Angular application, protects browser access and proxies API calls.
 
 The business flow is: a service on the Tally server extracts data, POSTs a complete company snapshot to this application, and users view the stored figures. The VPS needs no inbound connection to Tally. The sender service itself is a separate deliverable; the receiving API and contract are included here.

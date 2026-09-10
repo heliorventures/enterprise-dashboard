@@ -12,7 +12,7 @@ const app = express();
 
 app.use(cors({ origin: ['http://localhost:4200'] }));
 app.disable('x-powered-by');
-app.post('/api/ingest/tally', (req, res, next) => {
+function authenticateSender(req, res, next) {
   const supplied = req.headers.authorization || '';
   const expected = 'Bearer ' + config.ingestToken;
   const hash = value => createHash('sha256').update(value).digest();
@@ -20,7 +20,19 @@ app.post('/api/ingest/tally', (req, res, next) => {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   next();
-}, express.json({ limit: '20mb' }), async (req, res) => {
+}
+const staged = require('./ingestChunks');
+for (const operation of ['begin', 'chunk', 'complete']) {
+  app.post('/api/ingest/tally/' + operation, authenticateSender, express.json({ limit: '1100kb' }), async (req, res) => {
+    try { res.json(await staged[operation](req.body)); }
+    catch (error) {
+      const status = error.status || (error.code === '23505' ? 409 : 500);
+      if (status === 500) console.error('Staged ingestion failed:', error.code || error.name);
+      res.status(status).json({ error: status === 500 ? 'Upload operation failed; retry the same request' : error.code === '23505' ? 'Company identity conflict' : error.message });
+    }
+  });
+}
+app.post('/api/ingest/tally', authenticateSender, express.json({ limit: '20mb' }), async (req, res) => {
   try { res.json(await ingestSnapshot(req.body)); }
   catch (error) {
     const status = error.status || (error.code === '23505' ? 409 : 500);
@@ -93,7 +105,7 @@ app.get('/api/vouchers', async (req, res) => {
 if (config.tallyMode === 'pull' && !config.production) registerTallyRoutes(app);
 else app.get('/api/tally/status', (_req, res) => res.json({ connected: true, mode: 'push', url: '', companies: [], message: 'Receiving snapshots from the Tally sender service' }));
 app.post('/api/tally/sync', (_req, res) => res.status(405).json({ error: 'Synchronization is initiated by the Tally sender service' }));
-app.use((error, _req, res, _next) => res.status(error.status || 500).json({ error: error.type === 'entity.too.large' ? 'Snapshot exceeds 20 MB' : 'Invalid request' }));
+app.use((error, _req, res, _next) => res.status(error.status || 500).json({ error: error.type === 'entity.too.large' ? 'Request exceeds the endpoint size limit' : 'Invalid request' }));
 
 async function start() {
   if (config.production && config.ingestToken.length < 32) throw new Error('TALLY_INGEST_TOKEN must contain at least 32 characters');

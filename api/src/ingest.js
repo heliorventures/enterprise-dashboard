@@ -62,7 +62,11 @@ async function ingestSnapshot(input) {
   const snapshot = validateSnapshot(input);
   const { batchId, capturedAt, company, ledgers, vouchers } = snapshot;
   const checksum = createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');
-  return db.transaction(async client => {
+  return db.transaction(client => applySnapshot(client, snapshot, checksum,
+    id => replaceSnapshot(client, id, ledgers, vouchers)));
+}
+
+async function applySnapshot(client, { batchId, capturedAt, company }, checksum, writeRows) {
     // Serialize imports before inspecting timestamps; never apply an older snapshot last.
     await client.query('SELECT pg_advisory_xact_lock(74312002)');
     const prior = await client.query('SELECT checksum, company_id FROM tally_ingestions WHERE batch_id = $1', [batchId]);
@@ -78,24 +82,27 @@ async function ingestSnapshot(input) {
     if (latest.rows.length && Date.parse(capturedAt) <= latest.rows[0].captured_at.getTime()) {
       throw invalid('Snapshot is older than or equal to the latest accepted snapshot', 409);
     }
-    await replaceSnapshot(client, id, ledgers, vouchers);
+    const counts = await writeRows(id);
     await client.query('INSERT INTO tally_ingestions (batch_id, company_id, captured_at, checksum) VALUES ($1, $2, $3, $4)', [batchId, id, capturedAt, checksum]);
     await client.query(`INSERT INTO "SyncLog" ("Source", "Status", "Message") VALUES ('tally', 'ok', $1)`,
-      [`Received ${company.name}: ${ledgers.length} ledgers, ${vouchers.length} vouchers`]);
-    return { ok: true, duplicate: false, companyId: id, batchId, ledgerCount: ledgers.length, voucherCount: vouchers.length };
-  });
+      [`Received ${company.name}: ${counts.ledgerCount} ledgers, ${counts.voucherCount} vouchers`]);
+    return { ok: true, duplicate: false, companyId: id, batchId, ...counts };
 }
 
 async function replaceSnapshot(client, companyId, ledgers, vouchers) {
   await client.query('DELETE FROM "Ledgers" WHERE "CompanyID" = $1', [companyId]);
+  await client.query(`DELETE FROM "Vouchers" WHERE "CompanyID" = $1 AND "Source" = 'tally'`, [companyId]);
+  await appendRows(client, companyId, ledgers, vouchers);
+  return { ledgerCount: ledgers.length, voucherCount: vouchers.length };
+}
+async function appendRows(client, companyId, ledgers, vouchers) {
   await client.query(`INSERT INTO "Ledgers" ("CompanyID", "LedgerName", "GroupCategory", "CurrentBalance")
     SELECT $1, name, "group", balance::numeric FROM jsonb_to_recordset($2::jsonb)
       AS x(name text, "group" text, balance text)`, [companyId, JSON.stringify(ledgers)]);
-  await client.query(`DELETE FROM "Vouchers" WHERE "CompanyID" = $1 AND "Source" = 'tally'`, [companyId]);
   await client.query(`INSERT INTO "Vouchers" ("CompanyID", "VoucherDate", "VoucherType", "Amount", "VoucherNumber", "PartyLedgerName", "Narration", "Source")
     SELECT $1, date::date, type, amount::numeric, number, party, narration, 'tally'
     FROM jsonb_to_recordset($2::jsonb) AS x(date text, type text, amount text, number text, party text, narration text)`,
     [companyId, JSON.stringify(vouchers)]);
 }
 
-module.exports = { validateSnapshot, ingestSnapshot };
+module.exports = { validateSnapshot, ingestSnapshot, applySnapshot, appendRows };

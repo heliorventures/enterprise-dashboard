@@ -1,0 +1,9 @@
+{
+  "tallyUrl": "http://localhost:9000",
+  "apiUrl": "https://finance.heliorsoft.com",
+  "tokenFile": "token.txt",
+  "stateDirectory": "state",
+  "requestTimeoutMs": 300000,
+  "allowEmptyCompanies": false,
+  "logRetentionDays": 30
+}

@@ -14,6 +14,10 @@ test('ingestion authenticates before parsing and rejects malformed authenticated
   const url = `http://127.0.0.1:${server.address().port}/api/ingest/tally`;
   const denied = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: 'not-json' });
   assert.equal(denied.status, 401);
+  for (const operation of ['begin','chunk','complete']) {
+    const response=await fetch(`${url}/${operation}`,{method:'POST',headers:{'Content-Type':'application/json'},body:'not-json'});
+    assert.equal(response.status,401);
+  }
   const invalid = await fetch(url, {
     method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + process.env.TALLY_INGEST_TOKEN }, body: '{}',
   });

@@ -1,5 +1,19 @@
 # Tally sender contract
 
+The Windows one-run sender and setup instructions are in [tally-agent](../tally-agent/README.md). Large snapshots use the staged protocol below; the original single-request endpoint remains supported.
+
+## Staged uploads
+
+All requests use `Authorization: Bearer <TALLY_INGEST_TOKEN>` and JSON over HTTPS.
+
+1. `POST /api/ingest/tally/begin`: `{batchId, capturedAt, fullSnapshot: true, company: {externalId, name}, chunkCount, ledgerCount, voucherCount}`. The manifest is immutable for a batch ID.
+2. `POST /api/ingest/tally/chunk`: `{batchId, index, ledgers: [], vouchers: []}`. Indexes are zero-based. Each chunk contains at most 2,000 total records and 1 MiB normalized JSON. Both arrays are required. Identical retries succeed; changed content at an existing index returns 409.
+3. `POST /api/ingest/tally/complete`: `{batchId}`. Every index and declared record count must match. The API rejects duplicate ledger names across chunks. Replacement and receipt storage commit in one transaction; retries return the stored result. Staging chunks are then removed. Live data is unchanged by begin/chunk calls or failed finalization.
+
+Limits: 10,000 chunks, 5,000,000 rows per kind and 512 MiB per company, 100 pending batches, 2 GiB aggregate pending payload. Incomplete batches expire after seven idle days (cleanup on begin); completed receipts are retained. These bounds require capacity planning for PostgreSQL disk/WAL and transaction time. Uploads are serialized with existing ingestion to protect ordering. HTTP 429 denotes staging capacity; 413 denotes size limits. Do not silently skip failed chunks or finalize a subset.
+
+## Original single-request protocol
+
 `POST https://finance.heliorsoft.com/api/ingest/tally`
 
 Headers: `Content-Type: application/json` and `Authorization: Bearer <TALLY_INGEST_TOKEN>`.

@@ -5,3 +5,6 @@ dist-images/
 !.env.example
 *.log
 .release-test.*/
+deploy/tally-agent/config.json
+deploy/tally-agent/token.txt
+deploy/tally-agent/state/
