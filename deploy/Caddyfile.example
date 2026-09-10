@@ -29,8 +29,6 @@ rms.heliorsoft.com {
 }
 
 finance.heliorsoft.com {
-    # Existing HRMS/RMS Cloudflare origin-certificate setup, if covering this domain:
-    # tls /etc/caddy/certs/origin.pem /etc/caddy/certs/origin.key
     reverse_proxy enterprise-dashboard-ui:8080
 }
 

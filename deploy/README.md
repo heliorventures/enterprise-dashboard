@@ -49,13 +49,15 @@ Requires Linux Bash, curl, flock, sha256sum, SSH/SCP and Docker Compose **2.30 o
 
    It generates random API/database credentials on the server, creates only the `enterprise_dashboard` database and non-superuser role, and verifies authentication. You do not enter a new database password. It never resets an existing role password. Existing `api.env` is preserved. An interrupted setup retains `api.env.pending`; investigate a role/password mismatch instead of deleting this recovery file. The deployment account needs Docker access and permission to create the app directory (an administrator can create/chown that directory first); the initializer does not run sudo automatically.
 
-3. Generate a dashboard bcrypt hash interactively on the VPS:
+3. Generate and save the dashboard login from local PowerShell:
 
-   ```bash
-   docker run --rm -it caddy:2-alpine caddy hash-password
+   ```powershell
+   .\deploy\scripts\configure-ui.ps1 -DashboardUser admin -GeneratePassword
    ```
 
-   Create `/opt/apps/enterprise-dashboard/shared/ui.env` from `ui.env.example`, set a username and paste the hash. Use `chmod 600` on both env files. They use raw format: no surrounding quotes and no doubling `$`. Never place the ingestion token in Angular code or browser storage. Configure the Tally sender with the token from `shared/api.env` using a secure channel.
+   Save the generated password displayed once after success. Omit `-GeneratePassword` to enter your own password at a hidden prompt. The script connects over SSH, hashes the password using a temporary Caddy container, and creates or atomically replaces `/opt/apps/enterprise-dashboard/shared/ui.env` from `ui.env.example` with permissions `600`. Only the hash is saved; failed hashing or template validation preserves the existing file. Running this command again changes the saved login; deploy afterward to apply it. It does not restart existing applications or change database credentials. The same SSH options as initialization are supported.
+
+   Env files use raw format: no surrounding quotes and no doubling `$`. Never place the ingestion token in Angular code or browser storage. Configure the Tally sender with the token from `shared/api.env` using a secure channel.
 
 ## Build, upload, deploy and test
 
