@@ -1,5 +1,7 @@
 # TallyPrime sender for Windows
 
+To exercise the deployed API without Tally access, use the [two-version synthetic fixture test](fixtures/README.md).
+
 Runs once, discovers all companies exposed by Tally's XML collection interface, uploads each company separately, writes a JSON-lines log, and exits. You create the Task Scheduler job. Nothing registers a task, service, or Docker container on the Tally server.
 
 ## Deploy the API first
@@ -12,41 +14,38 @@ Build and deploy a NEW release containing migration `003_tally_uploads.sql`, the
 
 Use another unused tag if finance-002 already exists. No changes to the shared HRMS/RMS Caddy blocks are needed for these paths.
 
-## Install on the Windows Tally server
+## Portable Windows package
 
-Copy this entire directory, including package-lock.json, to e.g. `C:\FinanceTallyAgent`. Install Node.js 22.12 or newer and make `node` accessible to the Windows account running the task. In PowerShell:
-
-```powershell
-Set-Location C:\FinanceTallyAgent
-npm.cmd ci --omit=dev --ignore-scripts --no-audit --no-fund
-Copy-Item config.example.json config.json
-notepad config.json
-notepad token.txt
-```
-
-Put only the existing **TALLY_INGEST_TOKEN** from the VPS's `/opt/apps/enterprise-dashboard/shared/api.env` in `token.txt`. This is the sender token, not the dashboard password or database password. Do not create a new unrelated token. Protect this folder using Windows Security permissions: allow only the task account and administrators. `token.txt`, the outbox and previews contain sensitive information; POSIX file modes do not set Windows ACLs. Do not commit or share them.
-
-`config.json` defaults to Tally `http://localhost:9000`, API `https://finance.heliorsoft.com`, and state paths relative to the configuration file. Enable/verify TallyPrime's HTTP/XML server when you have server access. Keep the interface private. Tally must be running with the companies available to that interface under the required user/session. Discovery cannot open unloaded or inaccessible companies.
-
-First inspect a dry run (does not need the token and never calls the ingestion API):
+Build on your local development machine, not the Tally server:
 
 ```powershell
-.\run-sync.ps1 -DryRun
+.\deploy\scripts\bundle-tally-agent.ps1 -Tag tally-001
 ```
 
-Inspect `state\logs` and the extracted JSON chunks under `state\preview\<batchId>`. Reconcile company names, counts, dates, signs and totals against Tally. Then upload:
+The output is `deploy/bundles/tally-001/FinanceTallyAgent-tally-001-win-x64.zip`. The bundler downloads the pinned Windows x64 runtime from Node.js, verifies its SHA-256 against the official HTTPS checksum manifest, installs only locked production dependencies, and validates runtime loading. An explicit file allowlist excludes real credentials, fixture tools and runtime state. Use a new bundle tag for subsequent builds; `bundle-info.json` records the runtime version and checksum.
 
-```powershell
-.\run-sync.ps1
-```
+On the server, use File Explorer and Notepad only:
 
-Task Scheduler action for every 15 minutes, using your configured service account:
+1. Extract the ZIP to `C:\FinanceTallyAgent`.
+2. Edit `config.json`: set `tallyUrl` (default `http://localhost:9000`) and confirm `apiUrl`.
+3. Paste only the existing **TALLY_INGEST_TOKEN** value into the included empty `token.txt`.
+4. Add the Task Scheduler action below. No install commands, PowerShell execution-policy changes, or PATH changes are needed.
 
-- Program: `powershell.exe`
-- Arguments: `-NoProfile -File "C:\FinanceTallyAgent\run-sync.ps1"`
-- Start in: `C:\FinanceTallyAgent`
+| Task Scheduler setting | Value |
+| --- | --- |
+| Program/script | `C:\FinanceTallyAgent\Run-Sync.cmd` |
+| Arguments | Leave empty |
+| Start in | `C:\FinanceTallyAgent` |
+| Trigger | Every 15 minutes indefinitely |
+| If already running | Do not start a new instance |
 
-Follow your organization's PowerShell execution/signing policy. Select “Do not start a new instance.” The runner also holds an exclusive OS file handle in the state directory; another run using that directory exits 2 and logs the overlap. Exit 0 means all attempted company operations succeeded; exit 1 means a failure. One company failure does not stop the remaining companies. Configure all tasks for this application to use the same state directory; do not run multiple sender installations for the same company.
+Use Task Scheduler's **Run** button for the initial run and inspect `state\logs`. For a dry run, set the action's arguments to `--dry-run`, inspect the preview data, then remove that argument before normal uploads. The included `START-HERE.txt` also gives a direct `runtime\node.exe` entry point if your task policy requires an executable.
+
+The package includes its own Node.js runtime; the server needs no Node.js/npm installation. Windows must support the bundled runtime and permit executable execution. TallyPrime must be running with its private HTTP/XML interface enabled and companies accessible in that session. The task account needs folder write access and network access to Tally and the API.
+
+Protect `token.txt`, logs and outbox using Windows folder Security permissions for only the task account and administrators. This token is not the dashboard password. The bundle deliberately contains no real token. Keep `config.json`, `token.txt` and the entire `state` folder when updating: stop/disable the old task first and replace only program files, dependencies and runtime, then re-enable it.
+
+The launcher uses a Windows named-pipe lock tied to the resolved state directory. A concurrent invocation exits 2 and logs the overlap; Windows releases the lock on process exit. Exit 0 means success; exit 1 means failure. Source checkouts can still use `run-sync.ps1`, which calls the same launcher and prefers the bundled runtime if available. Use the same state directory for all scheduled invocations of this installation.
 
 ## Logs and retries
 

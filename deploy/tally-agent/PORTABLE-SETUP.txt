@@ -1,0 +1,50 @@
+FINANCE TALLY SENDER - PORTABLE WINDOWS X64 PACKAGE
+
+No Node.js/npm installation or server command is required.
+
+1. Extract the ZIP, for example to C:\FinanceTallyAgent.
+   Use a local folder writable by the Windows account running the task.
+
+2. Open config.json in Notepad.
+   tallyUrl: use http://localhost:9000 if Tally runs on this server.
+   apiUrl: keep https://finance.heliorsoft.com for the finance application.
+   Keep tokenFile as token.txt and stateDirectory as state.
+
+3. Open token.txt in Notepad and paste ONLY your existing TALLY_INGEST_TOKEN.
+   No variable name, quotes, or dashboard password. Save the file.
+   Restrict folder access to administrators and the task account using
+   Windows folder Security settings. The package contains no real token.
+
+4. In Windows Task Scheduler, create your task:
+   Program/script: C:\FinanceTallyAgent\Run-Sync.cmd
+   Arguments: leave empty
+   Start in: C:\FinanceTallyAgent
+   Trigger: repeat every 15 minutes indefinitely
+   If already running: Do not start a new instance
+   Use an account able to reach Tally and write to this folder.
+
+   If your scheduler policy requires an executable instead of a CMD file:
+   Program/script: C:\FinanceTallyAgent\runtime\node.exe
+   Arguments: "C:\FinanceTallyAgent\launcher.js" "C:\FinanceTallyAgent\config.json"
+   Start in: C:\FinanceTallyAgent
+
+5. Use Task Scheduler's Run button for the first execution.
+   Inspect the timestamped files in state\logs using Notepad.
+   Exit 0 = successful; 1 = failure; 2 = overlapping run skipped.
+   For an extraction-only check, set arguments to --dry-run for Run-Sync.cmd,
+   then remove that argument before enabling normal scheduled uploads.
+
+TallyPrime must be running and its HTTP/XML interface must be enabled.
+Only companies exposed to that interface can be discovered. Each run
+extracts a complete snapshot (not incremental). Large uploads use chunks.
+Failed uploads remain in state\outbox for retry; do not delete that folder.
+The application must have the staged ingestion endpoints deployed.
+
+UPDATING: disable the task and wait for its current run to finish. Keep
+config.json, token.txt and the entire state folder. Replace only program
+files, node_modules and runtime from the new ZIP; do not overwrite your
+configuration with the blank templates. Re-enable the task afterward.
+
+The runtime is bundled for Windows x64. Your server must support that
+runtime and permit executing it; application-control policies still apply.
+No services, tasks, PATH entries or machine settings are installed by us.

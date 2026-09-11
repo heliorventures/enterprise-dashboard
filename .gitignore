@@ -8,3 +8,4 @@ dist-images/
 deploy/tally-agent/config.json
 deploy/tally-agent/token.txt
 deploy/tally-agent/state/
+deploy/bundles/

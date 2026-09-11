@@ -1,0 +1,15 @@
+{
+  "company": { "name": "TEST - Finance Sync", "externalId": "finance-sync-fixture-company-2026" },
+  "ledgers": [
+    {"name":"Test Sales","group":"Sales Accounts","balance":"150000.00"},
+    {"name":"Test Expenses","group":"Indirect Expenses","balance":"45000.00"},
+    {"name":"Test Cash","group":"Cash-in-Hand","balance":"40000.00"},
+    {"name":"Test Customer","group":"Sundry Debtors","balance":"20000.00"},
+    {"name":"Test Supplier","group":"Sundry Creditors","balance":"10000.00"}
+  ],
+  "vouchers": [
+    {"date":"20260901","type":"Sales","number":"TEST-S001","amount":"100000.00","narration":"Synthetic test sale"},
+    {"date":"20260902","type":"Payment","number":"TEST-P001","amount":"45000.00","narration":"Updated synthetic expense"},
+    {"date":"20260903","type":"Sales","number":"TEST-S002","amount":"50000.00","narration":"Second synthetic test sale"}
+  ]
+}

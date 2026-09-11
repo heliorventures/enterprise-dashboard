@@ -32,7 +32,9 @@ async function run(configFile, dryRun=false) {
     for (const file of fs.readdirSync(logs)) {
       if (/^[\dTZ-]+-[a-f0-9-]+\.jsonl$/.test(file) && fs.statSync(path.join(logs,file)).mtimeMs < Date.now()-retention*86400000) fs.unlinkSync(path.join(logs,file));
     }
-    const token=dryRun ? '' : fs.readFileSync(path.resolve(base,config.tokenFile || 'token.txt'),'utf8').trim();
+    const token=dryRun ? '' : config.tokenEnvironmentVariable
+      ? (process.env[config.tokenEnvironmentVariable] || '').trim()
+      : fs.readFileSync(path.resolve(base,config.tokenFile || 'token.txt'),'utf8').trim();
     if (!dryRun && (token.length<32 || /[\r\n]/.test(token))) throw new Error('Token file must contain the TALLY_INGEST_TOKEN');
     async function send(directory, manifest, resumed=false) {
       const start=Date.now();

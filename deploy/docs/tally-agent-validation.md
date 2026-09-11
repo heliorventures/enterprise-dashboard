@@ -1,5 +1,7 @@
 # Tally sender validation
 
+Portable package validation on 2026-09-11: built `deploy/bundles/tally-001/FinanceTallyAgent-tally-001-win-x64.zip` with the pinned Node.js 22.23.2 Windows x64 runtime, verified against the official SHA-256 manifest. All six sender/fixture/launcher tests passed. An extracted ZIP in a path containing spaces ran `Run-Sync.cmd --dry-run` with Node removed from PATH, extracted 5 ledgers and 2 vouchers from a local XML simulator, and wrote a successful run log. The packaged token file was verified empty and fixture tools were absent. No production uploads were made during this packaging test. Actual server execution and Task Scheduler policy remain environment-specific.
+
 Validated locally on 2026-09-11:
 
 - Eight API tests passed against an isolated PostgreSQL 16 container with database `enterprise_dashboard_test`. Migration 003 applied alongside existing migrations; existing ingestion tests still pass.
