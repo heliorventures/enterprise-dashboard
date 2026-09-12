@@ -22,6 +22,17 @@ function authenticateSender(req, res, next) {
   next();
 }
 const staged = require('./ingestChunks');
+const sourceArchive = require('./sourceArchive');
+for (const operation of ['begin','chunk','complete']) {
+  app.post('/api/ingest/tally/source/' + operation, authenticateSender, express.json({limit:'5mb'}), async (req,res) => {
+    try { res.json(await sourceArchive[operation](req.body)); }
+    catch(error) {
+      const status=error.status || (error.code==='23505' ? 409 : 500);
+      if(status===500) console.error('Source archive failed:',error.code || error.name);
+      res.status(status).json({error:status===500?'Source archive failed; retry the same batch':error.code==='23505'?'Duplicate source record identity':error.message});
+    }
+  });
+}
 for (const operation of ['begin', 'chunk', 'complete']) {
   app.post('/api/ingest/tally/' + operation, authenticateSender, express.json({ limit: '1100kb' }), async (req, res) => {
     try { res.json(await staged[operation](req.body)); }

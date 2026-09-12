@@ -28,13 +28,15 @@ function writer(directory) {
   };
 }
 async function deliver(config, token, directory, manifest, log, fetcher=fetch, sleep=ms=>new Promise(r=>setTimeout(r,ms))) {
+  const sourceMode=manifest.profile==='company-business-v1';
+  const endpoint=sourceMode ? 'source/' : '';
   let retries=0, requestBytes=0, chunksAcknowledged=0;
   async function post(operation, value) {
     const body=JSON.stringify(value);
     for (let attempt=0; attempt<4; attempt++) {
       try {
         requestBytes+=Buffer.byteLength(body);
-        const response=await fetcher(`${config.apiUrl}/api/ingest/tally/${operation}`, {
+        const response=await fetcher(`${config.apiUrl}/api/ingest/tally/${endpoint}${operation}`, {
           method:'POST', headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`},
           body, redirect:'error', signal:AbortSignal.timeout(config.requestTimeoutMs) });
         if (response.status!==200) {
@@ -58,7 +60,10 @@ async function deliver(config, token, directory, manifest, log, fetcher=fetch, s
     await post('chunk',{batchId:manifest.batchId,index,...payload}); chunksAcknowledged++;
   }
   const result=await post('complete',{batchId:manifest.batchId});
-  if (result.ledgerCount!==manifest.ledgerCount || result.voucherCount!==manifest.voucherCount) throw new Error('API committed counts differ from manifest');
-  return {retries,requestBytes,chunksAcknowledged,duplicate:result.duplicate};
+  if(sourceMode) {
+    const expected=manifest.collections.every(c=>c.status==='success')&&manifest.consistency!=='changed'?'complete':'partial';
+    if(result.recordCount!==manifest.recordCount||result.coverageStatus!==expected) throw new Error('API committed source coverage differs from manifest');
+  } else if (result.ledgerCount!==manifest.ledgerCount || result.voucherCount!==manifest.voucherCount) throw new Error('API committed counts differ from manifest');
+  return {retries,requestBytes,chunksAcknowledged,duplicate:result.duplicate,...(sourceMode?{coverageStatus:result.coverageStatus}:{})};
 }
 module.exports = {saveJson,writer,deliver};

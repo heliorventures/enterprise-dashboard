@@ -1,5 +1,65 @@
 FINANCE TALLY SENDER - PORTABLE WINDOWS X64 PACKAGE
 
+TALLY-007 EXPORT DIAGNOSTICS
+The same Run-Sync.cmd --dry-run command now logs request start, HTTP response,
+10-second progress, completion and detailed export failures to state\logs.
+Find tally_export_failed: it includes requestId, phase, collection, stage,
+HTTP status, bytes/records received, elapsed time, nested error codes and
+XML path/line/column when applicable. The action field gives a next check.
+run_finished includes a failedCollections summary. Share these failure events
+instead of running separate amount-format diagnostic commands. Response body
+text, passwords, tokens and accounting values are not included in these logs.
+This logging update does not change source data or make malformed XML valid.
+
+TALLY-006: SOURCE DATA IMPORT (DEFAULT)
+
+This package captures source records as JSON without converting or validating
+business amounts, dates, balances or voucher types. Set importMode to "source"
+in config.json; an absent importMode also selects source mode. The current
+dashboard tables are not updated by source mode. Formatting and reports are
+separate later work.
+
+LIVE UPLOAD PREREQUISITE: deploy the matching API/UI release with migration
+004_tally_source_archive.sql and /api/ingest/tally/source/* routes first.
+Do not run source uploads against finance-002: it lacks these endpoints.
+
+1. Extract the full package. On updates preserve your config.json, token.txt
+   and entire state folder, then replace program files, runtime and node_modules.
+2. Configure tallyUrl, apiUrl and token.txt as described below. Open Tally and
+   load the intended companies, or use the optional startup configuration.
+3. In PowerShell from the extracted folder run:
+     .\Run-Sync.cmd --dry-run
+   Inspect state\source-preview\<batch>\manifest.json and numbered JSON chunks.
+   All decoded XML text, attributes and ordered nested lists are retained.
+4. After the new API release is deployed, run:
+     .\Run-Sync.cmd
+   Look for source_snapshot_saved and coverageStatus. "partial" means some
+   collection failed or the company changed during capture. Data is archived
+   with that status, but does not replace the latest complete reporting snapshot.
+
+The profile requests Company, Group, Ledger, Voucher Type, Currency, Cost
+Category, Cost Centre, Stock Group, Stock Category, Stock Item, Unit, Godown,
+and Voucher with all exposed methods/subcollections. Tax, bill, inventory,
+bank and cost allocations are retained when present in those responses.
+It is not a Tally backup or a guarantee of every custom/derived report field.
+Dedicated payroll masters are not requested; shared vouchers may contain
+payroll-related entries. Nothing is silently filtered from returned vouchers.
+
+Source mode retries from state\source-outbox. Do not delete this folder.
+Old dashboard state\outbox batches are preserved but not replayed in source mode.
+Run exit 0 means complete selected-profile captures; 1 means failure or partial
+coverage; 2 means an overlapping run was skipped. Capture completeness does
+not prove an accounting-consistent Tally snapshot or reconciled reporting.
+
+Full source captures may take substantially longer and consume more storage
+than legacy sync. Measure the server dry run before choosing a repeat interval.
+All source snapshot history is retained in the application database; no history
+purge is automatic. Review capacity as history grows.
+
+The remaining general installation/login settings still apply. References to
+state\preview, state\outbox, full-snapshot accounting replacement and legacy
+staged endpoints below apply only to importMode "dashboard".
+
 No Node.js/npm installation or server command is required.
 
 1. Extract the ZIP, for example to C:\FinanceTallyAgent.

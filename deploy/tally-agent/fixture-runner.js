@@ -38,7 +38,7 @@ async function main() {
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
   try {
     const configFile=path.join(__dirname,'state','fixture-config.json');
-    saveJson(configFile,{tallyUrl:`http://127.0.0.1:${server.address().port}`,apiUrl:process.argv[3] || 'https://finance.heliorsoft.com',
+    saveJson(configFile,{importMode:'dashboard',tallyUrl:`http://127.0.0.1:${server.address().port}`,apiUrl:process.argv[3] || 'https://finance.heliorsoft.com',
       tokenEnvironmentVariable:'FINANCE_FIXTURE_TOKEN',stateDirectory:state,requestTimeoutMs:300000,logRetentionDays:30});
     process.exitCode=await withLock(configFile,()=>run(configFile,process.argv.includes('--dry-run')));
   } finally {await new Promise(resolve=>server.close(resolve));}

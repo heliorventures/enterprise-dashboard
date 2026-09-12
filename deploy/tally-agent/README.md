@@ -1,8 +1,22 @@
 # TallyPrime sender for Windows
 
+## Source import is the default from tally-006
+
+`Run-Sync.cmd` now captures company source data into PostgreSQL JSONB through the separate source archive protocol. It does not call the dashboard ledger/voucher converters, change amounts/dates, reject empty balances, exclude cancelled/optional vouchers, or update the old dashboard tables. Use `--dry-run` to capture JSON locally without contacting the API. See [source archive setup, storage and coverage](../docs/tally-source-archive.md).
+
+Deploy the new API/UI release and migration `004_tally_source_archive.sql` before live source uploads. Preserve server `config.json`, `token.txt`, and all of `state` when replacing the full program bundle. Set `"importMode": "source"` in the existing config (also the default when absent). Source previews use `state/source-preview`; source retry batches use `state/source-outbox`. Old `state/outbox` dashboard batches are preserved but are not replayed in source mode.
+
+The earlier dashboard sender is available only with `"importMode": "dashboard"`. The instructions and accounting conversions below describe that legacy mode, not the default source importer.
+
+## Legacy dashboard import
+
 To exercise the deployed API without Tally access, use the [two-version synthetic fixture test](fixtures/README.md).
 
 Runs once, discovers all companies exposed by Tally's XML collection interface, uploads each company separately, writes a JSON-lines log, and exits. You create the Task Scheduler job. Nothing registers a task, service, or Docker container on the Tally server.
+
+The `tally-004` bundle corrects collection parsing: response-header counters are not company records, and typed XML leaves retain their text. Matching record NAME attributes and NAME elements resolve to one string; conflicting identities still fail. Each ledger/voucher export already supplies the discovered name as `SVCURRENTCOMPANY`, so manually entering names is not required for this correction. Actual company records without a valid name or GUID still stop the run; they are not silently skipped. Validate against your server with `Run-Sync.cmd --dry-run` before uploads.
+
+The `tally-005` bundle also maps an explicitly empty ledger `CLOSINGBALANCE` to `0.00`, following [Tally's empty Amount convention](https://help.tallysolutions.com/article/DeveloperReference/faq/7661.html). An absent field, repeated values, malformed amounts, currency decoration and unsupported precision remain errors. This rule is specific to ledger closing balances; general amount parsing and voucher handling remain strict.
 
 ## Deploy the API first
 

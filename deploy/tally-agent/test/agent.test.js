@@ -32,7 +32,7 @@ test('one-run sender retains a failed batch and resumes it without extracting a 
     return {status:200,json:async()=>({ok:true,batchId:body.batchId,ledgerCount:1,voucherCount:1})};
   };
   try {
-    fs.writeFileSync(path.join(directory,'config.json'),JSON.stringify({tallyUrl:'http://localhost:9000',apiUrl:'https://finance.example',tokenFile:'token.txt',stateDirectory:'state',requestTimeoutMs:1000}));
+    fs.writeFileSync(path.join(directory,'config.json'),JSON.stringify({importMode:'dashboard',tallyUrl:'http://localhost:9000',apiUrl:'https://finance.example',tokenFile:'token.txt',stateDirectory:'state',requestTimeoutMs:1000}));
     fs.writeFileSync(path.join(directory,'token.txt'),'test-token-not-for-logs-1234567890123456789');
     assert.equal(await run(path.join(directory,'config.json')),1);
     const outbox=path.join(directory,'state','outbox');

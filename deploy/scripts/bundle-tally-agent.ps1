@@ -28,7 +28,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $nodeRoot 'node.exe') -Destination (Join-Path $package 'runtime/node.exe')
     Copy-Item -LiteralPath (Join-Path $nodeRoot 'LICENSE') -Destination (Join-Path $package 'runtime/LICENSE')
     # Explicit allowlist: never package source config, tokens, fixtures, logs or state.
-    foreach ($file in @('agent.js','tally.js','outbox.js','launcher.js','startup.js','login-windows.ps1','Run-Sync.cmd','run-sync.ps1','package.json','package-lock.json')) {
+    foreach ($file in @('agent.js','tally.js','source-agent.js','source-export.js','export-diagnostics.js','outbox.js','launcher.js','startup.js','login-windows.ps1','Run-Sync.cmd','run-sync.ps1','package.json','package-lock.json')) {
         Copy-Item -LiteralPath (Join-Path $agentSource $file) -Destination (Join-Path $package $file)
     }
     Copy-Item -LiteralPath (Join-Path $agentSource 'config.example.json') -Destination (Join-Path $package 'config.json')
@@ -38,7 +38,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Bundled dependency install failed' }
     $version = & (Join-Path $package 'runtime/node.exe') --version
     if ($LASTEXITCODE -ne 0 -or $version -ne "v$NodeVersion") { throw 'Portable runtime validation failed' }
-    foreach ($file in @('agent.js','tally.js','outbox.js','launcher.js','startup.js')) {
+    foreach ($file in @('agent.js','tally.js','source-agent.js','source-export.js','export-diagnostics.js','outbox.js','launcher.js','startup.js')) {
         & (Join-Path $package 'runtime/node.exe') --check (Join-Path $package $file)
         if ($LASTEXITCODE -ne 0) { throw "Syntax validation failed for $file" }
     }

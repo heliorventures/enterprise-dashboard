@@ -70,6 +70,9 @@ compose exec -T enterprise-dashboard-api node < "$target/smoke.js"
 test "$(curl --fail --silent --show-error --max-time 30 "$public_url/healthz")" = "enterprise-dashboard $tag"
 test "$(curl --silent --show-error --max-time 30 -o /dev/null -w '%{http_code}' "$public_url/api/companies")" = 401
 test "$(curl --silent --show-error --max-time 30 -X POST -o /dev/null -w '%{http_code}' "$public_url/api/ingest/tally")" = 401
+for operation in begin chunk complete; do
+  test "$(curl --silent --show-error --max-time 30 -X POST -o /dev/null -w '%{http_code}' "$public_url/api/ingest/tally/source/$operation")" = 401
+done
 
 # Promote only after all checks. Keep all previous artifacts; no image/volume pruning.
 touch "$target/.deployed"

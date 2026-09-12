@@ -1,4 +1,5 @@
 const { SaxesParser } = require('saxes');
+const {exportXml,xmlCode,xmlReference}=require('./export-diagnostics');
 const escapeXml = value => String(value).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&apos;' }[c]));
 function amount(value) {
   const raw = String(value ?? '').trim();
@@ -24,14 +25,26 @@ function parseXml(type, onRecord) {
   const stack = [];
   let recordDepth = -1, recordBytes = 0, collection = false, root = false;
   parser.on('doctype', () => { throw new Error('XML DTD is not allowed'); });
-  parser.on('error', () => { throw new Error('Malformed Tally XML'); });
+  const diagnostics=()=>({xmlLine:parser.line,xmlColumn:parser.column,xmlPosition:parser.position,
+    xmlPath:'/'+stack.map(n=>n.name).join('/'),
+    ...xmlReference(parser)});
+  parser.on('error', error => { throw Object.assign(new Error('Malformed Tally XML'),{code:xmlCode(error),xmlDiagnostic:diagnostics()}); });
   parser.on('opentag', node => {
     if (stack.length >= 64) throw new Error('Tally XML nesting exceeds supported depth');
     const name = node.name.toUpperCase();
     if (!stack.length) { if (name !== 'ENVELOPE') throw new Error('Not a Tally envelope'); root = true; }
-    if (name === 'COLLECTION') collection = true;
-    if (name === type && recordDepth === -1) { recordDepth = stack.length; recordBytes = 0; }
-    stack.push({ name, text: '', value: Object.fromEntries(Object.entries(node.attributes).map(([k,v]) => [k.toUpperCase(),v])) });
+    // HEADER/VERSION can contain COMPANY counters. Only DATA collection members
+    // are records; response descriptions and nested fields are not discoveries.
+    const parentPath = stack.map(entry => entry.name).join('/');
+    if (name === 'COLLECTION' && parentPath === 'ENVELOPE/BODY/DATA') collection = true;
+    const isRecord = name === type && recordDepth === -1 && parentPath === 'ENVELOPE/BODY/DATA/COLLECTION';
+    if (isRecord) { recordDepth = stack.length; recordBytes = 0; }
+    const attributes = Object.fromEntries(Object.entries(node.attributes).map(([k,v]) => [k.toUpperCase(),v]));
+    // TYPE="String", TYPE="Date", etc. describe a leaf's text, not its value.
+    // Retain record attributes separately so NAME attributes and NAME elements
+    // can be reconciled without confusing repeated list entries with metadata.
+    stack.push({ name, text: '', attributes, isRecord, children: new Set(),
+      value: Object.assign(Object.create(null), isRecord ? attributes : {}) });
   });
   const addText = text => {
     if (!stack.length) return;
@@ -50,15 +63,22 @@ function parseXml(type, onRecord) {
       onRecord(node.value);
       recordDepth = -1;
     } else if (recordDepth >= 0) {
-      const value = Object.keys(node.value).length ? node.value : node.text.trim();
-      const parent = stack[stack.length-1].value;
-      if (parent[node.name] === value) return;
-      if (parent[node.name] === undefined) parent[node.name] = value;
+      const value = node.children.size ? node.value : node.text.trim();
+      const parentNode = stack[stack.length-1];
+      const parent = parentNode.value;
+      if (parentNode.isRecord && Object.hasOwn(parentNode.attributes, node.name) && !parentNode.children.has(node.name)) {
+        if (typeof value !== 'string' || parentNode.attributes[node.name].trim() !== value) {
+          throw new Error(`Conflicting Tally ${node.name} attribute and element`);
+        }
+        parent[node.name] = value;
+      } else if (!parentNode.children.has(node.name)) parent[node.name] = value;
       else if (Array.isArray(parent[node.name])) parent[node.name].push(value);
       else parent[node.name] = [parent[node.name], value];
+      parentNode.children.add(node.name);
     }
   });
   return {
+    diagnostics,
     write(text) { parser.write(text); return this; },
     close() { parser.close(); if (!root || !collection) throw new Error('Tally collection missing; refusing an empty snapshot'); }
   };
@@ -69,24 +89,14 @@ function request(type, company) {
   return `<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>FinanceAgent</ID></HEADER><BODY><DESC><STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>${company ? `<SVCURRENTCOMPANY>${escapeXml(company)}</SVCURRENTCOMPANY>` : ''}<SVFROMDATE TYPE="Date">19000101</SVFROMDATE><SVTODATE TYPE="Date">99991231</SVTODATE></STATICVARIABLES><TDL><TDLMESSAGE><COLLECTION NAME="FinanceAgent" ISMODIFY="No"><TYPE>${type}</TYPE><FETCH>${fields[type]}</FETCH></COLLECTION></TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>`;
 }
 async function extract(config, type, company, onRecord) {
-  const response = await fetch(config.tallyUrl, { method:'POST', headers:{'Content-Type':'application/xml; charset=utf-8'},
-    body:request(type, company), redirect:'error', signal:AbortSignal.timeout(config.requestTimeoutMs) });
-  if (!response.ok) throw new Error(`Tally HTTP ${response.status}`);
-  const parser = parseXml(type, onRecord);
-  const decoder = new TextDecoder('utf-8', { fatal:true });
-  let bytes = 0;
-  try {
-    for await (const part of response.body) {
-      bytes += part.length;
-      if (bytes > 2*1024**3) throw new Error('Tally export exceeds 2 GiB; extraction stopped');
-      parser.write(decoder.decode(part, {stream:true}));
-    }
-    parser.write(decoder.decode()); parser.close();
-  } catch (error) { throw error; }
-  return bytes;
+  return exportXml(config,{collection:type,company,body:request(type,company),phase:config.exportPhase||'discovery',
+    createParser:wrap=>parseXml(type,wrap(onRecord))});
 }
 function ledger(row) {
-  return { name:required(row.NAME,200,'ledger name'), group:required(row.PARENT,100,'ledger group'), balance:amount(row.CLOSINGBALANCE) };
+  // Tally emits an explicit empty Amount for a zero closing balance. Scope this
+  // convention to this field: a missing value still indicates an invalid export.
+  const balance = row.CLOSINGBALANCE === '' ? '0.00' : amount(row.CLOSINGBALANCE);
+  return { name:required(row.NAME,200,'ledger name'), group:required(row.PARENT,100,'ledger group'), balance };
 }
 function voucher(row) {
   if (row.ISCANCELLED === 'Yes' || row.ISOPTIONAL === 'Yes') return null;

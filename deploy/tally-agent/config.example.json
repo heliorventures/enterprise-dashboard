@@ -1,4 +1,5 @@
 {
+  "importMode": "source",
   "tallyUrl": "http://localhost:9000",
   "apiUrl": "https://finance.heliorsoft.com",
   "tokenFile": "token.txt",

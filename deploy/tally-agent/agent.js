@@ -8,6 +8,8 @@ const {saveJson,writer,deliver} = require('./outbox');
 async function run(configFile, dryRun=false) {
   const base=path.dirname(path.resolve(configFile));
   const config=JSON.parse(fs.readFileSync(configFile,'utf8'));
+  if((config.importMode ?? 'source')==='source') return require('./source-agent').run(configFile,dryRun);
+  if(config.importMode!=='dashboard') throw new Error('importMode must be source or dashboard');
   const api=new URL(config.apiUrl), source=new URL(config.tallyUrl);
   if (api.protocol!=='https:' || api.username || api.password || api.search || api.hash || api.pathname!=='/') throw new Error('apiUrl must be an HTTPS origin without credentials');
   if (!['http:','https:'].includes(source.protocol) || source.username || source.password) throw new Error('Invalid tallyUrl');
@@ -25,6 +27,8 @@ async function run(configFile, dryRun=false) {
     console.log(JSON.stringify(row));
   };
   let succeeded=0, failed=0, ledgerTotal=0, voucherTotal=0;
+  config.exportLog=log;
+  config.exportPhase='dashboard_export';
   log({event:'run_started',dryRun});
   const seen=new Set();
   try {
