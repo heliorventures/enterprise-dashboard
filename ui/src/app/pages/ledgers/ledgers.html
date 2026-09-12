@@ -1,16 +1,32 @@
 <section class="grid-page">
   <header>
-    <p class="eyebrow">Books of account</p>
-    <h1>Ledgers</h1>
+    <div>
+      <p class="eyebrow">Books of account</p>
+      <h1>Ledgers</h1>
+    </div>
   </header>
 
-  <form class="filter-card" (submit)="apply($event)">
-    <div class="filter-form">
+  @if (error()) {
+    <p class="banner">{{ error() }}</p>
+  }
+
+  <article class="grid-card">
+    <div class="grid-toolbar">
+      <div>
+        <h2><app-icon name="ledgers" /> Chart of accounts</h2>
+        <p>{{ total() }} ledgers from the latest source dump.</p>
+      </div>
+    </div>
+
+    <form class="filter-bar filters-4" (submit)="apply($event)">
       <label class="field search">
         <span>Search</span>
-        <input type="search" [value]="query()" (input)="onQuery($event)" placeholder="Ledger, group or company" />
+        <span class="search-box">
+          <app-icon name="search" />
+          <input type="search" [value]="query()" (input)="onQuery($event)" placeholder="Ledger, group or company" />
+        </span>
       </label>
-      <label class="field compact">
+      <label class="field">
         <span>Company</span>
         <select [value]="company()" (change)="onCompany($event)">
           <option value="all">All companies</option>
@@ -19,7 +35,7 @@
           }
         </select>
       </label>
-      <label class="field compact">
+      <label class="field">
         <span>Group</span>
         <select [value]="group()" (change)="onGroup($event)">
           <option value="">All groups</option>
@@ -29,24 +45,17 @@
         </select>
       </label>
       <div class="filter-actions">
-        <button type="button" class="btn ghost" (click)="exportCsv()" [disabled]="exporting()">
+        <button type="button" class="btn ghost" (click)="clear()">
+          <app-icon name="close" />
+          Clear
+        </button>
+        <button type="button" class="btn primary" (click)="exportCsv()" [disabled]="exporting()">
+          <app-icon name="download" />
           {{ exporting() ? 'Exporting…' : 'Export' }}
         </button>
       </div>
-    </div>
-  </form>
+    </form>
 
-  @if (error()) {
-    <p class="banner">{{ error() }}</p>
-  }
-
-  <article class="grid-card">
-    <div class="grid-toolbar">
-      <div>
-        <h2>Chart of accounts</h2>
-        <p>Closing balances by ledger. Use filters and paging to scan the full extract.</p>
-      </div>
-    </div>
     <div class="table-wrap">
       <table class="data-table">
         <thead>
@@ -54,8 +63,8 @@
             <th>Company</th>
             <th>Ledger</th>
             <th>Group</th>
-            <th class="num">Closing balance</th>
-            <th class="num">Dr/Cr</th>
+            <th class="num">Balance</th>
+            <th class="num">Side</th>
           </tr>
         </thead>
         <tbody>
@@ -66,11 +75,15 @@
           } @else {
             @for (row of items(); track row.id) {
               <tr>
-                <td>{{ row.companyName }}</td>
-                <td><strong>{{ row.name }}</strong></td>
-                <td>{{ row.group }}</td>
-                <td class="num" [title]="fullInr(row.balance)">{{ compactInr(abs(row.balance)) }}</td>
-                <td class="num">{{ drCr(row.balance) }}</td>
+                <td class="wrap">{{ row.companyName }}</td>
+                <td class="wrap"><strong>{{ clean(row.name) }}</strong></td>
+                <td class="wrap">{{ clean(row.group) }}</td>
+                <td class="num" [title]="fullInr(row.balance)">{{ fullInr(row.balance) }}</td>
+                <td class="num">
+                  <span class="side" [class.dr]="drCr(row.balance) === 'Dr'" [class.cr]="drCr(row.balance) === 'Cr'">
+                    {{ drCr(row.balance) }}
+                  </span>
+                </td>
               </tr>
             }
           }

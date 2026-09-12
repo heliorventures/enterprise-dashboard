@@ -1,0 +1,53 @@
+<section class="login">
+  <div class="login-card">
+    <div class="brand">
+      <span class="mark" aria-hidden="true">H</span>
+      <div>
+        <strong>Helior Finance</strong>
+        <span>Executive console</span>
+      </div>
+    </div>
+
+    <header>
+      <p class="eyebrow">Secure access</p>
+      <h1>Sign in</h1>
+      <p>Use the dashboard account to view group funds, expenses, and Tally books.</p>
+    </header>
+
+    @if (error()) {
+      <p class="banner danger">{{ error() }}</p>
+    }
+
+    <form (submit)="$event.preventDefault(); submit()">
+      <label class="field">
+        <span><app-icon name="user" /> Username</span>
+        <input
+          name="username"
+          autocomplete="username"
+          [ngModel]="username"
+          (ngModelChange)="username = $event"
+          [disabled]="submitting()"
+          required
+        />
+      </label>
+      <label class="field">
+        <span><app-icon name="lock" /> Password</span>
+        <input
+          name="password"
+          type="password"
+          autocomplete="current-password"
+          [ngModel]="password"
+          (ngModelChange)="password = $event"
+          [disabled]="submitting()"
+          required
+        />
+      </label>
+      <button type="submit" class="btn primary" [disabled]="submitting() || !username.trim() || !password">
+        <app-icon name="signin" />
+        {{ submitting() ? 'Signing in…' : 'Sign in' }}
+      </button>
+    </form>
+
+    <p class="hint">Sessions last 12 hours. Tally remains the system of record.</p>
+  </div>
+</section>

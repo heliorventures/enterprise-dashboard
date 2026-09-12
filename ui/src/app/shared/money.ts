@@ -7,14 +7,15 @@ export function compactInr(value: number) {
   if (abs >= 100_000) {
     return `${sign}₹${(abs / 100_000).toFixed(2)} L`;
   }
-  return `${sign}₹${Math.round(abs).toLocaleString('en-IN')}`;
+  return fullInr(value);
 }
 
 export function fullInr(value: number) {
   return (value || 0).toLocaleString('en-IN', {
     style: 'currency',
     currency: 'INR',
-    maximumFractionDigits: 0,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   });
 }
 

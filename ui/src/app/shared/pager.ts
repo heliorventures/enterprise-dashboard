@@ -1,7 +1,9 @@
 import { Component, computed, input, output } from '@angular/core';
+import { Icon } from './icon';
 
 @Component({
   selector: 'app-pager',
+  imports: [Icon],
   templateUrl: './pager.html',
   styleUrl: './pager.css',
 })
@@ -12,7 +14,7 @@ export class Pager {
   readonly pageChange = output<number>();
   readonly pageSizeChange = output<number>();
 
-  readonly pageSizes = [25, 50, 100];
+  readonly pageSizes = [25, 50, 100, 250, 500];
 
   readonly lastPage = computed(() => Math.max(1, Math.ceil(this.total() / this.pageSize())));
   readonly from = computed(() => (this.total() === 0 ? 0 : (this.page() - 1) * this.pageSize() + 1));

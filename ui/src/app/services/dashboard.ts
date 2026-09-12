@@ -1,8 +1,8 @@
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
-import { LedgerRow, PagedResult, VoucherRow } from '../models/books';
-import { DashboardData, TallyStatus } from '../models/dashboard';
+import { ExpenseReport, LedgerRow, PagedResult, ProjectReport, VoucherRow } from '../models/books';
+import { DashboardData, SourceSyncHistory, SourceSyncRun, TallyStatus } from '../models/dashboard';
 
 @Injectable({
   providedIn: 'root',
@@ -42,6 +42,18 @@ export class DashboardService {
     });
   }
 
+  getExpenseReport(company = 'all'): Observable<ExpenseReport> {
+    return this.http.get<ExpenseReport>('/api/reports/expenses', {
+      params: { company },
+    });
+  }
+
+  getProjectReport(company = 'all'): Observable<ProjectReport> {
+    return this.http.get<ProjectReport>('/api/reports/projects', {
+      params: { company },
+    });
+  }
+
   getTallyStatus(): Observable<TallyStatus> {
     return this.http.get<TallyStatus>('/api/tally/status');
   }
@@ -64,8 +76,12 @@ export class DashboardService {
     );
   }
 
-  syncTally(): Observable<TallyStatus> {
-    return this.http.post<TallyStatus>('/api/tally/sync', {});
+  getSourceSync(): Observable<SourceSyncHistory> {
+    return this.http.get<SourceSyncHistory>('/api/tally/sync');
+  }
+
+  startSourceSync(): Observable<SourceSyncRun> {
+    return this.http.post<SourceSyncRun>('/api/tally/sync', {});
   }
 
   private toParams(filters: Record<string, string | number | undefined>) {

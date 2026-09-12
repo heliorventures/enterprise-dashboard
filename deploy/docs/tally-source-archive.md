@@ -96,4 +96,8 @@ WHERE s.company_external_id = $1
 ORDER BY r.collection, r.ordinal;
 ```
 
-Future reporting transformations must explicitly interpret amounts, units, currencies, debit/credit signs, dates, tax structures and company identity, and reconcile against Tally. This release provides the retained source data and coverage needed for that work; it does not add report projections or alter current dashboard values.
+Dashboard promote reads the latest usable snapshot per company and applies interpreted `LEDGER` / `VOUCHER` rows incrementally to `Companies`, `Ledgers` and `Vouchers`. Each dump is a full extract; unchanged rows are left alone, new or changed rows are upserted, and Tally-sourced rows missing from the latest dump are removed. Source JSONB stays untouched. Cancelled and optional vouchers are excluded. Empty ledger `CLOSINGBALANCE` becomes `0.00`; if that field was not exported, `OPENINGBALANCE` is used. Vouchers without `AMOUNT` or balancing ledger entries stay at `0.00`. The same snapshot batch ID is recorded in `tally_ingestions`, so a retry of that dump is a no-op. A newer dump with a new batch ID diffs against the current books.
+
+Trigger promote from **Operations → Sync Tally**, `npm run promote` in `api`, or `POST /api/tally/sync` while signed in. `GET /api/tally/sync` returns run history with per-company progress and status. A successful source `complete` for a complete capture also promotes that batch and records it in the same history. A partial capture can still promote when its `LEDGER` collection succeeded.
+
+Tally `Fetch: *` often omits calculated methods. Ledger/voucher source requests also ask for `OpeningBalance`, `ClosingBalance`, `Amount` and ledger-entry collections so later captures can populate dashboard amounts. Re-run the sender after that agent change, then unpack, before treating voucher amounts as complete.

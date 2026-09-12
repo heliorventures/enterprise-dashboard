@@ -14,6 +14,8 @@ const assert = require('node:assert/strict');
     const unauthorized = await fetch('http://127.0.0.1:3000/api/ingest/tally'+suffix, { method: 'POST' });
     assert.equal(unauthorized.status, 401);
   }
+  const unpackUnauthorized = await fetch('http://127.0.0.1:3000/api/process/tally/unpack', { method: 'POST' });
+  assert.equal(unpackUnauthorized.status, 401);
   const db=require('./src/db');
   try {
     const result=await db.query("SELECT version FROM schema_migrations WHERE version='004_tally_source_archive.sql'");
