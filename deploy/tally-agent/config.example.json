@@ -5,5 +5,34 @@
   "stateDirectory": "state",
   "requestTimeoutMs": 300000,
   "allowEmptyCompanies": false,
-  "logRetentionDays": 30
+  "logRetentionDays": 30,
+  "startup": {
+    "enabled": false,
+    "executablePath": "",
+    "arguments": [],
+    "workingDirectory": "",
+    "timeoutMs": 120000,
+    "pollIntervalMs": 3000,
+    "probeTimeoutMs": 5000,
+    "minimumCompanies": 1,
+    "requiredCompanies": [],
+    "login": {
+      "username": "",
+      "password": "",
+      "timeoutMs": 60000,
+      "pollIntervalMs": 1000,
+      "windowTitle": "",
+      "usernameAutomationId": "",
+      "passwordAutomationId": "",
+      "submitAutomationId": "",
+      "submitButtonName": ""
+    },
+    "loginHelper": {
+      "enabled": false,
+      "executablePath": "",
+      "arguments": [],
+      "workingDirectory": "",
+      "timeoutMs": 30000
+    }
+  }
 }

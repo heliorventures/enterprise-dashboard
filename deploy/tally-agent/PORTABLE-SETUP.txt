@@ -35,6 +35,46 @@ No Node.js/npm installation or server command is required.
    then remove that argument before enabling normal scheduled uploads.
 
 TallyPrime must be running and its HTTP/XML interface must be enabled.
+OPTIONAL STARTUP: in config.json set startup.enabled to true and specify
+startup.executablePath, arguments and workingDirectory for YOUR installation.
+Set timeoutMs, pollIntervalMs, probeTimeoutMs, minimumCompanies and
+requiredCompanies to control readiness. All settings are editable; no Tally
+path, company name, username or password is compiled into the sender.
+An existing matching process is reused; we never kill or restart Tally.
+Startup is local-only (use a loopback tallyUrl). Remote Tally must be
+started on its own server. Windows PowerShell is used for process checks.
+
+LOGIN FROM CONFIG: fill startup.login.username and startup.login.password
+in config.json. Filling both enables the built-in Windows login helper.
+Keep startup.loginHelper.enabled false when using these credentials.
+The helper targets the configured executable in the current Windows
+session, waits for an identifiable username/password screen, fills the
+fields and submits once. XML company readiness must then pass before sync.
+
+Leave windowTitle and Automation ID selectors empty for auto-detection
+of one username Edit and one password Edit control. If there are multiple
+controls, set startup.login.windowTitle, usernameAutomationId and
+passwordAutomationId to match your installation. submitAutomationId or
+submitButtonName can target a button; otherwise Enter is sent only after
+verifying focus on the identified password field. Custom Tally controls
+may not expose writable UI Automation values: this must be checked on the
+actual server, and unsupported controls cause a logged failure.
+
+Set Task Scheduler to "Run only when user is logged on" and keep the
+Windows desktop unlocked for credential entry. There must be no pending
+UAC/elevation or other secure-desktop prompt. Startup can show Tally's
+window when credentials are configured. The helper does not select
+companies, bypass TallyVault, or log on to Windows. Configure Tally to
+load the required companies on startup. A second company login prompt
+requires Tally's shared-credential auto-login setting or separate setup.
+
+Username/password remain in your local config.json as requested; use
+Windows folder permissions to restrict that file. Values are passed to
+the helper through stdin, not command arguments, clipboard or logs.
+The ZIP includes only blank credentials. Do not overwrite your configured
+file with the blank template on updates. The external loginHelper option
+is still available as an alternative to the built-in login, not together.
+
 Only companies exposed to that interface can be discovered. Each run
 extracts a complete snapshot (not incremental). Large uploads use chunks.
 Failed uploads remain in state\outbox for retry; do not delete that folder.

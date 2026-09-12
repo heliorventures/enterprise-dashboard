@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const tally = require('./tally');
+const {ensureTally} = require('./startup');
 const {saveJson,writer,deliver} = require('./outbox');
 
 async function run(configFile, dryRun=false) {
@@ -63,6 +64,7 @@ async function run(configFile, dryRun=false) {
       seen.add(manifest.company.externalId);
       await send(directory,manifest,true);
     }
+    await ensureTally(config,base,log);
     const companies=[];
     await tally.extract(config,'COMPANY',null,row => companies.push({
       name:tally.required(row.NAME,200,'company name'), externalId:tally.required(row.GUID,200,'company GUID'),
