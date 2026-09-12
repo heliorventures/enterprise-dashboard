@@ -42,6 +42,9 @@ async function main() {
     const summary=events.find(row=>row.event==='run_finished');
     assert.equal(summary.succeeded,1);assert.equal(summary.failed,0);
     assert.equal(summary.records,8);assert.equal(summary.mode,'source');assert.equal(summary.dryRun,true);
+    assert.ok(events.some(row=>row.event==='tally_export_response'&&row.httpStatus===200));
+    assert.ok(events.some(row=>row.event==='tally_export_finished'&&row.phase==='source_capture'&&row.collection==='LEDGER'&&row.recordsReceived===5));
+    assert.deepEqual(summary.failedCollections,[]);
     const preview=path.join(root,'state','source-preview');
     const batches=fs.readdirSync(preview);
     assert.equal(batches.length,1);

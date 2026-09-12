@@ -1,5 +1,7 @@
 # TallyPrime sender for Windows
 
+`tally-007` adds detailed export logging to the same dry-run command: request/response events, progress every 10 seconds, underlying network/parser codes, XML path/line/column, offending numeric character references when available, received byte/record counters and a final failed-collection summary. It does not alter source values or automatically repair malformed XML. Send the `tally_export_failed` events to diagnose failed captures; raw accounting values and response bodies are not printed.
+
 ## Source import is the default from tally-006
 
 `Run-Sync.cmd` now captures company source data into PostgreSQL JSONB through the separate source archive protocol. It does not call the dashboard ledger/voucher converters, change amounts/dates, reject empty balances, exclude cancelled/optional vouchers, or update the old dashboard tables. Use `--dry-run` to capture JSON locally without contacting the API. See [source archive setup, storage and coverage](../docs/tally-source-archive.md).
