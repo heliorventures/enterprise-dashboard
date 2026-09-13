@@ -1,3 +1,4 @@
+import { BrandMark } from './shared/brand-mark';
 import { NgTemplateOutlet } from '@angular/common';
 import { Component, DestroyRef, ElementRef, inject, signal, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -7,7 +8,7 @@ import { Icon } from './shared/icon';
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, Icon, NgTemplateOutlet],
+  imports: [BrandMark, RouterOutlet, RouterLink, RouterLinkActive, Icon, NgTemplateOutlet],
   templateUrl: './app.html',
   styleUrl: './app.css',
 })

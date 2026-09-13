@@ -48,9 +48,7 @@ test('source JSON trees project to dashboard ledger and voucher rows', () => {
   assert.deepEqual(api.interpretLedger(ledger('Cash', 'Cash-in-Hand', '')), {
     name: 'Cash', group: 'Cash-in-Hand', balance: '0.00',
   });
-  assert.deepEqual(api.interpretLedger(ledger('Bank', 'Bank Accounts', undefined, '-9500000.00')), {
-    name: 'Bank', group: 'Bank Accounts', balance: '-9500000.00',
-  });
+  assert.throws(() => api.interpretLedger(ledger('Bank', 'Bank Accounts', undefined, '-9500000.00')), /Missing closing balance/);
   assert.equal(api.interpretVoucher(voucher({ cancelled: 'Yes' })), null);
   assert.deepEqual(api.interpretVoucher(voucher({ amount: '250.00' })), {
     date: '2026-04-01', type: 'Sales', amount: '250.00', narration: 'Invoice', number: 'S1', party: 'Customer',
@@ -61,7 +59,7 @@ test('source JSON trees project to dashboard ledger and voucher rows', () => {
     amount: undefined,
     entries: [{ name: 'Sales', amount: '100.00' }, { name: 'Debtors', amount: '-100.00' }],
   })).amount, '100.00');
-  assert.equal(api.interpretVoucher(voucher({ amount: undefined })).amount, '0.00');
+  assert.throws(() => api.interpretVoucher(voucher({ amount: undefined })), /Missing voucher amount/);
   assert.equal(api.interpretCostCentre({ tag: 'COSTCENTRE', attributes: { NAME: 'Hingoli' }, content: [] }).name, 'Hingoli');
   assert.equal(api.interpretVoucher(voucher({ amount: '250.00', costCentre: 'Majalgaon-Beed' })).project, 'Majalgaon-Beed');
   assert.equal(api.interpretVoucher(voucher({ amount: '250.00', costCentres: ['Office', 'Hingoli'] })).project, undefined);
@@ -87,6 +85,32 @@ test('source JSON trees project to dashboard ledger and voucher rows', () => {
 function treeInvalid() {
   return voucher({ date: 'not-a-date', amount: 'USD 1.00' });
 }
+
+test('financial validation blocks rejected rows but preserves actual zero and cancelled exclusions', () => {
+  assert.equal(api.interpretVoucher(voucher({ amount: '0.00' })).amount, '0.00');
+  assert.throws(() => api.assertPromotable(api.projectRecords([
+    { collection: 'VOUCHER', ordinal: 0, payload: voucher() },
+  ])), /Financial validation failed/);
+  assert.throws(() => api.assertPromotable({ errors: [], skipped: { ledgers: 1 } }), /rejected/);
+  assert.doesNotThrow(() => api.assertPromotable({ errors: [], skipped: { cancelled: 2 } }));
+});
+
+test('invalid complete archive cannot mutate reporting data even when previously applied', async () => {
+  const original = db.query;
+  const calls = [];
+  db.query = async (sql) => {
+    calls.push(sql);
+    if (sql.includes('FROM tally_source_snapshots')) return { rows: [{ batch_id: 'bad', coverage_status: 'complete' }] };
+    if (sql.includes('FROM tally_ingestions')) return { rows: [{ company_id: 1 }] };
+    if (sql.includes('FROM tally_source_records')) return { rows: [{ collection: 'VOUCHER', ordinal: 0, payload: voucher() }] };
+    throw new Error('Unexpected database operation');
+  };
+  try {
+    await assert.rejects(api.unpackBatch('bad'), /Financial validation failed/);
+    await assert.rejects(api.unpackBatch('bad', { force: true }), /Financial validation failed/);
+    assert.ok(calls.every(sql => sql.trim().startsWith('SELECT')));
+  } finally { db.query = original; }
+});
 
 test('unpack writes latest complete source records into dashboard tables', {
   skip: process.env.DB_NAME !== 'enterprise_dashboard_test',

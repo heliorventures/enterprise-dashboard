@@ -64,6 +64,6 @@ async function deliver(config, token, directory, manifest, log, fetcher=fetch, s
     const expected=manifest.collections.every(c=>c.status==='success')&&manifest.consistency!=='changed'?'complete':'partial';
     if(result.recordCount!==manifest.recordCount||result.coverageStatus!==expected) throw new Error('API committed source coverage differs from manifest');
   } else if (result.ledgerCount!==manifest.ledgerCount || result.voucherCount!==manifest.voucherCount) throw new Error('API committed counts differ from manifest');
-  return {retries,requestBytes,chunksAcknowledged,duplicate:result.duplicate,...(sourceMode?{coverageStatus:result.coverageStatus}:{})};
+  return {retries,requestBytes,chunksAcknowledged,duplicate:result.duplicate,...(sourceMode?{coverageStatus:result.coverageStatus,reportingStatus:result.reportingStatus || 'unverified'}:{})};
 }
 module.exports = {saveJson,writer,deliver};

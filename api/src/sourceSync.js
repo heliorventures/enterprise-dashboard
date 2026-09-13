@@ -28,6 +28,9 @@ function countsFrom(result) {
 }
 
 function itemFromPromote(result) {
+  if (result.ok === false || result.errors?.length || result.skipped?.ledgers || result.skipped?.vouchers) {
+    return { status: 'error', message: result.error || 'Financial validation failed: rejected records require review', ...countsFrom(result) };
+  }
   if (result.duplicate) {
     const linked = result.projects?.linked || 0;
     return {

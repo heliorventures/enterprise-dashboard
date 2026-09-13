@@ -8,12 +8,29 @@ const {run}=require('../agent');
 const {deliver}=require('../outbox');
 const envelope=records=>`<ENVELOPE><HEADER><VERSION><COMPANY>1</COMPANY></VERSION><STATUS>1</STATUS></HEADER><BODY><DATA><COLLECTION>${records}</COLLECTION></DATA></BODY></ENVELOPE>`;
 const company='<COMPANY NAME="Source Company"><NAME TYPE="String">Source Company</NAME><GUID>source-guid</GUID></COMPANY>';
+
 const voucher='<VOUCHER><GUID>v-guid</GUID><DATE TYPE="Date">not-a-date</DATE><AMOUNT TYPE="Amount">USD 1,23,456.789 Cr</AMOUNT><ISCANCELLED>Yes</ISCANCELLED><ISOPTIONAL>Yes</ISOPTIONAL><ALLLEDGERENTRIES.LIST><LEDGERNAME>A</LEDGERNAME><AMOUNT></AMOUNT></ALLLEDGERENTRIES.LIST><ALLLEDGERENTRIES.LIST><LEDGERNAME>A</LEDGERNAME><AMOUNT></AMOUNT></ALLLEDGERENTRIES.LIST><UDF:EXTRA ISLIST="Yes">  unchanged &amp; spaced  </UDF:EXTRA></VOUCHER>';
 function parse(collection,xml,step=1) {
   const rows=[],parser=source.parser(collection,row=>rows.push(row));
   for(let i=0;i<xml.length;i+=step) parser.write(xml.slice(i,i+step));
   parser.close();return rows;
 }
+
+test('export retains missing and unsupported accounting fields for independent sync validation', async () => {
+  const originalFetch=global.fetch;
+  try {
+    for(const [collection,xml] of [
+      ['LEDGER','<LEDGER NAME="Opening only"><OPENINGBALANCE>10</OPENINGBALANCE></LEDGER>'],
+      ['VOUCHER','<VOUCHER><DATE>20260901</DATE><VOUCHERTYPENAME>Payment</VOUCHERTYPENAME></VOUCHER>'],
+      ['VOUCHER','<VOUCHER><AMOUNT>unknown</AMOUNT></VOUCHER>'],
+    ]) {
+      global.fetch=async()=>new Response(envelope(xml));
+      const records=[];
+      await source.extract({tallyUrl:'http://localhost:9000',requestTimeoutMs:1000},collection,'Example',row=>records.push(row));
+      assert.deepEqual(records,parse(collection,envelope(xml)));
+    }
+  } finally {global.fetch=originalFetch;}
+});
 test('source JSON keeps exact decoded text, attributes, nested/repeated fields and unsupported business values',()=>{
   const rows=parse('VOUCHER',envelope(voucher));
   assert.deepEqual(rows,parse('VOUCHER',envelope(voucher),10000));
@@ -58,7 +75,7 @@ test('default source import captures empty/unrecognized values without dashboard
     const c=Object.keys(source.CATALOG).find(k=>options.body.includes(`<TYPE>${source.CATALOG[k]}</TYPE>`));
     assert.ok(c);
     if(c==='STOCKITEM'&&failStock) return new Response(envelope('<STOCKITEM NAME="Incomplete"/>').slice(0,-6));
-    return new Response(envelope(c==='COMPANY'?company:c==='VOUCHER'?voucher:c==='LEDGER'?'<LEDGER NAME="Empty"><CLOSINGBALANCE/></LEDGER>':''));
+    return new Response(envelope(c==='COMPANY'?company:c==='VOUCHER'?voucher:c==='LEDGER'?'<LEDGER NAME="Empty"><OPENINGBALANCE>10</OPENINGBALANCE></LEDGER>':''));
   };
   try {
     const configFile=path.join(directory,'config.json');
@@ -70,7 +87,7 @@ test('default source import captures empty/unrecognized values without dashboard
     assert.deepEqual(m.collections.find(c=>c.name==='STOCKITEM'),{name:'STOCKITEM',status:'failed',count:0});
     const records=JSON.parse(fs.readFileSync(path.join(preview.directory,'0.json'),'utf8')).records;
     assert.equal(source.field(records.find(r=>r.collection==='VOUCHER').payload,'AMOUNT'),'USD 1,23,456.789 Cr');
-    assert.equal(source.field(records.find(r=>r.collection==='LEDGER').payload,'CLOSINGBALANCE'),'');
+    assert.equal(source.field(records.find(r=>r.collection==='LEDGER').payload,'CLOSINGBALANCE'),null);
     assert.equal(records.some(r=>r.collection==='STOCKITEM'),false);
     logs.length=0;failStock=false;
     assert.equal(await run(configFile,true),0);
@@ -90,6 +107,7 @@ test('source delivery uses its own routes and retries the exact persisted payloa
       return {status:200,json:async()=>({ok:true,batchId:m.batchId,recordCount:1,coverageStatus:'complete'})};
     },async()=>{});
     assert.equal(result.retries,1);assert.equal(payloads[0],payloads[1]);assert.equal(result.coverageStatus,'complete');
+    assert.equal(result.reportingStatus,'unverified');
   } finally {fs.rmSync(directory,{recursive:true});}
 });
 

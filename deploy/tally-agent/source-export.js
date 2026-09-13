@@ -9,7 +9,7 @@ function fetchList(collection) {
   // AllLedgerEntries. Ask for those methods by name on ledgers and vouchers.
   if(collection==='LEDGER') return 'Name,Parent,OpeningBalance,ClosingBalance,*';
   if(collection==='VOUCHER') {
-    return 'Date,VoucherTypeName,VoucherNumber,Narration,PartyLedgerName,Amount,MasterID,GUID,IsCancelled,IsOptional,AllLedgerEntries.LedgerName,AllLedgerEntries.Amount,AllLedgerEntries.IsDeemedPositive,LedgerEntries.LedgerName,LedgerEntries.Amount';
+    return 'Date,VoucherTypeName,VoucherNumber,Narration,PartyLedgerName,Amount,MasterID,GUID,IsCancelled,IsOptional,AllLedgerEntries.LedgerName,AllLedgerEntries.Amount,AllLedgerEntries.IsDeemedPositive,LedgerEntries.LedgerName,LedgerEntries.Amount,*';
   }
   return '*';
 }

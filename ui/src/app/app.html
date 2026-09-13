@@ -26,13 +26,13 @@
   <div class="shell">
     <aside class="sidebar desktop-sidebar">
       <div class="brand">
-        <span class="mark" aria-hidden="true">H</span>
+        <app-brand-mark />
         <div><strong>Helior Finance</strong><span>Executive console</span></div>
       </div>
       <ng-container [ngTemplateOutlet]="navigation" />
     </aside>
     <header class="mobile-header">
-      <a routerLink="/dashboard" class="mobile-brand">Helior Finance</a>
+      <a routerLink="/dashboard" class="mobile-brand"><app-brand-mark />Helior Finance</a>
       <button
         type="button"
         class="btn menu-toggle"

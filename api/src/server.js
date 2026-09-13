@@ -29,10 +29,12 @@ const sourceUnpack = require('./sourceUnpack');
 const sourceSync = require('./sourceSync');
 async function completeSource(body) {
   const result = await sourceArchive.complete(body);
-  if (result.ok && !result.duplicate && result.coverageStatus === 'complete') {
+  // Archive acknowledgement is independent of downstream reporting validation.
+  if (result.ok && result.coverageStatus === 'complete') {
     try { result.unpack = await sourceSync.recordBatch(result.batchId); }
     catch (error) { result.unpack = { ok: false, error: error.message }; }
   }
+  result.reportingStatus = result.coverageStatus !== 'complete' ? 'blocked' : result.unpack?.ok === true ? 'validated' : 'error';
   return result;
 }
 for (const operation of ['begin','chunk','complete']) {

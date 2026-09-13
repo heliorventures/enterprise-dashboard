@@ -33,32 +33,18 @@
   padding: 4px 8px 32px;
 }
 
-.mark {
-  display: grid;
-  place-items: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
-  background: linear-gradient(145deg, #5a9bff 0%, #2d62d4 70%);
-  color: #fff;
-  font-size: 16px;
-  font-weight: 700;
-  flex: 0 0 auto;
-  box-shadow: 0 8px 16px rgba(45, 98, 212, 0.28);
-}
-
-.brand strong,
-.brand span {
+.brand > div strong,
+.brand > div span {
   display: block;
 }
 
-.brand strong {
+.brand > div strong {
   font-family: var(--font-display);
   font-size: 16px;
   font-weight: 560;
 }
 
-.brand span {
+.brand > div span {
   margin-top: 3px;
   color: var(--sidebar-muted);
   font-size: 13px;
@@ -174,6 +160,9 @@ nav {
     color: white;
   }
   .mobile-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     color: inherit;
     font-weight: 650;
     text-decoration: none;

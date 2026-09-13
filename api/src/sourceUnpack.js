@@ -55,7 +55,7 @@ function voucherAmount(node) {
   const direct = field(node, 'AMOUNT');
   if (typeof direct === 'string' && direct !== '') return amount(direct);
   const entries = [...children(node, 'ALLLEDGERENTRIES.LIST'), ...children(node, 'LEDGERENTRIES.LIST')];
-  if (!entries.length) return '0.00';
+  if (!entries.length) throw invalid('Missing voucher amount and accounting entries; fresh Tally export required');
   let credit = 0n;
   let debit = 0n;
   for (const entry of entries) {
@@ -76,8 +76,8 @@ function interpretLedger(node) {
   if (!name) throw invalid('Invalid ledger name');
   if (!group) throw invalid('Invalid ledger group');
   const closing = field(node, 'CLOSINGBALANCE');
-  const opening = field(node, 'OPENINGBALANCE');
-  const source = closing !== null ? closing : opening;
+  if (closing === null) throw invalid('Missing closing balance; opening balance cannot represent current balance');
+  const source = closing;
   const balance = source === '' || source === null ? '0.00' : amount(source);
   return { name, group, balance };
 }
@@ -170,6 +170,12 @@ function projectRecords(rows) {
   return { ledgers, vouchers, projects, skipped, errors };
 }
 
+function assertPromotable({ skipped = {}, errors = [] }) {
+  if (errors.length || skipped.ledgers || skipped.vouchers) {
+    throw invalid(`Financial validation failed: ${skipped.ledgers || 0} ledger records and ${skipped.vouchers || 0} voucher records rejected. No reporting data changed. ${errors.slice(0, 3).join('; ')}`, 422);
+  }
+}
+
 function snapshotTimestamp(value) {
   return new Date(value).toISOString();
 }
@@ -181,14 +187,10 @@ async function unpackBatch(batchId, { force = false } = {}) {
     [batchId]
   )).rows[0];
   if (!snapshot) throw invalid('Source snapshot not found', 404);
-  const ledgerCoverage = (snapshot.manifest?.collections || []).find((row) => row.name === 'LEDGER');
-  if (snapshot.coverage_status !== 'complete' && ledgerCoverage?.status !== 'success') {
-    throw invalid('Source snapshot has no successful ledger collection', 409);
+  if (snapshot.coverage_status !== 'complete') {
+    throw invalid('Partial source snapshot cannot replace reporting data; complete export required', 409);
   }
   const prior = (await db.query('SELECT company_id FROM tally_ingestions WHERE batch_id = $1', [batchId])).rows[0];
-  if (prior && force) {
-    await db.query('DELETE FROM tally_ingestions WHERE batch_id = $1', [batchId]);
-  }
   const records = await db.query(
     `SELECT collection, ordinal, payload
      FROM tally_source_records
@@ -197,6 +199,7 @@ async function unpackBatch(batchId, { force = false } = {}) {
     [batchId]
   );
   const { ledgers, vouchers, projects, skipped, errors } = projectRecords(records.rows);
+  assertPromotable({ skipped, errors });
   let result;
   if (prior && !force) {
     result = {
@@ -211,7 +214,7 @@ async function unpackBatch(batchId, { force = false } = {}) {
       company: { externalId: snapshot.company_external_id, name: snapshot.company_name },
       ledgers,
       vouchers,
-    });
+    }, { force });
   }
   if (result.companyId) {
     result.projects = await attachProjects(result.companyId, vouchers, projects);
@@ -229,10 +232,6 @@ async function listPromotableSnapshots() {
     SELECT DISTINCT ON (company_external_id) batch_id, company_external_id, company_name, captured_at
     FROM tally_source_snapshots
     WHERE coverage_status = 'complete'
-       OR EXISTS (
-         SELECT 1 FROM jsonb_array_elements(manifest->'collections') c
-         WHERE c->>'name' = 'LEDGER' AND c->>'status' = 'success'
-       )
     ORDER BY company_external_id, captured_at DESC, received_at DESC, batch_id DESC
   `)).rows;
 }
@@ -256,6 +255,7 @@ async function unpackLatest(options = {}) {
 
 module.exports = {
   field,
+  assertPromotable,
   interpretLedger,
   interpretCostCentre,
   interpretVoucher,

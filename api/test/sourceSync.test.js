@@ -2,6 +2,14 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { progress, itemFromPromote, finishState } = require('../src/sourceSync');
 
+test('validation errors override success and duplicate statuses', () => {
+  for (const result of [
+    { ok: true, errors: ['missing closing'] },
+    { ok: true, skipped: { vouchers: 1 } },
+    { duplicate: true, ok: false },
+  ]) assert.equal(itemFromPromote(result).status, 'error');
+});
+
 test('sync progress and item summaries stay incremental', () => {
   assert.equal(progress(0, 0), 100);
   assert.equal(progress(1, 4), 25);

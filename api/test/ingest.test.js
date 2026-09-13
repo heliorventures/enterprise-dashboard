@@ -2,6 +2,26 @@ const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { validateSnapshot, ingestSnapshot, planIncremental, ledgerKey, projectKey, voucherKey } = require('../src/ingest');
 const db = require('../src/db');
+
+test('force replay keeps its marker and refuses to overwrite a newer batch', async () => {
+  const { applySnapshot } = require('../src/ingest');
+  for (const newer of [true, false]) {
+    const calls = [];
+    let writes = 0;
+    const client = { query: async sql => {
+      calls.push(sql);
+      if (sql.includes('SELECT checksum')) return { rows: [{ checksum: 'old', company_id: 1 }] };
+      if (sql.includes('SELECT 1 FROM tally_ingestions')) return { rows: newer ? [{}] : [] };
+      return { rows: [] };
+    } };
+    const work = applySnapshot(client, { batchId: 'same', capturedAt: '2026-09-01T00:00:00Z', company: { name: 'Example' } }, 'new', async () => { writes++; return { ledgerCount: 1, voucherCount: 1 }; }, true);
+    if (newer) await assert.rejects(work, /older snapshot/);
+    else assert.equal((await work).duplicate, false);
+    assert.equal(writes, newer ? 0 : 1);
+    assert.ok(!calls.some(sql => sql.includes('DELETE FROM tally_ingestions')));
+    assert.equal(calls.some(sql => sql.startsWith('UPDATE tally_ingestions')), !newer);
+  }
+});
 const payload = () => ({
   batchId: 'test-1', capturedAt: '2026-09-08T10:00:00Z', fullSnapshot: true,
   company: { externalId: 'tally-guid-1', name: 'Test Company' },

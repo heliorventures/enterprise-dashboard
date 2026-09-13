@@ -7,6 +7,38 @@ process.env.DASHBOARD_SESSION_SECRET = 'test-session-secret-at-least-32-chars!!'
 const { app } = require('../src/server');
 const db = require('../src/db');
 let server;
+
+test('saved exports succeed independently of automatic sync validation, including retries', async () => {
+  const archive = require('../src/sourceArchive');
+  const sync = require('../src/sourceSync');
+  const originalComplete = archive.complete, originalPromote = sync.recordBatch;
+  const local = app.listen(0, '127.0.0.1');
+  await new Promise(resolve => local.once('listening', resolve));
+  try {
+    for (const [coverageStatus, duplicate, ok, expected] of [
+      ['complete', false, false, 'error'],
+      ['complete', true, false, 'error'],
+      ['complete', true, true, 'validated'],
+      ['partial', false, true, 'blocked'],
+    ]) {
+      let promotions = 0;
+      archive.complete = async () => ({ ok: true, batchId: 'example', coverageStatus, duplicate });
+      sync.recordBatch = async () => { promotions++; return { ok }; };
+      const response = await fetch(`http://127.0.0.1:${local.address().port}/api/ingest/tally/source/complete`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + process.env.TALLY_INGEST_TOKEN }, body: '{"batchId":"example"}',
+      });
+      assert.equal(response.status, 200);
+      const result = await response.json();
+      assert.equal(result.ok, true); // Archive acknowledgement remains retry-safe.
+      assert.equal(result.coverageStatus, coverageStatus);
+      assert.equal(result.reportingStatus, expected);
+      assert.equal(promotions, coverageStatus === 'complete' ? 1 : 0);
+    }
+  } finally {
+    archive.complete = originalComplete; sync.recordBatch = originalPromote;
+    await new Promise(resolve => local.close(resolve));
+  }
+});
 after(async () => {
   if (server) await new Promise(resolve => server.close(resolve));
   await db.close();

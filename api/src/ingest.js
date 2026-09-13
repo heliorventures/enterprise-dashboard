@@ -102,18 +102,27 @@ function planIncremental(existing, incoming, same) {
   };
 }
 
-async function ingestSnapshot(input) {
+async function ingestSnapshot(input, { force = false } = {}) {
   const snapshot = validateSnapshot(input);
   const { batchId, capturedAt, company, ledgers, vouchers } = snapshot;
   const checksum = createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');
   return db.transaction(client => applySnapshot(client, snapshot, checksum,
-    id => replaceSnapshot(client, id, ledgers, vouchers)));
+    id => replaceSnapshot(client, id, ledgers, vouchers), force));
 }
 
-async function applySnapshot(client, { batchId, capturedAt, company }, checksum, writeRows) {
+async function applySnapshot(client, { batchId, capturedAt, company }, checksum, writeRows, force = false) {
     // Serialize imports before inspecting timestamps; never apply an older snapshot last.
     await client.query('SELECT pg_advisory_xact_lock(74312002)');
     const prior = await client.query('SELECT checksum, company_id FROM tally_ingestions WHERE batch_id = $1', [batchId]);
+    if (prior.rows.length && force) {
+      const id = prior.rows[0].company_id;
+      const newer = await client.query('SELECT 1 FROM tally_ingestions WHERE company_id = $1 AND captured_at > $2 LIMIT 1', [id, capturedAt]);
+      if (newer.rows.length) throw invalid('Cannot reprocess an older snapshot over newer reporting data', 409);
+      const counts = await writeRows(id);
+      await client.query('UPDATE tally_ingestions SET checksum = $2 WHERE batch_id = $1', [batchId, checksum]);
+      await client.query(`INSERT INTO "SyncLog" ("Source", "Status", "Message") VALUES ('tally', 'ok', $1)`, [promoteMessage(company.name, counts)]);
+      return { ok: true, duplicate: false, companyId: id, batchId, ...counts };
+    }
     if (prior.rows.length) {
       if (prior.rows[0].checksum !== checksum) throw invalid('batchId already used for different data', 409);
       return { ok: true, duplicate: true, companyId: prior.rows[0].company_id, batchId };

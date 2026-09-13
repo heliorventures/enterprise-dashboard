@@ -1,3 +1,4 @@
+import { BrandMark } from '../../shared/brand-mark';
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -6,7 +7,7 @@ import { Icon } from '../../shared/icon';
 
 @Component({
   selector: 'app-login',
-  imports: [FormsModule, Icon],
+  imports: [BrandMark, FormsModule, Icon],
   templateUrl: './login.html',
   styleUrl: './login.css',
 })
@@ -28,7 +29,10 @@ export class Login {
       const returnUrl = this.route.snapshot.queryParamMap.get('returnUrl') || '/dashboard';
       await this.router.navigateByUrl(returnUrl.startsWith('/') ? returnUrl : '/dashboard');
     } catch (err: unknown) {
-      const body = err && typeof err === 'object' && 'error' in err ? (err as { error?: { error?: string } }).error : null;
+      const body =
+        err && typeof err === 'object' && 'error' in err
+          ? (err as { error?: { error?: string } }).error
+          : null;
       this.error.set(body?.error || 'Unable to sign in. Confirm the API is running on port 3000.');
     } finally {
       this.submitting.set(false);

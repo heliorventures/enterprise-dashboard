@@ -2,7 +2,7 @@
   <app-page-header
     title="Data operations"
     eyebrow="Source reliability"
-    description="Review import status and failures before relying on financial balances."
+    description="Validate saved Tally exports before updating reporting data. Saved exports trigger sync automatically."
   >
     <button type="button" class="btn ghost" (click)="loadSync()" [disabled]="loading()">
       Refresh status
@@ -43,7 +43,8 @@
       <div>
         <h2><app-icon name="sync" /> Current run</h2>
         <p>
-          Promotes the latest dumped source records into the books. Unchanged rows are left alone.
+          Validates the latest complete export for each company, then updates its reporting data.
+          Rejected source data remains archived; validation failures leave that company's reporting data unchanged.
         </p>
       </div>
     </div>
