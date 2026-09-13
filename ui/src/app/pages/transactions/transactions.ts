@@ -1,4 +1,10 @@
-import { DatePipe } from '@angular/common';
+import { FilterPanel } from '../../shared/filter-panel';
+import { CompanySelect } from '../../shared/company-select';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { DataTable } from '../../shared/data-table';
+import { PageHeader } from '../../shared/page-header';
+import { LatestRequest } from '../../shared/latest-request';
+import { voucherColumns, recordKey } from '../../shared/record-columns';
 import { Component, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 import { DashboardService } from '../../services/dashboard';
@@ -10,7 +16,7 @@ import { Pager } from '../../shared/pager';
 
 @Component({
   selector: 'app-transactions',
-  imports: [DatePipe, Pager, Icon],
+  imports: [FilterPanel, CompanySelect, DataTable, PageHeader, Pager, Icon],
   templateUrl: './transactions.html',
   styleUrl: './transactions.css',
 })
@@ -18,13 +24,18 @@ export class Transactions {
   private readonly api = inject(DashboardService);
   private readonly route = inject(ActivatedRoute);
 
+  private readonly request = new LatestRequest();
+  readonly columns = voucherColumns;
+  readonly recordKey = recordKey;
+
   readonly company = signal('all');
   readonly query = signal('');
+  readonly search = signal('');
   readonly type = signal('');
   readonly from = signal('');
   readonly to = signal('');
   readonly page = signal(1);
-  readonly pageSize = signal(100);
+  readonly pageSize = signal(25);
   readonly loading = signal(true);
   readonly exporting = signal(false);
   readonly error = signal('');
@@ -43,14 +54,31 @@ export class Transactions {
     return this.companies().find((item) => item.id === this.company())?.name || '';
   });
 
+  readonly filterSummary = computed(() =>
+    [
+      this.selectedCompanyName() ||
+        (this.company() === 'all' ? 'All companies' : 'Selected company'),
+      this.query(),
+      this.type(),
+      this.from(),
+      this.to(),
+    ]
+      .filter(Boolean)
+      .join(' / '),
+  );
+
   constructor() {
-    this.api.getDashboard('all').subscribe({
-      next: (dashboard) => this.companies.set(dashboard.companies),
-      error: () => undefined,
-    });
-    this.route.queryParamMap.subscribe((params) => {
+    this.api
+      .getDashboard('all')
+      .pipe(takeUntilDestroyed())
+      .subscribe({
+        next: (dashboard) => this.companies.set(dashboard.companies),
+        error: () => undefined,
+      });
+    this.route.queryParamMap.pipe(takeUntilDestroyed()).subscribe((params) => {
       this.company.set(params.get('company') || 'all');
       this.query.set(params.get('q') || '');
+      this.search.set(this.query());
       this.type.set(params.get('type') || '');
       this.from.set(params.get('from') || '');
       this.to.set(params.get('to') || '');
@@ -60,10 +88,20 @@ export class Transactions {
   }
 
   load() {
+    if (this.from() && this.to() && this.from() > this.to()) {
+      this.request.cancel();
+      this.items.set([]);
+      this.total.set(0);
+      this.loading.set(false);
+      this.error.set('From date must be on or before To date.');
+      return;
+    }
     this.loading.set(true);
     this.error.set('');
-    this.api
-      .getVouchers({
+    this.items.set([]);
+    this.total.set(0);
+    this.request.run(
+      this.api.getVouchers({
         company: this.company(),
         q: this.query(),
         type: this.type(),
@@ -71,8 +109,8 @@ export class Transactions {
         to: this.to(),
         page: this.page(),
         pageSize: this.pageSize(),
-      })
-      .subscribe({
+      }),
+      {
         next: (result) => {
           this.items.set(result.items);
           this.total.set(result.total);
@@ -83,11 +121,13 @@ export class Transactions {
           this.error.set(err.error?.error || 'Unable to load transactions.');
           this.loading.set(false);
         },
-      });
+      },
+    );
   }
 
   apply(event?: Event) {
     event?.preventDefault();
+    this.query.set(this.search());
     this.page.set(1);
     this.load();
   }
@@ -95,6 +135,7 @@ export class Transactions {
   clear() {
     this.company.set('all');
     this.query.set('');
+    this.search.set('');
     this.type.set('');
     this.from.set('');
     this.to.set('');
@@ -102,8 +143,8 @@ export class Transactions {
     this.load();
   }
 
-  onCompany(event: Event) {
-    this.company.set((event.target as HTMLSelectElement).value);
+  onCompany(value: string) {
+    this.company.set(value);
     this.type.set('');
     this.apply();
   }
@@ -114,8 +155,7 @@ export class Transactions {
   }
 
   onQuery(event: Event) {
-    this.query.set((event.target as HTMLInputElement).value);
-    this.apply();
+    this.search.set((event.target as HTMLInputElement).value);
   }
 
   onFrom(event: Event) {
@@ -144,6 +184,7 @@ export class Transactions {
   }
 
   exportCsv() {
+    if (this.exporting() || this.loading() || this.error()) return;
     this.exporting.set(true);
     this.api
       .getVouchers({
@@ -157,9 +198,25 @@ export class Transactions {
       })
       .subscribe({
         next: (result) => {
+          if (result.total > result.items.length) {
+            this.error.set(
+              'Export exceeds the 20,000-row limit. Narrow the filters to export a complete file; no partial file was downloaded.',
+            );
+            this.exporting.set(false);
+            return;
+          }
           downloadCsv(
             'transactions.csv',
-            ['Date', 'Voucher type', 'Voucher no', 'Company', 'Party', 'Project', 'Narration', 'Amount'],
+            [
+              'Date',
+              'Voucher type',
+              'Voucher no',
+              'Company',
+              'Party',
+              'Project',
+              'Narration',
+              'Amount',
+            ],
             result.items.map((row) => [
               String(row.date || '').slice(0, 10),
               row.type,
@@ -169,7 +226,7 @@ export class Transactions {
               row.project,
               row.narration,
               row.amount,
-            ])
+            ]),
           );
           this.exporting.set(false);
         },

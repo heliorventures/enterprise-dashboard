@@ -1,0 +1,134 @@
+:host {
+  display: block;
+  min-width: 0;
+}
+.desktop-table {
+  overflow: auto;
+  max-height: 65vh;
+  margin-top: 16px;
+  overscroll-behavior-inline: contain;
+}
+table {
+  width: 100%;
+  table-layout: auto;
+  border-collapse: collapse;
+  margin: 0;
+}
+th,
+td {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  font-size: 13px;
+  min-width: 140px;
+  max-width: 380px;
+  overflow-wrap: anywhere;
+}
+th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-tint);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+td:first-child {
+  font-weight: 600;
+  min-width: 200px;
+}
+.numeric {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+tbody tr:hover {
+  background: var(--surface-tint);
+}
+a {
+  color: var(--accent);
+  text-underline-offset: 3px;
+}
+small {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+  white-space: normal;
+}
+.mobile-records {
+  display: none;
+}
+[data-tone='negative'] {
+  color: var(--danger);
+}
+[data-tone='positive'] {
+  color: var(--positive);
+}
+@media (max-width: 760px) {
+  .desktop-table {
+    display: none;
+  }
+  .mobile-records {
+    display: grid;
+    gap: 12px;
+    list-style: none;
+    padding: 16px;
+    margin: 0;
+  }
+  li {
+    min-width: 0;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px;
+    background: var(--surface);
+  }
+  dl {
+    display: grid;
+    gap: 12px;
+    margin: 0;
+  }
+  dl > div {
+    display: grid;
+    grid-template-columns: minmax(80px, 0.8fr) minmax(0, 1.2fr);
+    gap: 12px;
+  }
+  dt {
+    color: var(--muted);
+    font-size: 12px;
+    align-self: baseline;
+  }
+  dd {
+    margin: 0;
+    text-align: right;
+    font-size: 14px;
+    overflow-wrap: anywhere;
+  }
+  dd.num {
+    grid-column: 1 / -1;
+    text-align: left;
+  }
+  .record-title {
+    display: block;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 12px;
+  }
+  .record-title dt {
+    margin-bottom: 6px;
+  }
+  .record-title dd {
+    font-weight: 650;
+    text-align: left;
+  }
+  details {
+    margin-top: 10px;
+    border-top: 1px solid var(--line);
+  }
+  summary {
+    padding: 12px 0;
+    color: var(--accent);
+    font-size: 13px;
+  }
+}

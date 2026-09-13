@@ -126,46 +126,28 @@ function groupHistory(rows) {
 }
 
 function companyInsight(row) {
-  if (row.payables > row.cashAndBank && row.receivables > 0) {
-    return {
-      tone: 'risk',
-      note: 'Payables are larger than cash. Collect receivables or move surplus from another company before new vendor payments.',
-    };
+  if (row.payables > row.cashAndBank) {
+    return { tone: 'risk', note: 'Payables are larger than cash on the books. Review payment dates and funding; receivables are not assumed collectible.' };
   }
   if (row.nextMonthFund < 0) {
-    return {
-      tone: 'risk',
-      note: 'Next-month cash turns negative on the current run-rate. Pause non-essential spend and chase collections.',
-    };
+    return { tone: 'risk', note: 'The next-month run-rate model is negative. Validate the source amounts and receipt/payment timing before funding decisions.' };
   }
   if (row.nextMonthFund < row.payables && row.payables > 0) {
-    return {
-      tone: 'watch',
-      note: 'Projected next-month cash may not cover vendor dues already on the books. Keep a weekly payment calendar.',
-    };
+    return { tone: 'watch', note: 'The model balance is below recorded payables. Review due dates; the model does not schedule those obligations separately.' };
   }
-  if (row.lastMonthEstimated && row.lastMonthVouchers > 0) {
-    return {
-      tone: 'watch',
-      note: 'Last-month vouchers exist but amounts are missing. The expense figure is a ledger run-rate until Tally is re-synced.',
-    };
+  if (row.lastMonthEstimated) {
+    return { tone: 'watch', note: 'Last-month spending is estimated from the run-rate, not confirmed activity. Verify source coverage before relying on this assessment.' };
+  }
+  if (row.cashAndBank - row.payables < row.nextMonthNeed) {
+    return { tone: 'watch', note: 'Recorded cash after payables is below one month of model spending. Confirm expected collections and spending commitments.' };
   }
   if (row.receivables > row.bank && row.receivables > 0) {
-    return {
-      tone: 'watch',
-      note: 'Customers owe more than the bank balance. Collection is the fastest way to fund next month.',
-    };
+    return { tone: 'watch', note: 'Receivables exceed the bank balance. Review their age and recoverability; they are not available cash.' };
   }
-  if (row.uncommitted > 0 && row.bank > 0) {
-    return {
-      tone: 'ok',
-      note: 'Bank covers payables and the next-month run-rate. Surplus can support a cash-tight group company if needed.',
-    };
+  if (row.cashAndBank <= 0) {
+    return { tone: 'watch', note: 'No positive cash balance is reported. A zero spending model does not establish funding capacity.' };
   }
-  return {
-    tone: 'ok',
-    note: 'Bank covers the current monthly run-rate. Review payables weekly so committed dues do not surprise cash.',
-  };
+  return { tone: 'ok', note: 'Reported cash covers payables and one month of model spending on this snapshot. Confirm bank availability and source completeness; this is not a guarantee.' };
 }
 
 function buildCompanyFundRows({ today = new Date(), companies = [], histories = new Map() }) {

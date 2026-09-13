@@ -26,7 +26,7 @@
 
 .size select,
 .pages button {
-  height: 36px;
+  height: 44px;
   border: 1px solid var(--line);
   background: var(--surface);
   border-radius: 12px;
@@ -68,4 +68,31 @@
   width: 24px;
   text-align: center;
   color: var(--subtle);
+}
+
+.mobile-page {
+  display: none;
+  font-size: 12px;
+  color: var(--muted);
+}
+@media (max-width: 760px) {
+  .pager {
+    padding: 16px;
+    gap: 8px 12px;
+  }
+  .pages {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: nowrap;
+  }
+  .page-number,
+  .ellipsis {
+    display: none;
+  }
+  .mobile-page {
+    display: inline;
+  }
+  .pages button {
+    padding: 0 10px;
+  }
 }

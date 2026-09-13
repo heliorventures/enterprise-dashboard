@@ -1,19 +1,17 @@
 <div class="pager">
-  <p class="range">
-    {{ from() }}–{{ to() }} of {{ total() }}
-  </p>
+  <p class="range">{{ from() }}–{{ to() }} of {{ total() }}</p>
 
   <label class="size">
     Rows
-    <select [value]="pageSize()" (change)="onPageSize($event)">
+    <select [value]="pageSize()" [disabled]="busy()" (change)="onPageSize($event)">
       @for (size of pageSizes; track size) {
         <option [value]="size">{{ size }}</option>
       }
     </select>
   </label>
 
-  <div class="pages">
-    <button type="button" class="nav" [disabled]="page() <= 1" (click)="goTo(page() - 1)">
+  <nav class="pages" aria-label="Pagination">
+    <button type="button" class="nav" [disabled]="busy() || page() <= 1" (click)="goTo(page() - 1)">
       <app-icon name="chevronLeft" />
       Previous
     </button>
@@ -21,12 +19,28 @@
       @if (item === 'ellipsis') {
         <span class="ellipsis">…</span>
       } @else {
-        <button type="button" [class.active]="item === page()" (click)="goTo(item)">{{ item }}</button>
+        <button
+          type="button"
+          class="page-number"
+          [attr.aria-label]="'Page ' + item"
+          [attr.aria-current]="item === page() ? 'page' : null"
+          [disabled]="busy()"
+          [class.active]="item === page()"
+          (click)="goTo(item)"
+        >
+          {{ item }}
+        </button>
       }
     }
-    <button type="button" class="nav" [disabled]="page() >= lastPage()" (click)="goTo(page() + 1)">
+    <span class="mobile-page">{{ page() }} / {{ lastPage() }}</span>
+    <button
+      type="button"
+      class="nav"
+      [disabled]="busy() || page() >= lastPage()"
+      (click)="goTo(page() + 1)"
+    >
       Next
       <app-icon name="chevronRight" />
     </button>
-  </div>
+  </nav>
 </div>

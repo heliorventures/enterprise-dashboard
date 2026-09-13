@@ -9,6 +9,7 @@ import { Icon } from './icon';
 })
 export class Pager {
   readonly total = input(0);
+  readonly busy = input(false);
   readonly page = input(1);
   readonly pageSize = input(25);
   readonly pageChange = output<number>();
@@ -17,7 +18,9 @@ export class Pager {
   readonly pageSizes = [25, 50, 100, 250, 500];
 
   readonly lastPage = computed(() => Math.max(1, Math.ceil(this.total() / this.pageSize())));
-  readonly from = computed(() => (this.total() === 0 ? 0 : (this.page() - 1) * this.pageSize() + 1));
+  readonly from = computed(() =>
+    this.total() === 0 ? 0 : (this.page() - 1) * this.pageSize() + 1,
+  );
   readonly to = computed(() => Math.min(this.total(), this.page() * this.pageSize()));
   readonly pages = computed(() => {
     const current = this.page();
@@ -39,6 +42,7 @@ export class Pager {
   });
 
   goTo(page: number) {
+    if (this.busy()) return;
     const next = Math.min(this.lastPage(), Math.max(1, page));
     if (next !== this.page()) {
       this.pageChange.emit(next);

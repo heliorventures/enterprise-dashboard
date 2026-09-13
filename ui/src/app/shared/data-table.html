@@ -1,0 +1,95 @@
+<ng-template #cell let-row let-column="column">
+  @if (column.link; as linkFor) {
+    <a [routerLink]="linkFor(row).path" [queryParams]="linkFor(row).query">{{
+      column.value(row)
+    }}</a>
+  } @else {
+    <span [attr.data-tone]="column.tone?.(row)">{{ column.value(row) }}</span>
+  }
+  @if (column.secondary?.(row); as detail) {
+    <small>{{ detail }}</small>
+  }
+</ng-template>
+
+@if (loading()) {
+  <p class="empty" role="status">Loading {{ label().toLowerCase() }}…</p>
+} @else if (error()) {
+  <p class="empty" role="status">{{ error() }}</p>
+} @else if (!rows().length) {
+  <p class="empty" role="status">{{ empty() }}</p>
+} @else {
+  <div
+    class="desktop-table"
+    role="region"
+    [attr.aria-label]="label() + ' table, scroll for more columns'"
+    tabindex="0"
+  >
+    <table>
+      <caption class="sr-only">
+        {{
+          label()
+        }}
+      </caption>
+      <thead>
+        <tr>
+          @for (column of columns(); track column.key) {
+            <th scope="col" [class.numeric]="column.numeric">{{ column.label }}</th>
+          }
+        </tr>
+      </thead>
+      <tbody>
+        @for (row of rows(); track rowKey()(row)) {
+          <tr>
+            @for (column of columns(); track column.key) {
+              <td [class.numeric]="column.numeric">
+                <ng-container
+                  [ngTemplateOutlet]="cell"
+                  [ngTemplateOutletContext]="{ $implicit: row, column: column }"
+                />
+              </td>
+            }
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+  <ul class="mobile-records" [attr.aria-label]="label()">
+    @for (row of rows(); track rowKey()(row)) {
+      <li>
+        <dl>
+          @for (column of primary(); track column.key; let first = $first) {
+            <div [class.record-title]="first">
+              <dt>{{ column.label }}</dt>
+              <dd [class.num]="column.numeric">
+                <ng-container
+                  [ngTemplateOutlet]="cell"
+                  [ngTemplateOutletContext]="{ $implicit: row, column: column }"
+                />
+              </dd>
+            </div>
+          }
+        </dl>
+        @if (secondary().length) {
+          <details>
+            <summary>
+              Details<span class="sr-only"> for {{ columns()[0].value(row) }}</span>
+            </summary>
+            <dl>
+              @for (column of secondary(); track column.key) {
+                <div>
+                  <dt>{{ column.label }}</dt>
+                  <dd [class.num]="column.numeric">
+                    <ng-container
+                      [ngTemplateOutlet]="cell"
+                      [ngTemplateOutletContext]="{ $implicit: row, column: column }"
+                    />
+                  </dd>
+                </div>
+              }
+            </dl>
+          </details>
+        }
+      </li>
+    }
+  </ul>
+}

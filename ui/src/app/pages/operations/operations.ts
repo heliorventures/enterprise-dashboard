@@ -1,12 +1,17 @@
+import { DataColumn, DataTable } from '../../shared/data-table';
+import { PageHeader } from '../../shared/page-header';
+import { recordKey } from '../../shared/record-columns';
 import { DatePipe } from '@angular/common';
 import { Component, DestroyRef, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { finalize } from 'rxjs';
 import { DashboardService } from '../../services/dashboard';
 import { SourceSyncCompany, SourceSyncCounts, SourceSyncRun } from '../../models/dashboard';
 import { Icon } from '../../shared/icon';
 
 @Component({
   selector: 'app-operations',
-  imports: [DatePipe, Icon],
+  imports: [DatePipe, Icon, DataTable, PageHeader],
   templateUrl: './operations.html',
   styleUrl: './operations.css',
 })
@@ -14,7 +19,60 @@ export class Operations {
   private readonly api = inject(DashboardService);
   private readonly destroyRef = inject(DestroyRef);
   private pollId: ReturnType<typeof setInterval> | null = null;
+  private reading = false;
 
+  readonly recordKey = recordKey;
+  readonly companyColumns: DataColumn<SourceSyncCompany>[] = [
+    {
+      key: 'name',
+      label: 'Company',
+      value: (r) => this.clean(r.companyName),
+      secondary: (r) => r.batchId || '',
+    },
+    {
+      key: 'status',
+      label: 'Status',
+      value: (r) => this.syncStatus(r.status),
+      primary: true,
+      tone: (r) => (r.status === 'error' ? 'negative' : 'neutral'),
+    },
+    { key: 'progress', label: 'Progress', value: (r) => `${r.progress}%`, primary: true },
+    {
+      key: 'changes',
+      label: 'Changes',
+      value: (r) => this.changeLabel(r).primary,
+      secondary: (r) => this.changeLabel(r).secondary,
+    },
+  ];
+  readonly historyColumns: DataColumn<SourceSyncRun>[] = [
+    {
+      key: 'date',
+      label: 'Started',
+      value: (r) =>
+        new Date(r.startedAt).toLocaleString('en-IN', {
+          day: '2-digit',
+          month: 'short',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+    },
+    {
+      key: 'status',
+      label: 'Status',
+      value: (r) => this.syncStatus(r.status),
+      primary: true,
+      tone: (r) => (r.status === 'error' ? 'negative' : 'neutral'),
+    },
+    {
+      key: 'progress',
+      label: 'Companies processed',
+      value: (r) => `${r.companyDone} / ${r.companyTotal}`,
+      primary: true,
+    },
+    { key: 'trigger', label: 'Started by', value: (r) => this.triggerLabel(r.triggeredBy) },
+    { key: 'result', label: 'Result', value: (r) => r.message },
+  ];
   readonly loading = signal(true);
   readonly syncing = signal(false);
   readonly error = signal('');
@@ -29,64 +87,80 @@ export class Operations {
   syncTally() {
     this.error.set('');
     this.syncing.set(true);
-    this.api.startSourceSync().subscribe({
-      next: (run) => {
-        this.currentSync.set(run);
-        this.startPoll();
-      },
-      error: (err) => {
-        if (err.status === 409 && err.error?.run) {
-          this.currentSync.set(err.error.run);
+    this.api
+      .startSourceSync()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (run) => {
+          this.currentSync.set(run);
           this.startPoll();
-          return;
-        }
-        this.syncing.set(false);
-        this.error.set(err.error?.error || 'Tally sync could not start');
-      },
-    });
+        },
+        error: (err) => {
+          if (err.status === 409 && err.error?.run) {
+            this.currentSync.set(err.error.run);
+            this.startPoll();
+            return;
+          }
+          this.syncing.set(false);
+          this.error.set(err.error?.error || 'Tally sync could not start');
+        },
+      });
   }
 
   loadSync() {
-    this.api.getSourceSync().subscribe({
-      next: (history) => {
-        this.syncHistory.set(history.runs || []);
-        this.currentSync.set(history.current || history.runs?.[0] || null);
-        const running = history.current?.status === 'running';
-        this.syncing.set(running);
-        this.loading.set(false);
-        if (running) {
-          this.startPoll();
-        } else {
-          this.stopPoll();
-        }
-      },
-      error: (err) => {
-        this.loading.set(false);
-        this.error.set(err.error?.error || 'Unable to load Tally sync history');
-      },
-    });
+    if (this.reading) return;
+    this.reading = true;
+    this.api
+      .getSourceSync()
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => (this.reading = false)),
+      )
+      .subscribe({
+        next: (history) => {
+          this.error.set('');
+          this.syncHistory.set(history.runs || []);
+          this.currentSync.set(history.current || history.runs?.[0] || null);
+          const running = history.current?.status === 'running';
+          this.syncing.set(running);
+          this.loading.set(false);
+          if (running) {
+            this.startPoll();
+          } else {
+            this.stopPoll();
+          }
+        },
+        error: (err) => {
+          this.loading.set(false);
+          this.error.set(err.error?.error || 'Unable to load Tally sync history');
+        },
+      });
   }
 
   syncStatus(status: string) {
     return (
-      {
-        running: 'In progress',
-        ok: 'Completed',
-        error: 'Failed',
-        skipped: 'Already applied',
-        pending: 'Waiting',
-      } as Record<string, string>
-    )[status] || status;
+      (
+        {
+          running: 'In progress',
+          ok: 'Completed',
+          error: 'Failed',
+          skipped: 'Already applied',
+          pending: 'Waiting',
+        } as Record<string, string>
+      )[status] || status
+    );
   }
 
   triggerLabel(value: string) {
     return (
-      {
-        dashboard: 'Operations',
-        cli: 'Command',
-        'source-complete': 'New dump',
-      } as Record<string, string>
-    )[value] || value;
+      (
+        {
+          dashboard: 'Operations',
+          cli: 'Command',
+          'source-complete': 'New dump',
+        } as Record<string, string>
+      )[value] || value
+    );
   }
 
   clean(value: string) {

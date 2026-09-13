@@ -1,0 +1,60 @@
+<article class="panel">
+  <header>
+    <div>
+      <h2>{{ title() }}</h2>
+      <p>{{ description() }}</p>
+    </div>
+  </header>
+  @if (!rows().length) {
+    <p class="empty">{{ empty() }}</p>
+  } @else {
+    <div class="chart-body">
+      <p class="scale">
+        Common scale · {{ compactInr(domain().min) }} to {{ compactInr(domain().max) }}
+      </p>
+      <ul [attr.aria-label]="title()">
+        @for (row of visibleRows(); track row.key) {
+          <li>
+            <div class="row-head">
+              @if (row.link; as link) {
+                <a [routerLink]="link.path" [queryParams]="link.query">{{ row.label }}</a>
+              } @else {
+                <strong>{{ row.label }}</strong>
+              }
+              @if (row.note) {
+                <small>{{ row.note }}</small>
+              }
+            </div>
+            @for (item of row.values; track item.label) {
+              <div class="series">
+                <div class="value">
+                  <span>{{ item.label }}</span
+                  ><span class="num">{{ fullInr(item.value) }}</span>
+                </div>
+                <div class="track" aria-hidden="true">
+                  <i class="zero" [style.left.%]="domain().zero"></i
+                  ><i
+                    class="bar"
+                    [attr.data-tone]="item.value < 0 ? 'negative' : item.tone || 'accent'"
+                    [style.left.%]="left(item.value)"
+                    [style.width.%]="width(item.value)"
+                  ></i>
+                </div>
+              </div>
+            }
+          </li>
+        }
+      </ul>
+      @if (rows().length > 6) {
+        <button
+          type="button"
+          class="btn ghost show-more"
+          [attr.aria-expanded]="expanded()"
+          (click)="expanded.set(!expanded())"
+        >
+          {{ expanded() ? 'Show first 6' : 'Show all ' + rows().length }} entries
+        </button>
+      }
+    </div>
+  }
+</article>

@@ -218,6 +218,9 @@ async function bankAccounts(companyId) {
     name: row.LedgerName,
     group: row.GroupCategory,
     available: fundsOnHand(row.CurrentBalance),
+    // Preserve evidence for reconciliation; do not infer a universal debit/credit
+    // convention from mixed signed-numeric and Dr/Cr-tagged source formats.
+    rawBalance: toNumber(row.CurrentBalance),
     kind: /bank/i.test(row.GroupCategory) ? 'bank' : 'cash',
   }));
 }

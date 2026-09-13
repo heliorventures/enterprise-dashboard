@@ -1,0 +1,96 @@
+:host {
+  display: block;
+  min-width: 0;
+}
+.show-more {
+  margin-top: 20px;
+}
+.panel {
+  height: 100%;
+}
+.chart-body {
+  padding: 0 24px 24px;
+}
+.scale {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 14px 0 20px;
+}
+ul {
+  display: grid;
+  gap: 20px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+li {
+  min-width: 0;
+}
+.row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.row-head small {
+  font-size: 11px;
+  color: var(--muted);
+}
+a {
+  color: var(--accent);
+  text-underline-offset: 3px;
+  font-weight: 600;
+}
+.series + .series {
+  margin-top: 8px;
+}
+.value {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+  font-size: 12px;
+  margin-bottom: 5px;
+  color: var(--muted);
+}
+.value .num {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.track {
+  position: relative;
+  height: 9px;
+  background: var(--surface-tint);
+  border-radius: 3px;
+}
+.bar {
+  position: absolute;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+}
+.bar[data-tone='negative'] {
+  background: var(--danger);
+}
+.bar[data-tone='positive'] {
+  background: var(--positive);
+}
+.bar[data-tone='muted'] {
+  background: #708399;
+}
+.zero {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  border-left: 1px solid var(--muted);
+  z-index: 1;
+}
+@media (max-width: 760px) {
+  .chart-body {
+    padding: 0 16px 20px;
+  }
+}

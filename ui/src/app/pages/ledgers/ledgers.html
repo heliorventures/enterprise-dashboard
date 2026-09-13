@@ -1,101 +1,94 @@
 <section class="grid-page">
-  <header>
-    <div>
-      <p class="eyebrow">Books of account</p>
-      <h1>Ledgers</h1>
-    </div>
-  </header>
+  <app-page-header
+    title="Ledgers"
+    eyebrow="Books of account"
+    description="Inspect balances and account groups from the latest imported books."
+  />
 
   @if (error()) {
-    <p class="banner">{{ error() }}</p>
+    <p class="banner" role="alert">{{ error() }}</p>
   }
 
   <article class="grid-card">
     <div class="grid-toolbar">
       <div>
         <h2><app-icon name="ledgers" /> Chart of accounts</h2>
-        <p>{{ total() }} ledgers from the latest source dump.</p>
-      </div>
-    </div>
-
-    <form class="filter-bar filters-4" (submit)="apply($event)">
-      <label class="field search">
-        <span>Search</span>
-        <span class="search-box">
-          <app-icon name="search" />
-          <input type="search" [value]="query()" (input)="onQuery($event)" placeholder="Ledger, group or company" />
-        </span>
-      </label>
-      <label class="field">
-        <span>Company</span>
-        <select [value]="company()" (change)="onCompany($event)">
-          <option value="all">All companies</option>
-          @for (item of companies(); track item.id) {
-            <option [value]="item.id">{{ item.name }}</option>
-          }
-        </select>
-      </label>
-      <label class="field">
-        <span>Group</span>
-        <select [value]="group()" (change)="onGroup($event)">
-          <option value="">All groups</option>
-          @for (name of groups(); track name) {
-            <option [value]="name">{{ name }}</option>
-          }
-        </select>
-      </label>
-      <div class="filter-actions">
-        <button type="button" class="btn ghost" (click)="clear()">
-          <app-icon name="close" />
-          Clear
-        </button>
-        <button type="button" class="btn primary" (click)="exportCsv()" [disabled]="exporting()">
-          <app-icon name="download" />
-          {{ exporting() ? 'Exporting…' : 'Export' }}
-        </button>
-      </div>
-    </form>
-
-    <div class="table-wrap">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>Company</th>
-            <th>Ledger</th>
-            <th>Group</th>
-            <th class="num">Balance</th>
-            <th class="num">Side</th>
-          </tr>
-        </thead>
-        <tbody>
+        <p>
           @if (loading()) {
-            <tr><td class="empty" colspan="5">Loading ledgers…</td></tr>
-          } @else if (!items().length) {
-            <tr><td class="empty" colspan="5">No ledgers match the current filters.</td></tr>
-          } @else {
-            @for (row of items(); track row.id) {
-              <tr>
-                <td class="wrap">{{ row.companyName }}</td>
-                <td class="wrap"><strong>{{ clean(row.name) }}</strong></td>
-                <td class="wrap">{{ clean(row.group) }}</td>
-                <td class="num" [title]="fullInr(row.balance)">{{ fullInr(row.balance) }}</td>
-                <td class="num">
-                  <span class="side" [class.dr]="drCr(row.balance) === 'Dr'" [class.cr]="drCr(row.balance) === 'Cr'">
-                    {{ drCr(row.balance) }}
-                  </span>
-                </td>
-              </tr>
-            }
+            Loading ledger count…
+          } @else if (!error()) {
+            {{ total() }} matching ledgers.
           }
-        </tbody>
-      </table>
+          No totals are inferred from a single page.
+        </p>
+      </div>
     </div>
-    <app-pager
-      [total]="total()"
-      [page]="page()"
-      [pageSize]="pageSize()"
-      (pageChange)="onPage($event)"
-      (pageSizeChange)="onPageSize($event)"
+
+    <app-filter-panel [summary]="filterSummary()">
+      <form class="filter-bar filters-4" (submit)="apply($event)">
+        <label class="field search">
+          <span>Search</span>
+          <span class="search-box">
+            <app-icon name="search" />
+            <input
+              type="search"
+              [value]="search()"
+              (input)="onQuery($event)"
+              placeholder="Ledger, group or company"
+            />
+          </span>
+        </label>
+        <app-company-select
+          [companies]="companies()"
+          [value]="company()"
+          (companyChange)="onCompany($event)"
+        />
+        <label class="field">
+          <span>Group</span>
+          <select [value]="group()" (change)="onGroup($event)">
+            <option value="">All groups</option>
+            @for (name of groups(); track name) {
+              <option [value]="name">{{ name }}</option>
+            }
+          </select>
+        </label>
+        <div class="filter-actions">
+          <button type="submit" class="btn ghost" [disabled]="loading()">Search</button>
+          <button type="button" class="btn ghost" (click)="clear()">
+            <app-icon name="close" />
+            Clear
+          </button>
+          <button
+            type="button"
+            class="btn primary"
+            (click)="exportCsv()"
+            [disabled]="exporting() || loading() || !!error()"
+          >
+            <app-icon name="download" />
+            {{ exporting() ? 'Exporting…' : 'Export' }}
+          </button>
+        </div>
+      </form>
+    </app-filter-panel>
+
+    <app-data-table
+      label="Ledgers"
+      [rows]="items()"
+      [columns]="columns"
+      [rowKey]="recordKey"
+      [loading]="loading()"
+      [error]="error()"
+      empty="No ledgers match the current filters."
     />
+    @if (!loading() && !error()) {
+      <app-pager
+        [busy]="loading()"
+        [total]="total()"
+        [page]="page()"
+        [pageSize]="pageSize()"
+        (pageChange)="onPage($event)"
+        (pageSizeChange)="onPageSize($event)"
+      />
+    }
   </article>
 </section>

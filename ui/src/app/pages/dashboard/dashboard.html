@@ -1,508 +1,277 @@
 <section class="page">
-  <header class="topbar">
-    <div>
-      <p class="eyebrow">{{ selectedLabel() }}</p>
-      <h1>Fund position</h1>
-    </div>
+  <app-page-header
+    title="Financial overview"
+    [eyebrow]="selectedLabel()"
+    description="Liquidity, business performance and the decisions that need attention."
+  >
     <div class="controls">
-      <label class="field">
-        <span>Company</span>
-        <select [value]="selectedCompany()" (change)="onCompanyChange($event)">
-          <option value="all">All companies</option>
-          @for (company of data()?.companies || []; track company.id) {
-            <option [value]="company.id">{{ company.name }}</option>
-          }
-        </select>
-      </label>
+      <app-company-select
+        [companies]="companies()"
+        [value]="selectedCompany()"
+        (companyChange)="onCompanyChange($event)"
+      />
       <button type="button" class="btn primary" (click)="load()" [disabled]="loading()">
-        <app-icon name="refresh" />
         {{ loading() ? 'Refreshing…' : 'Refresh' }}
       </button>
     </div>
-  </header>
-
+  </app-page-header>
   @if (error()) {
-    <p class="banner danger">{{ error() }}</p>
+    <p class="banner" role="alert">{{ error() }}</p>
   }
-  @if (!loading() && data() && !funds().asOf) {
-    <p class="banner info">Restart the API on port 3000 to load bank balance, last-month spend, and the three-month budget.</p>
-  }
-
-  @if (loading() && !data()) {
-    <div class="skeleton-grid" aria-hidden="true">
-      <span></span><span></span><span></span><span></span><span></span><span></span>
-    </div>
+  @if (loading()) {
+    <p class="empty" role="status">Loading financial overview…</p>
   } @else if (data(); as dashboard) {
-    <div class="meta-row">
-      <span class="pill" [class.ok]="dashboard.tally.connected" [class.warn]="!dashboard.tally.connected">
-        <app-icon name="operations" />
-        {{ dashboard.tally.mode === 'archive' ? 'Source dump' : (dashboard.tally.mode === 'push' ? 'Tally linked' : (dashboard.tally.connected ? 'Tally connected' : 'Tally offline')) }}
-      </span>
-      <span class="meta"><app-icon name="company" /> {{ dashboard.companies.length }} companies</span>
-      <span class="meta"><app-icon name="ledgers" /> {{ dashboard.books.ledgerCount }} ledgers</span>
-      <span class="meta"><app-icon name="transactions" /> {{ dashboard.books.voucherCount }} vouchers</span>
-      @if (dashboard.lastSync) {
-        <span class="meta"><app-icon name="calendar" /> Last sync {{ dashboard.lastSync.SyncedAt | date: 'dd MMM yyyy, HH:mm' }}</span>
+    <div class="freshness">
+      <span>Source: imported Tally books</span>
+      <span
+        >{{ dashboard.companies.length }} companies / {{ dashboard.books.ledgerCount }} ledgers /
+        {{ dashboard.books.voucherCount }} vouchers</span
+      >
+      @if (dashboard.lastSync; as sync) {
+        <span
+          >Latest import: {{ sync.SyncedAt | date: 'dd MMM yyyy, HH:mm' }} · {{ sync.Status }}</span
+        >
+      } @else {
+        <span>Latest import: not confirmed</span>
       }
+      <a routerLink="/operations">Check data freshness</a>
     </div>
-
-    <section class="kpis">
+    @if (!dashboard.books.ledgerCount) {
+      <p class="banner warning">
+        No ledger balances are available for this selection. Financial figures are unavailable until
+        source data is imported.
+      </p>
+    }
+    <section class="kpi-grid" aria-label="Financial indicators">
       @for (kpi of kpis(); track kpi.key) {
-        <article class="kpi" [attr.data-key]="kpi.key">
-          <p><app-icon [name]="kpi.icon" /> {{ kpi.label }}</p>
-          <strong class="num" [class.up]="kpi.tone === 'up'" [class.down]="kpi.tone === 'down'" [title]="fullInr(kpi.value)">
-            {{ compactInr(kpi.value) }}
-          </strong>
-          <small>{{ kpi.hint }}</small>
-        </article>
+        <app-kpi-card
+          [label]="kpi.label"
+          [value]="kpi.value === null ? 'Not available' : compactInr(kpi.value)"
+          [detail]="kpi.value === null ? '' : fullInr(kpi.value)"
+          [hint]="kpi.hint"
+          [icon]="kpi.icon"
+          [tone]="kpi.tone"
+        />
       }
     </section>
-
-    <article class="panel">
-      <header>
-        <div>
-          <h2><app-icon name="company" /> Company fund board</h2>
-          <p>
-            Read each company left to right: cash in the bank now, what was spent last month,
-            and how much cash is likely left at the end of {{ funds().nextMonthLabel || 'next month' }}.
-          </p>
-        </div>
-        <a class="btn ghost" routerLink="/reports">
-          <app-icon name="reports" />
-          Expense report
-        </a>
-      </header>
-      <div class="board-legend">
-        <span><app-icon name="bank" /> In the bank now</span>
-        <span><app-icon name="spend" /> Spent last month</span>
-        <span><app-icon name="forecast" /> Expected next month</span>
-      </div>
-      @if (!funds().byCompany.length) {
-        <p class="empty-copy">No company fund data yet.</p>
-      } @else {
-        <div class="fund-board">
-          @for (row of funds().byCompany; track row.id) {
-            <article class="fund-card" [attr.data-tone]="row.tone">
-              <div class="fund-head">
-                <div class="entity">
-                  <span class="avatar">{{ initials(row.name) }}</span>
-                  <div>
-                    <strong>{{ row.name }}</strong>
-                    <small>{{ compactInr(row.uncommitted) }} left after payables</small>
-                  </div>
-                </div>
-                <span class="tone" [attr.data-tone]="row.tone">
-                  <app-icon [name]="toneIcon(row.tone)" />
-                  {{ toneLabel(row.tone) }}
-                </span>
+    @if (priorities().length) {
+      <article class="panel">
+        <header>
+          <div>
+            <h2>Management attention</h2>
+            <p>Signals from the current books. Open the supporting records before deciding.</p>
+          </div>
+        </header>
+        <ul class="priorities">
+          @for (item of priorities(); track item.title) {
+            <li [attr.data-tone]="item.tone">
+              <div>
+                <h3>{{ item.title }}</h3>
+                <p>{{ item.detail }}</p>
               </div>
-              <div class="metrics">
-                <div class="metric">
-                  <span class="metric-label"><app-icon name="bank" /> In the bank now</span>
-                  <strong class="num" [title]="fullInr(row.bank)">{{ compactInr(row.bank) }}</strong>
-                  <small>Cash you can use today</small>
-                </div>
-                <div class="metric">
-                  <span class="metric-label"><app-icon name="spend" /> Spent last month</span>
-                  <a class="num cell-link" [routerLink]="'/reports'" [queryParams]="{ company: row.id }" [title]="fullInr(row.lastMonthExpenses)">
-                    {{ compactInr(row.lastMonthExpenses) }}
-                  </a>
-                  <small>{{ row.lastMonthEstimated ? 'Estimated from ledgers' : 'Payment and purchase vouchers' }}</small>
-                </div>
-                <div class="metric">
-                  <span class="metric-label"><app-icon name="forecast" /> Expected next month</span>
-                  <strong class="num" [class.up]="row.nextMonthFund >= 0" [class.down]="row.nextMonthFund < 0" [title]="fullInr(row.nextMonthFund)">
-                    {{ compactInr(row.nextMonthFund) }}
-                  </strong>
-                  <small>After {{ compactInr(row.nextMonthNeed) }} typical spend</small>
-                </div>
-              </div>
-              <p class="insight" [attr.data-tone]="row.tone">{{ row.note }}</p>
-              <div class="chips">
-                <span><app-icon name="receivables" /> {{ compactInr(row.receivables) }} to collect</span>
-                <span><app-icon name="payables" /> {{ compactInr(row.payables) }} already due</span>
-              </div>
-            </article>
+              <a [routerLink]="item.path" [queryParams]="item.query">{{ item.action }} →</a>
+            </li>
           }
-        </div>
-        <div class="totals-block">
-          <div class="grid-toolbar">
-            <div>
-              <h2><app-icon name="ledgers" /> Company totals</h2>
-              <p>
-                Bank today, {{ funds().lastMonthLabel || 'last month' }} spend and receipts,
-                and cash needed for {{ funds().nextMonthLabel || 'next month' }}.
-              </p>
-            </div>
-          </div>
-          <div class="table-wrap board">
-            <table class="data-table fund-totals">
-              <thead>
-                <tr>
-                  <th>Company</th>
-                  <th class="num">Bank balance</th>
-                  <th class="num">Last month expenses</th>
-                  <th class="num">Last month received</th>
-                  <th class="num">Next month required</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (row of funds().byCompany; track row.id) {
-                  <tr>
-                    <td class="wrap"><strong>{{ row.name }}</strong></td>
-                    <td class="num" [title]="fullInr(row.bank)">{{ compactInr(row.bank) }}</td>
-                    <td class="num" [title]="fullInr(row.lastMonthExpenses)">{{ compactInr(row.lastMonthExpenses) }}</td>
-                    <td class="num" [title]="fullInr(row.lastMonthInflow || 0)">{{ compactInr(row.lastMonthInflow || 0) }}</td>
-                    <td class="num" [title]="fullInr(row.nextMonthNeed)">{{ compactInr(row.nextMonthNeed) }}</td>
-                  </tr>
-                }
-                <tr class="total-row">
-                  <td><strong>Total</strong></td>
-                  <td class="num" [title]="fullInr(fundTotals().bank)"><strong>{{ compactInr(fundTotals().bank) }}</strong></td>
-                  <td class="num" [title]="fullInr(fundTotals().lastMonthExpenses)"><strong>{{ compactInr(fundTotals().lastMonthExpenses) }}</strong></td>
-                  <td class="num" [title]="fullInr(fundTotals().lastMonthInflow)"><strong>{{ compactInr(fundTotals().lastMonthInflow) }}</strong></td>
-                  <td class="num" [title]="fullInr(fundTotals().nextMonthNeed)"><strong>{{ compactInr(fundTotals().nextMonthNeed) }}</strong></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      }
-    </article>
-
-    <div class="fund-note">
-      <p>
-        Bank is the money on hand today. Last month is Payment and Purchase activity.
-        Next-month expected fund is projected closing cash after the typical monthly spend and inflow.
-      </p>
-      @if (funds().methodNote) {
-        <p>{{ funds().methodNote }}</p>
-      }
-    </div>
-
-    <div class="charts">
-      <article class="panel">
-        <header>
-          <div>
-            <h2><app-icon name="forecast" /> Cashflow and 3-month budget</h2>
-            <p>Actual monthly inflow and spend, then the projected run-rate.</p>
-          </div>
-        </header>
-        @if (!cashflowChart().columns.length) {
-          <p class="empty-copy">No monthly voucher activity to chart yet.</p>
-        } @else {
-          <div class="bar-chart" role="img" aria-label="Monthly inflow and spend with a three-month forecast">
-            <div class="bar-scale" aria-hidden="true">
-              <span>{{ compactInr(cashflowChart().max) }}</span>
-              <span>{{ compactInr(cashflowChart().mid) }}</span>
-              <span>₹0</span>
-            </div>
-            <div class="bar-plot">
-              <div class="bar-grid" aria-hidden="true"><i></i><i></i><i></i></div>
-              <div class="bar-groups">
-                @for (col of cashflowChart().columns; track col.key) {
-                  <div class="bar-group">
-                    <div class="bar-cluster">
-                      <span class="stem inflow" [class.forecast]="col.kind === 'forecast'" [style.height.%]="col.inflowPct" [title]="col.label + ' inflow · ' + fullInr(col.inflow)"></span>
-                      <span class="stem expenses" [class.forecast]="col.kind === 'forecast'" [style.height.%]="col.expensePct" [title]="col.label + ' spend · ' + fullInr(col.expenses)"></span>
-                    </div>
-                    <span class="bar-label" [title]="col.label">{{ col.short }}</span>
-                  </div>
-                }
-              </div>
-            </div>
-          </div>
-          <div class="chart-legend">
-            <span><i class="inflow"></i> Inflow</span>
-            <span><i class="expenses"></i> Spend</span>
-            <span><i class="forecast"></i> Forecast</span>
-          </div>
-        }
-      </article>
-
-      <article class="panel">
-        <header>
-          <div>
-            <h2><app-icon name="cash" /> Cash the CEO can manage</h2>
-            <p>Uncommitted cash is bank and cash after vendor payables already on the books.</p>
-          </div>
-        </header>
-        <ul class="fund-stack">
-          <li>
-            <span>Bank + cash</span>
-            <strong class="num" [title]="fullInr(funds().cashAndBank)">{{ compactInr(funds().cashAndBank) }}</strong>
-          </li>
-          <li>
-            <span>Less payables</span>
-            <strong class="num" [title]="fullInr(funds().payables)">{{ compactInr(funds().payables) }}</strong>
-          </li>
-          <li>
-            <span>Uncommitted cash</span>
-            <strong class="num" [class.up]="funds().uncommitted >= 0" [class.down]="funds().uncommitted < 0" [title]="fullInr(funds().uncommitted)">{{ compactInr(funds().uncommitted) }}</strong>
-          </li>
-          <li>
-            <span>3-month operating budget</span>
-            <strong class="num" [title]="fullInr(funds().threeMonthBudget)">{{ compactInr(funds().threeMonthBudget) }}</strong>
-          </li>
-          <li class="total">
-            <span>Headroom after budget</span>
-            <strong class="num" [class.up]="funds().uncommitted - funds().threeMonthBudget >= 0" [class.down]="funds().uncommitted - funds().threeMonthBudget < 0" [title]="fullInr(funds().uncommitted - funds().threeMonthBudget)">
-              {{ compactInr(funds().uncommitted - funds().threeMonthBudget) }}
-            </strong>
-          </li>
         </ul>
       </article>
+    }
+    <div class="chart-grid">
+      <app-financial-chart
+        title="Can recorded cash cover payables?"
+        description="A balance comparison. Payables are obligations, not part of an asset mix; their due dates are not available."
+        [rows]="liquidityRows()"
+      />
+      <app-financial-chart
+        title="Company performance on books"
+        description="Source-period revenue and expenses. Negative results extend left of zero. Select a company to investigate its expenses."
+        [rows]="companyRows()"
+      />
     </div>
-
-    <article class="panel">
-      <header>
-        <div>
-          <h2><app-icon name="bank" /> Where the money sits</h2>
-          <p>Every bank and cash ledger, so funds can be moved between companies if needed.</p>
-        </div>
-      </header>
-      <div class="table-wrap compact">
-        <table>
-          <thead>
-            <tr>
-              <th>Account</th>
-              <th>Company</th>
-              <th>Type</th>
-              <th class="num">Available</th>
-            </tr>
-          </thead>
-          <tbody>
-            @if (!funds().accounts.length) {
-              <tr><td class="empty" colspan="4">No bank or cash ledgers in the current extract.</td></tr>
-            } @else {
-              @for (account of funds().accounts; track account.companyId + account.name) {
-                <tr>
-                  <td><strong>{{ clean(account.name) }}</strong></td>
-                  <td>{{ clean(account.companyName) }}</td>
-                  <td>
-                    <span class="account-kind">
-                      <app-icon [name]="account.kind === 'bank' ? 'bank' : 'cash'" />
-                      {{ account.kind === 'bank' ? 'Bank' : 'Cash' }}
-                    </span>
-                  </td>
-                  <td class="num" [title]="fullInr(account.available)">{{ compactInr(account.available) }}</td>
-                </tr>
-              }
-            }
-          </tbody>
-        </table>
+    @if (dashboard.books.ledgerCount && funds(); as fund) {
+      <section class="kpi-grid" aria-label="Funding and budget indicators">
+        <app-kpi-card
+          label="Bank balance"
+          [value]="compactInr(fund.bank)"
+          [detail]="fullInr(fund.bank)"
+          hint="Bank ledgers only; cash ledgers excluded."
+        />
+        <app-kpi-card
+          [label]="fund.lastMonth.label + ' recorded spending activity'"
+          [value]="compactInr(fund.lastMonth.expenses)"
+          hint="Reported payments, purchases and debit notes. Zero can also mean missing activity."
+        />
+        <app-kpi-card
+          label="Next 3-month spending budget"
+          [value]="compactInr(fund.threeMonthBudget)"
+          [detail]="fullInr(fund.threeMonthBudget)"
+          hint="Run-rate estimate, not an approved budget."
+        />
+        <app-kpi-card
+          label="Model runway"
+          [value]="runway()"
+          hint="Cash and bank divided by net monthly model burn. Depends on source coverage and activity classifications."
+        />
+        <app-kpi-card
+          label="Headroom after 3-month budget"
+          [value]="compactInr(fund.uncommitted - fund.threeMonthBudget)"
+          [detail]="fullInr(fund.uncommitted - fund.threeMonthBudget)"
+          hint="Cash less recorded payables and estimated spending; excludes future inflow and may overlap existing payables."
+        />
+        <app-kpi-card
+          label="Payables on books"
+          [value]="compactInr(fund.payables)"
+          [detail]="fullInr(fund.payables)"
+          hint="Outstanding ledger balances; due dates are not provided."
+        />
+      </section>
+      <div class="chart-grid">
+        <app-financial-chart
+          title="Monthly voucher activity"
+          description="Latest six recorded months. Sales and receipts, or purchases and payments, may include an invoice and its settlement; these are not verified cash flows."
+          [rows]="activityRows()"
+        />
+        <app-financial-chart
+          title="3-month funding model"
+          description="Estimated balances based on the existing run-rate model. Validate timing, source coverage and double counting before using this for funding decisions."
+          [rows]="forecastRows()"
+        />
       </div>
-    </article>
-
-    <div class="charts">
       <article class="panel">
-        <header>
-          <div>
-            <h2><app-icon name="reports" /> Company comparison</h2>
-            <p>Revenue, expenses, and profit from promoted source dump ledgers.</p>
-          </div>
-        </header>
-        @if (!companyChart().columns.length) {
-          <p class="empty-copy">No company balances to chart yet.</p>
-        } @else {
-          <div class="bar-chart" role="img" aria-label="Revenue, expenses, and profit by company">
-            <div class="bar-scale" aria-hidden="true">
-              <span>{{ compactInr(companyChart().max) }}</span>
-              <span>{{ compactInr(companyChart().mid) }}</span>
-              <span>₹0</span>
-            </div>
-            <div class="bar-plot">
-              <div class="bar-grid" aria-hidden="true"><i></i><i></i><i></i></div>
-              <div class="bar-groups">
-                @for (col of companyChart().columns; track col.id) {
-                  <div class="bar-group">
-                    <div class="bar-cluster">
-                      <span class="stem revenue" [style.height.%]="col.revenuePct" [title]="'Revenue · ' + fullInr(col.revenue)"></span>
-                      <span class="stem expenses" [style.height.%]="col.expensesPct" [title]="'Expenses · ' + fullInr(col.expenses)"></span>
-                      <span class="stem profit" [class.loss]="col.profit < 0" [style.height.%]="col.profitPct" [title]="'Profit · ' + fullInr(col.profit)"></span>
-                    </div>
-                    <span class="bar-label" [title]="col.name">{{ col.short }}</span>
-                  </div>
-                }
-              </div>
-            </div>
-          </div>
-          <div class="chart-legend">
-            <span><i class="revenue"></i> Revenue</span>
-            <span><i class="expenses"></i> Expenses</span>
-            <span><i class="profit"></i> Profit</span>
-          </div>
-        }
-      </article>
-
-      <article class="panel">
-        <header>
-          <div>
-            <h2><app-icon name="receivables" /> Liquidity mix</h2>
-            <p>Receivables, payables, and cash as a share of working capital.</p>
-          </div>
-        </header>
-        @if (!mixChart().total) {
-          <p class="empty-copy">No receivables, payables, or cash balances to chart yet.</p>
-        } @else {
-          <div class="donut-wrap">
-            <div class="donut-fig">
-              <svg viewBox="0 0 160 160" aria-hidden="true">
-                <circle cx="80" cy="80" r="56" fill="none" stroke="#eef3f8" stroke-width="16"></circle>
-                @for (seg of mixChart().segments; track seg.key) {
-                  @if (seg.d) {
-                    <path [attr.d]="seg.d" fill="none" [attr.stroke]="seg.color" stroke-width="16" stroke-linecap="butt"></path>
-                  }
-                }
-              </svg>
-              <div class="donut-center">
-                <small>Total</small>
-                <strong class="num" [title]="fullInr(mixChart().total)">{{ compactInr(mixChart().total) }}</strong>
-              </div>
-            </div>
-            <ul class="legend-list">
-              @for (seg of mixChart().segments; track seg.key) {
-                <li>
-                  <i [style.background]="seg.color"></i>
-                  <span>{{ seg.label }}</span>
-                  <em>{{ seg.pct }}%</em>
-                  <strong class="num" [title]="fullInr(seg.value)">{{ compactInr(seg.value) }}</strong>
-                </li>
-              }
-            </ul>
-          </div>
-        }
-      </article>
-    </div>
-
-    <article class="panel">
-      <header>
-        <div>
-          <h2><app-icon name="company" /> Company financials</h2>
-          <p>Balances taken from the latest source dump. Revenue uses sales and income groups.</p>
-        </div>
-      </header>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Company</th>
-              <th class="num">Ledgers</th>
-              <th class="num">Vouchers</th>
-              <th>Revenue</th>
-              <th>Expenses</th>
-              <th>Profit</th>
-              <th>Receivables</th>
-              <th>Payables</th>
-              <th>Cash</th>
-            </tr>
-          </thead>
-          <tbody>
-            @for (row of dashboard.companyFinancials; track row.id) {
-              <tr>
-                <td>
-                  <div class="entity">
-                    <span class="avatar">{{ initials(row.name) }}</span>
-                    <strong>{{ row.name }}</strong>
-                  </div>
-                </td>
-                <td class="num">{{ row.ledgerCount || 0 }}</td>
-                <td class="num">{{ row.voucherCount || 0 }}</td>
-                <td class="num" [title]="fullInr(row.revenue)">{{ compactInr(row.revenue) }}</td>
-                <td class="num" [title]="fullInr(row.expenses)">{{ compactInr(row.expenses) }}</td>
-                <td class="num" [class.up]="row.profit >= 0" [class.down]="row.profit < 0" [title]="fullInr(row.profit)">{{ compactInr(row.profit) }}</td>
-                <td class="num" [title]="fullInr(row.receivables)">{{ compactInr(row.receivables) }}</td>
-                <td class="num" [title]="fullInr(row.payables)">{{ compactInr(row.payables) }}</td>
-                <td class="num" [title]="fullInr(row.cashAndBank || row.cash)">{{ compactInr(row.cashAndBank || row.cash) }}</td>
-              </tr>
-            }
-          </tbody>
-        </table>
-      </div>
-    </article>
-
-    <div class="split">
-      <article class="panel">
-        <header>
-          <div>
-            <h2><app-icon name="ledgers" /> Ledger groups</h2>
-            <p>{{ dashboard.books.groups.length }} groups across {{ dashboard.books.ledgerCount }} ledgers</p>
-          </div>
-        </header>
-        <div class="table-wrap tall">
-          <table>
-            <thead>
-              <tr>
-                <th>Group</th>
-                <th class="num">Ledgers</th>
-                <th class="num">Balance</th>
-              </tr>
-            </thead>
-            <tbody>
-              @if (!dashboard.books.groups.length) {
-                <tr><td class="empty" colspan="3">No ledger groups in the current extract.</td></tr>
-              } @else {
-                @for (group of dashboard.books.groups; track group.name) {
-                  <tr>
-                    <td>{{ clean(group.name) }}</td>
-                    <td class="num">{{ group.count }}</td>
-                    <td class="num">{{ fullInr(group.balance) }}</td>
-                  </tr>
-                }
-              }
-            </tbody>
-          </table>
-        </div>
-      </article>
-
-      <article class="panel">
-        <header>
-          <div>
-            <h2><app-icon name="budget" /> Projects</h2>
+        <details>
+          <summary>Model assumptions and data limits</summary>
+          <div class="section-copy">
             <p>
-              @if (dashboard.work.items.length) {
-                {{ dashboard.work.totals.total }} cost centres ·
-                {{ dashboard.work.totals.voucherCount || 0 }} linked vouchers ·
-                invested {{ compactInr(dashboard.work.totals.invested || 0) }} ·
-                earned {{ compactInr(dashboard.work.totals.earned || 0) }}
-              } @else {
-                Linked only when Tally tagged a voucher with exactly one cost centre
-              }
+              Model basis:
+              {{
+                fund.runRate.method === 'ledgers'
+                  ? 'ledger balances spread over the financial year'
+                  : 'averages of complete months with recorded activity'
+              }}
+              · {{ fund.runRate.monthsUsed }} months used.
+            </p>
+            <p>
+              Monthly model inflow {{ fullInr(fund.runRate.monthlyInflow) }}; monthly model spending
+              {{ fullInr(fund.runRate.monthlyExpense) }}. Three-month spending estimate
+              {{ fullInr(fund.threeMonthBudget) }}.
+            </p>
+            <p>
+              The model starts with reported cash and bank balances, then adds typical inflow and
+              subtracts typical spending. It does not separately schedule existing payables or
+              receivables. It is not an approved budget.
+            </p>
+            <p>
+              Company results use current ledger group balances, without a verified reporting period
+              or consolidation eliminations. Bank balances are source-reported, not reconciled
+              availability. Invoice ageing, restricted cash and audited net profit are unavailable.
+            </p>
+          </div>
+        </details>
+      </article>
+      <article class="panel">
+        <header>
+          <div>
+            <h2>Company funding position</h2>
+            <p>
+              Keep individual company obligations visible even when the combined balance is
+              positive.
             </p>
           </div>
         </header>
-        @if (!dashboard.work.items.length) {
-          <p class="empty-copy">No cost-centre tags were found on the current Tally dump. Vouchers without a single project name stay unlinked.</p>
-        } @else {
-          <div class="table-wrap tall">
-            <table>
-              <thead>
-                <tr>
-                  <th>Project</th>
-                  <th class="num">Vouchers</th>
-                  <th class="num">Invested</th>
-                  <th class="num">Earned</th>
-                  <th class="num">Net</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (item of dashboard.work.items; track item.id) {
-                  <tr>
-                    <td>
-                      <a routerLink="/transactions" [queryParams]="{ company: item.companyId, q: item.name }">{{ item.name }}</a>
-                      <small>{{ item.companyName }}</small>
-                    </td>
-                    <td class="num">{{ item.voucherCount || 0 }}</td>
-                    <td class="num" [title]="fullInr(item.invested || 0)">{{ compactInr(item.invested || 0) }}</td>
-                    <td class="num" [title]="fullInr(item.earned || 0)">{{ compactInr(item.earned || 0) }}</td>
-                    <td class="num" [class.up]="(item.net || 0) >= 0" [class.down]="(item.net || 0) < 0" [title]="fullInr(item.net || 0)">{{ compactInr(item.net || 0) }}</td>
-                  </tr>
-                }
-              </tbody>
-            </table>
-          </div>
-        }
+        <app-data-table
+          label="Company funding position"
+          [rows]="fund.byCompany"
+          [columns]="fundColumns"
+          [rowKey]="recordKey"
+        />
       </article>
-    </div>
+      <article class="panel">
+        <header>
+          <div>
+            <h2>Company totals</h2>
+            <p>
+              Sum of the company funding rows above. Spending includes estimates where the source
+              lacks usable activity; no consolidation eliminations.
+            </p>
+          </div>
+        </header>
+        <app-data-table
+          label="Company funding totals"
+          [rows]="fundTotalRows()"
+          [columns]="totalColumns"
+          [rowKey]="recordKey"
+        />
+      </article>
+      <article class="panel">
+        <details>
+          <summary>Bank and cash account details ({{ fund.accounts.length }})</summary>
+          <app-data-table
+            label="Bank and cash accounts"
+            [rows]="fund.accounts"
+            [columns]="accountColumns"
+            [rowKey]="accountKey"
+          />
+        </details>
+      </article>
+    }
+    <article class="panel">
+      <details>
+        <summary>Company financial records ({{ dashboard.companyFinancials.length }})</summary>
+        <app-data-table
+          label="Company financial records"
+          [rows]="dashboard.companyFinancials"
+          [columns]="companyColumns"
+          [rowKey]="recordKey"
+        />
+      </details>
+    </article>
+    <article class="panel">
+      <header>
+        <div>
+          <h2>Ledger groups</h2>
+          <p>
+            {{ dashboard.books.groups.length }} groups; signed balances from the source. Open a
+            group to inspect its ledgers.
+          </p>
+        </div>
+      </header>
+      <app-data-table
+        label="Ledger group balances"
+        [rows]="dashboard.books.groups"
+        [columns]="groupColumns"
+        [rowKey]="groupKey"
+      />
+    </article>
+    <article class="panel">
+      <header>
+        <div>
+          <h2>Projects</h2>
+          <p>
+            Cost-centre-linked voucher activity for this selection. Amount completeness is not
+            reported by this dashboard endpoint.
+          </p>
+        </div>
+        <a class="btn ghost" routerLink="/reports" [queryParams]="{ company: selectedCompany() }"
+          >Project report</a
+        >
+      </header>
+      <div class="section-copy">
+        <app-project-summary
+          [count]="dashboard.work.totals.total"
+          [vouchers]="dashboard.work.totals.voucherCount"
+          [totals]="dashboard.work.totals"
+        />
+      </div>
+      <app-data-table
+        label="Dashboard projects"
+        [rows]="dashboard.work.items"
+        [columns]="projectColumns"
+        [rowKey]="recordKey"
+      />
+    </article>
+    <p class="section-copy">
+      Figures are in INR. Snapshot retrieved
+      {{ dashboard.generatedAt | date: 'dd MMM yyyy, HH:mm' }}; this is not the source accounting
+      date.
+    </p>
   }
 </section>

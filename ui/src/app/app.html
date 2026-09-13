@@ -1,52 +1,71 @@
-@if (!auth.ready()) {
-  <div class="boot">Loading console…</div>
+﻿@if (!auth.ready()) {
+  <div class="boot" role="status">Loading console…</div>
 } @else if (auth.user(); as user) {
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <ng-template #navigation>
+    <nav aria-label="Main navigation">
+      @for (link of links; track link.path) {
+        <a
+          class="nav-link"
+          [routerLink]="link.path"
+          routerLinkActive="active"
+          ariaCurrentWhenActive="page"
+          (click)="closeMenu()"
+          ><app-icon [name]="link.icon" />{{ link.label }}</a
+        >
+      }
+      <button type="button" class="nav-link sign-out" (click)="logout()">
+        <app-icon name="logout" />Sign out
+      </button>
+    </nav>
+    <div class="sidebar-foot">
+      <p class="signed-in">Signed in as {{ user.name }}</p>
+      <p>Tally is the system of record.</p>
+    </div>
+  </ng-template>
   <div class="shell">
-    <aside class="sidebar">
+    <aside class="sidebar desktop-sidebar">
       <div class="brand">
         <span class="mark" aria-hidden="true">H</span>
-        <div>
-          <strong>Helior Finance</strong>
-          <span>Executive console</span>
-        </div>
+        <div><strong>Helior Finance</strong><span>Executive console</span></div>
       </div>
-
-      <nav>
-        <a class="nav-link" routerLink="/dashboard" routerLinkActive="active">
-          <app-icon name="overview" />
-          Overview
-        </a>
-        <a class="nav-link" routerLink="/reports" routerLinkActive="active">
-          <app-icon name="reports" />
-          Reports
-        </a>
-        <a class="nav-link" routerLink="/ledgers" routerLinkActive="active">
-          <app-icon name="ledgers" />
-          Ledgers
-        </a>
-        <a class="nav-link" routerLink="/transactions" routerLinkActive="active">
-          <app-icon name="transactions" />
-          Transactions
-        </a>
-        <a class="nav-link" routerLink="/operations" routerLinkActive="active">
-          <app-icon name="operations" />
-          Operations
-        </a>
-        <button type="button" class="nav-link sign-out" (click)="auth.logout()">
-          <app-icon name="logout" />
-          Sign out
-        </button>
-      </nav>
-
-      <div class="sidebar-foot">
-        <p class="signed-in">Signed in as {{ user.name }}</p>
-        <p class="hint">Books come from dumped Tally source records. Each dump is applied incrementally.</p>
-      </div>
+      <ng-container [ngTemplateOutlet]="navigation" />
     </aside>
-
-    <main class="main">
-      <router-outlet />
-    </main>
+    <header class="mobile-header">
+      <a routerLink="/dashboard" class="mobile-brand">Helior Finance</a>
+      <button
+        type="button"
+        class="btn menu-toggle"
+        aria-controls="mobile-menu"
+        [attr.aria-expanded]="menuOpen()"
+        (click)="openMenu()"
+      >
+        <app-icon name="menu" />Menu
+      </button>
+    </header>
+    <dialog
+      #menu
+      id="mobile-menu"
+      class="mobile-menu"
+      aria-labelledby="menu-title"
+      (close)="menuOpen.set(false)"
+      (cancel)="menuOpen.set(false)"
+      (click)="dismissBackdrop($event)"
+    >
+      <div class="menu-heading">
+        <h2 id="menu-title">Navigation</h2>
+        <button
+          type="button"
+          class="btn close-menu"
+          aria-label="Close navigation"
+          (click)="closeMenu()"
+        >
+          <app-icon name="close" />
+        </button>
+      </div>
+      <ng-container [ngTemplateOutlet]="navigation" />
+    </dialog>
+    <main id="main-content" class="main" tabindex="-1"><router-outlet /></main>
   </div>
 } @else {
   <router-outlet />

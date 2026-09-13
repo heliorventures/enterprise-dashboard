@@ -9,7 +9,6 @@
   width: 100%;
   max-width: 100%;
   min-height: 100vh;
-  overflow-x: hidden;
 }
 
 .sidebar {
@@ -19,6 +18,7 @@
   top: 0;
   min-width: 0;
   height: 100vh;
+  overflow-y: auto;
   background: linear-gradient(180deg, #17375f 0%, #10284a 58%, #0c1f3a 100%);
   color: var(--sidebar-text);
   border-right: 0;
@@ -144,25 +144,94 @@ nav {
 
 .main {
   min-width: 0;
-  padding: 40px 48px 56px;
+  scroll-margin-top: 84px;
+  padding: 32px clamp(20px, 3vw, 48px) 56px;
+}
+
+.mobile-header {
+  display: none;
 }
 
 @media (max-width: 900px) {
   .shell {
     grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
   }
 
-  .sidebar {
-    position: static;
-    height: auto;
-    padding-bottom: 16px;
-  }
-
-  .sidebar-foot .hint {
+  .desktop-sidebar {
     display: none;
+  }
+  .mobile-header {
+    display: flex;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px max(16px, env(safe-area-inset-right)) 10px max(16px, env(safe-area-inset-left));
+    background: var(--sidebar);
+    color: white;
+  }
+  .mobile-brand {
+    color: inherit;
+    font-weight: 650;
+    text-decoration: none;
+  }
+  .menu-toggle {
+    width: auto;
   }
 
   .main {
-    padding: 24px 16px 40px;
+    padding: 24px max(16px, env(safe-area-inset-right)) max(40px, env(safe-area-inset-bottom))
+      max(16px, env(safe-area-inset-left));
   }
+}
+.mobile-menu {
+  position: fixed;
+  inset: 0 auto 0 0;
+  margin: 0;
+  width: min(340px, 90vw);
+  max-width: 90vw;
+  height: 100dvh;
+  max-height: 100dvh;
+  border: 0;
+  padding: 20px;
+  background: var(--sidebar);
+  color: var(--sidebar-text);
+  overscroll-behavior: contain;
+}
+.mobile-menu::backdrop {
+  background: rgba(8, 18, 36, 0.6);
+}
+.mobile-menu[open] {
+  display: flex;
+  flex-direction: column;
+}
+.menu-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.menu-heading h2 {
+  margin: 0;
+  font-size: 20px;
+}
+.close-menu {
+  width: 44px;
+}
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 10;
+  padding: 12px;
+  background: white;
+  color: var(--accent);
+  transform: translateY(-160%);
+}
+.skip-link:focus {
+  transform: translateY(0);
 }

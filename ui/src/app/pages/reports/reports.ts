@@ -1,14 +1,51 @@
-import { DatePipe } from '@angular/common';
+import { ProjectSummary, projectActivityColumns } from '../../shared/finance-summary';
+import { CompanySelect } from '../../shared/company-select';
 import { Component, computed, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
-import { CompanyOption, ExpenseCompany, ExpenseGroup, ExpenseLedger, ExpenseReport, ProjectReport, ProjectResult, VoucherRow } from '../../models/books';
+import {
+  CompanyOption,
+  ExpenseReport,
+  ProjectReport,
+  ProjectResult,
+  VoucherRow,
+} from '../../models/books';
 import { DashboardService } from '../../services/dashboard';
-import { Icon } from '../../shared/icon';
+import { DataColumn, DataTable, RecordLink } from '../../shared/data-table';
+import { ChartRow, FinancialChart } from '../../shared/financial-chart';
+import { KpiCard } from '../../shared/kpi-card';
+import { PageHeader } from '../../shared/page-header';
+import { LatestRequest } from '../../shared/latest-request';
+import {
+  balanceTone,
+  cleanText,
+  monthEnd,
+  recordKey,
+  voucherColumns,
+} from '../../shared/record-columns';
 import { compactInr, fullInr } from '../../shared/money';
+
+interface ExpenseView {
+  id: string;
+  name: string;
+  amount: number;
+  ledgers: number;
+  groups?: number;
+  payments?: RecordLink;
+  link: RecordLink;
+}
 
 @Component({
   selector: 'app-reports',
-  imports: [DatePipe, RouterLink, Icon],
+  imports: [
+    ProjectSummary,
+    CompanySelect,
+    RouterLink,
+    DataTable,
+    FinancialChart,
+    KpiCard,
+    PageHeader,
+  ],
   templateUrl: './reports.html',
   styleUrl: './reports.css',
 })
@@ -16,170 +53,212 @@ export class Reports {
   private readonly api = inject(DashboardService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
-
+  private readonly reportRequest = new LatestRequest();
+  private readonly projectRequest = new LatestRequest();
+  private readonly voucherRequest = new LatestRequest();
   readonly company = signal('all');
   readonly group = signal('');
   readonly loading = signal(true);
   readonly error = signal('');
   readonly report = signal<ExpenseReport | null>(null);
   readonly projects = signal<ProjectReport | null>(null);
+  readonly projectError = signal('');
+  readonly loadingProjects = signal(true);
   readonly vouchers = signal<VoucherRow[]>([]);
   readonly voucherTotal = signal(0);
   readonly loadingVouchers = signal(false);
+  readonly voucherError = signal('');
   readonly companies = signal<CompanyOption[]>([]);
-
   readonly compactInr = compactInr;
   readonly fullInr = fullInr;
-
-  readonly selectedCompany = computed(() => {
-    const id = this.company();
-    if (id === 'all') return null;
-    return this.report()?.companies.find((row) => row.id === id) || null;
+  readonly lastMonthEnd = monthEnd;
+  readonly recordKey = recordKey;
+  readonly voucherColumns = voucherColumns;
+  readonly selectedCompany = computed(() =>
+    this.report()?.companies.find((r) => r.id === this.company()),
+  );
+  readonly selectedGroup = computed(() =>
+    this.selectedCompany()?.groups.find((r) => r.name === this.group()),
+  );
+  readonly level = computed(() =>
+    this.group() ? 'ledgers' : this.company() !== 'all' ? 'groups' : 'companies',
+  );
+  readonly expenseRows = computed<ExpenseView[]>(() => {
+    if (this.group())
+      return (this.selectedGroup()?.ledgers || []).map((r) => ({
+        id: String(r.id),
+        name: cleanText(r.name),
+        amount: r.balance,
+        ledgers: 1,
+        payments: {
+          path: '/transactions',
+          query: {
+            company: r.companyId,
+            q: r.name,
+            from: this.report()!.lastMonth.from,
+            to: monthEnd(this.report()!.lastMonth.from),
+          },
+        },
+        link: { path: '/ledgers', query: { company: r.companyId, group: r.group, q: r.name } },
+      }));
+    if (this.company() !== 'all')
+      return (this.selectedCompany()?.groups || []).map((r) => ({
+        id: r.name,
+        name: cleanText(r.name),
+        amount: r.total,
+        ledgers: r.ledgerCount,
+        link: { path: '/reports', query: { company: this.company(), group: r.name } },
+      }));
+    return (this.report()?.companies || []).map((r) => ({
+      id: r.id,
+      name: r.name,
+      amount: r.total,
+      ledgers: r.ledgerCount,
+      groups: r.groups.length,
+      link: { path: '/reports', query: { company: r.id } },
+    }));
   });
-
-  readonly selectedGroup = computed(() => {
-    const name = this.group();
-    if (!name) return null;
-    return this.selectedCompany()?.groups.find((row) => row.name === name) || null;
+  readonly expenseTotal = computed(() => this.expenseRows().reduce((sum, r) => sum + r.amount, 0));
+  readonly expenseChart = computed<ChartRow[]>(() => {
+    const rows = [...this.expenseRows()].sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+    const result: ChartRow[] = rows.slice(0, 6).map((r) => ({
+      key: r.id,
+      label: r.name,
+      link: r.link,
+      values: [{ label: 'On books', value: r.amount }],
+    }));
+    if (rows.length > 6)
+      result.push({
+        key: '__remaining',
+        label: `Remaining ${rows.length - 6} entries`,
+        values: [
+          {
+            label: 'Combined on books',
+            value: rows.slice(6).reduce((sum, r) => sum + r.amount, 0),
+            tone: 'muted',
+          },
+        ],
+      });
+    return result;
   });
-
-  readonly rows = computed(() => {
-    const company = this.selectedCompany();
-    const group = this.selectedGroup();
-    if (group) return group.ledgers;
-    if (company) return company.groups;
-    return this.report()?.companies || [];
-  });
-
-  readonly projectRows = computed(() => {
-    return this.projects()?.companies.flatMap((company) => company.projects) || [];
-  });
-
-  readonly level = computed(() => {
-    if (this.selectedGroup()) return 'ledgers';
-    if (this.selectedCompany()) return 'groups';
-    return 'companies';
-  });
+  readonly projectRows = computed(
+    () => this.projects()?.companies.flatMap((c) => c.projects) || [],
+  );
+  readonly projectChart = computed<ChartRow[]>(() =>
+    [...this.projectRows()]
+      .filter((r) => r.withAmount > 0)
+      .sort((a, b) => a.net - b.net)
+      .slice(0, 6)
+      .map((r) => ({
+        key: r.id,
+        label: r.name,
+        note: `${r.companyName} · ${r.withAmount}/${r.voucherCount} vouchers have non-zero amounts`,
+        link: { path: '/transactions', query: { company: r.companyId, q: r.name } },
+        values: [{ label: 'Earned less invested (voucher model)', value: r.net, tone: 'positive' }],
+      })),
+  );
+  readonly expenseColumns = computed<DataColumn<ExpenseView>[]>(() => [
+    { key: 'name', label: 'Company / group / ledger', value: (r) => r.name, link: (r) => r.link },
+    ...(this.level() === 'companies'
+      ? [
+          {
+            key: 'groups',
+            label: 'Groups',
+            value: (r: ExpenseView) => String(r.groups),
+            primary: true,
+          },
+        ]
+      : []),
+    {
+      key: 'amount',
+      label: 'On books',
+      value: (r) => fullInr(r.amount),
+      numeric: true,
+      primary: true,
+    },
+    { key: 'ledgers', label: 'Ledgers', value: (r) => String(r.ledgers), primary: true },
+    ...(this.level() === 'ledgers'
+      ? [
+          {
+            key: 'payments',
+            label: 'Payments / activity',
+            value: () => 'Review matching vouchers',
+            link: (r: ExpenseView) => r.payments!,
+            primary: true,
+          },
+        ]
+      : []),
+  ]);
+  readonly projectColumns = projectActivityColumns;
 
   constructor() {
-    this.api.getDashboard('all').subscribe({
-      next: (dashboard) => this.companies.set(dashboard.companies),
-      error: () => undefined,
-    });
-    this.route.queryParamMap.subscribe((params) => {
+    this.api
+      .getDashboard('all')
+      .pipe(takeUntilDestroyed())
+      .subscribe({ next: (d) => this.companies.set(d.companies), error: () => undefined });
+    this.route.queryParamMap.pipe(takeUntilDestroyed()).subscribe((params) => {
       this.company.set(params.get('company') || 'all');
       this.group.set(params.get('group') || '');
       this.load();
     });
   }
-
   load() {
     this.loading.set(true);
     this.error.set('');
-    this.api.getExpenseReport(this.company()).subscribe({
+    this.report.set(null);
+    this.projects.set(null);
+    this.vouchers.set([]);
+    this.voucherTotal.set(0);
+    this.voucherError.set('');
+    this.voucherRequest.cancel();
+    this.reportRequest.run(this.api.getExpenseReport(this.company()), {
       next: (report) => {
         this.report.set(report);
         this.loading.set(false);
-        this.loadProjects();
-        this.loadVouchers();
+        this.loadVouchers(report);
       },
-      error: (err) => {
-        this.error.set(err.error?.error || 'Unable to load the expense report. Confirm the API is running on port 3000.');
+      error: () => {
+        this.error.set('Expense data could not be loaded. Retry to view this selection.');
         this.loading.set(false);
       },
     });
-  }
-
-  loadProjects() {
-    this.api.getProjectReport(this.company()).subscribe({
-      next: (report) => this.projects.set(report),
-      error: () => this.projects.set(null),
+    this.loadingProjects.set(true);
+    this.projectError.set('');
+    this.projectRequest.run(this.api.getProjectReport(this.company()), {
+      next: (report) => {
+        this.projects.set(report);
+        this.loadingProjects.set(false);
+      },
+      error: () => {
+        this.projectError.set('Project data could not be loaded.');
+        this.loadingProjects.set(false);
+      },
     });
   }
-
-  openProject(row: ProjectResult) {
-    this.router.navigate(['/transactions'], {
-      queryParams: { company: row.companyId, q: row.name },
-    });
-  }
-
-  loadVouchers() {
-    const report = this.report();
-    if (!report) {
-      this.vouchers.set([]);
-      return;
-    }
+  private loadVouchers(report: ExpenseReport) {
     this.loadingVouchers.set(true);
-    this.api
-      .getVouchers({
+    this.voucherRequest.run(
+      this.api.getVouchers({
         company: this.company(),
         from: report.lastMonth.from,
-        to: this.lastMonthEnd(report.lastMonth.from),
+        to: monthEnd(report.lastMonth.from),
         page: 1,
         pageSize: 25,
-      })
-      .subscribe({
+      }),
+      {
         next: (result) => {
           this.vouchers.set(result.items);
           this.voucherTotal.set(result.total);
           this.loadingVouchers.set(false);
         },
         error: () => {
-          this.vouchers.set([]);
+          this.voucherError.set('Voucher activity could not be loaded.');
           this.loadingVouchers.set(false);
         },
-      });
-  }
-
-  openCompany(row: ExpenseCompany) {
-    this.router.navigate(['/reports'], { queryParams: { company: row.id } });
-  }
-
-  openGroup(row: ExpenseGroup) {
-    const company = this.selectedCompany();
-    if (!company) return;
-    this.router.navigate(['/reports'], { queryParams: { company: company.id, group: row.name } });
-  }
-
-  openLedger(row: ExpenseLedger) {
-    this.router.navigate(['/ledgers'], {
-      queryParams: { company: row.companyId, group: row.group, q: row.name },
-    });
-  }
-
-  openPayments(row?: ExpenseLedger) {
-    const report = this.report();
-    this.router.navigate(['/transactions'], {
-      queryParams: {
-        company: row?.companyId || this.company(),
-        q: row?.name || this.group(),
-        from: report?.lastMonth.from || '',
-        to: report ? this.lastMonthEnd(report.lastMonth.from) : '',
       },
-    });
+    );
   }
-
-  onCompany(event: Event) {
-    const value = (event.target as HTMLSelectElement).value;
-    this.router.navigate(['/reports'], { queryParams: value === 'all' ? {} : { company: value } });
-  }
-
-  up() {
-    if (this.group()) {
-      this.router.navigate(['/reports'], { queryParams: { company: this.company() } });
-      return;
-    }
-    this.router.navigate(['/reports']);
-  }
-
-  clean(value: string) {
-    return (value || '').replace(/\u0004/g, '').trim();
-  }
-
-  lastMonthEnd(from: string) {
-    const date = new Date(`${from}T00:00:00`);
-    date.setMonth(date.getMonth() + 1);
-    date.setDate(0);
-    return date.toISOString().slice(0, 10);
+  onCompany(value: string) {
+    void this.router.navigate(['/reports'], { queryParams: { company: value } });
   }
 }

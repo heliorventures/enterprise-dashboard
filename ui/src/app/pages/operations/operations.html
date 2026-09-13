@@ -1,22 +1,34 @@
 <section class="grid-page">
-  <header>
-    <div>
-      <p class="eyebrow">Operations</p>
-      <h1>Tally sync</h1>
-    </div>
-    <button type="button" class="btn primary" (click)="syncTally()" [disabled]="loading() || syncing()">
-      <app-icon name="sync" />
-      {{ syncing() ? 'Syncing…' : 'Sync Tally' }}
+  <app-page-header
+    title="Data operations"
+    eyebrow="Source reliability"
+    description="Review import status and failures before relying on financial balances."
+  >
+    <button type="button" class="btn ghost" (click)="loadSync()" [disabled]="loading()">
+      Refresh status
     </button>
-  </header>
+    <button
+      type="button"
+      class="btn primary"
+      (click)="syncTally()"
+      [disabled]="loading() || syncing()"
+    >
+      <app-icon name="sync" />{{ syncing() ? 'Syncing…' : 'Sync Tally' }}
+    </button>
+  </app-page-header>
 
   @if (error()) {
-    <p class="banner">{{ error() }}</p>
+    <p class="banner" role="alert">{{ error() }}</p>
   }
 
   @if (currentSync(); as run) {
     <div class="meta-row">
-      <span class="pill" [class.ok]="run.status === 'ok'" [class.warn]="run.status === 'running'" [class.danger]="run.status === 'error'">
+      <span
+        class="pill"
+        [class.ok]="run.status === 'ok'"
+        [class.warn]="run.status === 'running'"
+        [class.danger]="run.status === 'error'"
+      >
         <i></i>
         {{ syncStatus(run.status) }}
       </span>
@@ -30,70 +42,37 @@
     <div class="grid-toolbar">
       <div>
         <h2><app-icon name="sync" /> Current run</h2>
-        <p>Promotes the latest dumped source records into the books. Unchanged rows are left alone.</p>
+        <p>
+          Promotes the latest dumped source records into the books. Unchanged rows are left alone.
+        </p>
       </div>
     </div>
 
     @if (currentSync(); as run) {
       <div class="run-summary">
-        <div class="sync-progress" role="progressbar" [attr.aria-valuenow]="run.progress" aria-valuemin="0" aria-valuemax="100">
+        <div
+          class="sync-progress"
+          role="progressbar"
+          aria-label="Import progress"
+          [attr.aria-valuenow]="run.progress"
+          aria-valuemin="0"
+          aria-valuemax="100"
+        >
           <span [style.width.%]="run.progress"></span>
         </div>
         <p>{{ run.message || 'Waiting for source dumps' }}</p>
       </div>
     }
 
-    <div class="table-wrap">
-      <table class="data-table companies">
-        <thead>
-          <tr>
-            <th>Company</th>
-            <th>Status</th>
-            <th>Progress</th>
-            <th>Change</th>
-          </tr>
-        </thead>
-        <tbody>
-          @if (loading() && !currentSync()) {
-            <tr><td class="empty" colspan="4">Loading sync history…</td></tr>
-          } @else if (currentSync(); as run) {
-            @if (!run.companies.length) {
-              <tr><td class="empty" colspan="4">No source dumps were available. Use Sync Tally after a dump is in the database.</td></tr>
-            } @else {
-              @for (company of run.companies; track company.id) {
-                <tr>
-                  <td class="wrap">
-                    <strong>{{ clean(company.companyName) }}</strong>
-                    @if (company.batchId) {
-                      <small>{{ company.batchId }}</small>
-                    }
-                  </td>
-                  <td>
-                    <span class="side" [class.ok]="company.status === 'ok'" [class.warn]="company.status === 'running'" [class.danger]="company.status === 'error'" [class.skip]="company.status === 'skipped' || company.status === 'pending'">
-                      {{ syncStatus(company.status) }}
-                    </span>
-                  </td>
-                  <td>
-                    <div class="progress-cell">
-                      <span class="bar"><i [style.width.%]="company.progress"></i></span>
-                      <span class="num">{{ company.progress }}%</span>
-                    </div>
-                  </td>
-                  <td class="wrap">
-                    <strong>{{ changeLabel(company).primary }}</strong>
-                    @if (changeLabel(company).secondary) {
-                      <small>{{ changeLabel(company).secondary }}</small>
-                    }
-                  </td>
-                </tr>
-              }
-            }
-          } @else {
-            <tr><td class="empty" colspan="4">No source dumps were available. Use Sync Tally after a dump is in the database.</td></tr>
-          }
-        </tbody>
-      </table>
-    </div>
+    <app-data-table
+      label="Company import status"
+      [rows]="currentSync()?.companies || []"
+      [columns]="companyColumns"
+      [rowKey]="recordKey"
+      [loading]="loading()"
+      [error]="error()"
+      empty="No source dumps are available yet."
+    />
   </article>
 
   <article class="grid-card">
@@ -103,46 +82,14 @@
         <p>Earlier promote runs, with status and how far each one got.</p>
       </div>
     </div>
-    <div class="table-wrap">
-      <table class="data-table history">
-        <thead>
-          <tr>
-            <th>When</th>
-            <th>Started by</th>
-            <th>Status</th>
-            <th>Progress</th>
-            <th>Result</th>
-          </tr>
-        </thead>
-        <tbody>
-          @if (loading() && !syncHistory().length) {
-            <tr><td class="empty" colspan="5">Loading sync history…</td></tr>
-          } @else if (!syncHistory().length) {
-            <tr><td class="empty" colspan="5">No sync history yet.</td></tr>
-          } @else {
-            @for (run of syncHistory(); track run.id) {
-              <tr>
-                <td>
-                  <strong>{{ run.startedAt | date: 'dd MMM yyyy, HH:mm' }}</strong>
-                </td>
-                <td class="wrap">{{ triggerLabel(run.triggeredBy) }}</td>
-                <td>
-                  <span class="side" [class.ok]="run.status === 'ok'" [class.warn]="run.status === 'running'" [class.danger]="run.status === 'error'">
-                    {{ syncStatus(run.status) }}
-                  </span>
-                </td>
-                <td>
-                  <div class="progress-cell">
-                    <span class="bar"><i [style.width.%]="run.progress"></i></span>
-                    <span class="num">{{ run.companyDone }}/{{ run.companyTotal }}</span>
-                  </div>
-                </td>
-                <td class="wrap">{{ run.message }}</td>
-              </tr>
-            }
-          }
-        </tbody>
-      </table>
-    </div>
+    <app-data-table
+      label="Import history"
+      [rows]="syncHistory()"
+      [columns]="historyColumns"
+      [rowKey]="recordKey"
+      [loading]="loading()"
+      [error]="error()"
+      empty="No import history yet."
+    />
   </article>
 </section>

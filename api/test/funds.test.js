@@ -2,6 +2,15 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const funds = require('../src/funds');
 
+test('funding assessments never assume receivables or zero balances make cash sufficient', () => {
+  const base = { bank: 100, cashAndBank: 100, payables: 20, nextMonthFund: 100, nextMonthNeed: 30, receivables: 0, lastMonthEstimated: false };
+  assert.equal(funds.companyInsight({ ...base, payables: 120 }).tone, 'risk');
+  assert.equal(funds.companyInsight({ ...base, nextMonthNeed: 90 }).tone, 'watch');
+  assert.equal(funds.companyInsight({ ...base, lastMonthEstimated: true }).tone, 'watch');
+  assert.equal(funds.companyInsight({ ...base, bank: 0, cashAndBank: 0, payables: 0, nextMonthFund: 0, nextMonthNeed: 0 }).tone, 'watch');
+  assert.equal(funds.companyInsight(base).tone, 'ok');
+});
+
 test('last complete month and forecast months stay on the calendar', () => {
   assert.equal(funds.lastCompleteMonthKey(new Date('2026-09-12T10:00:00')), '2026-08');
   assert.equal(funds.shiftMonth('2026-09', 1), '2026-10');

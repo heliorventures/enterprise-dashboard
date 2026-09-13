@@ -1,3 +1,10 @@
+import { FilterPanel } from '../../shared/filter-panel';
+import { CompanySelect } from '../../shared/company-select';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { DataTable } from '../../shared/data-table';
+import { PageHeader } from '../../shared/page-header';
+import { LatestRequest } from '../../shared/latest-request';
+import { ledgerColumns, recordKey } from '../../shared/record-columns';
 import { Component, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 import { DashboardService } from '../../services/dashboard';
@@ -9,7 +16,7 @@ import { Pager } from '../../shared/pager';
 
 @Component({
   selector: 'app-ledgers',
-  imports: [Pager, Icon],
+  imports: [FilterPanel, CompanySelect, DataTable, PageHeader, Pager, Icon],
   templateUrl: './ledgers.html',
   styleUrl: './ledgers.css',
 })
@@ -17,11 +24,16 @@ export class Ledgers {
   private readonly api = inject(DashboardService);
   private readonly route = inject(ActivatedRoute);
 
+  private readonly request = new LatestRequest();
+  readonly columns = ledgerColumns;
+  readonly recordKey = recordKey;
+
   readonly company = signal('all');
   readonly query = signal('');
+  readonly search = signal('');
   readonly group = signal('');
   readonly page = signal(1);
-  readonly pageSize = signal(100);
+  readonly pageSize = signal(25);
   readonly loading = signal(true);
   readonly exporting = signal(false);
   readonly error = signal('');
@@ -41,15 +53,30 @@ export class Ledgers {
     return this.companies().find((item) => item.id === this.company())?.name || '';
   });
 
+  readonly filterSummary = computed(() =>
+    [
+      this.selectedCompanyName() ||
+        (this.company() === 'all' ? 'All companies' : 'Selected company'),
+      this.query(),
+      this.group(),
+    ]
+      .filter(Boolean)
+      .join(' / '),
+  );
+
   constructor() {
-    this.api.getDashboard('all').subscribe({
-      next: (dashboard) => this.companies.set(dashboard.companies),
-      error: () => undefined,
-    });
-    this.route.queryParamMap.subscribe((params) => {
+    this.api
+      .getDashboard('all')
+      .pipe(takeUntilDestroyed())
+      .subscribe({
+        next: (dashboard) => this.companies.set(dashboard.companies),
+        error: () => undefined,
+      });
+    this.route.queryParamMap.pipe(takeUntilDestroyed()).subscribe((params) => {
       this.company.set(params.get('company') || 'all');
       this.group.set(params.get('group') || '');
       this.query.set(params.get('q') || '');
+      this.search.set(this.query());
       this.page.set(1);
       this.load();
     });
@@ -58,15 +85,17 @@ export class Ledgers {
   load() {
     this.loading.set(true);
     this.error.set('');
-    this.api
-      .getLedgers({
+    this.items.set([]);
+    this.total.set(0);
+    this.request.run(
+      this.api.getLedgers({
         company: this.company(),
         q: this.query(),
         group: this.group(),
         page: this.page(),
         pageSize: this.pageSize(),
-      })
-      .subscribe({
+      }),
+      {
         next: (result) => {
           this.items.set(result.items);
           this.total.set(result.total);
@@ -77,11 +106,13 @@ export class Ledgers {
           this.error.set(err.error?.error || 'Unable to load ledgers.');
           this.loading.set(false);
         },
-      });
+      },
+    );
   }
 
   apply(event?: Event) {
     event?.preventDefault();
+    this.query.set(this.search());
     this.page.set(1);
     this.load();
   }
@@ -89,13 +120,14 @@ export class Ledgers {
   clear() {
     this.company.set('all');
     this.query.set('');
+    this.search.set('');
     this.group.set('');
     this.page.set(1);
     this.load();
   }
 
-  onCompany(event: Event) {
-    this.company.set((event.target as HTMLSelectElement).value);
+  onCompany(value: string) {
+    this.company.set(value);
     this.group.set('');
     this.apply();
   }
@@ -106,8 +138,7 @@ export class Ledgers {
   }
 
   onQuery(event: Event) {
-    this.query.set((event.target as HTMLInputElement).value);
-    this.apply();
+    this.search.set((event.target as HTMLInputElement).value);
   }
 
   onPage(page: number) {
@@ -122,6 +153,7 @@ export class Ledgers {
   }
 
   exportCsv() {
+    if (this.exporting() || this.loading() || this.error()) return;
     this.exporting.set(true);
     this.api
       .getLedgers({
@@ -133,6 +165,13 @@ export class Ledgers {
       })
       .subscribe({
         next: (result) => {
+          if (result.total > result.items.length) {
+            this.error.set(
+              'Export exceeds the 20,000-row limit. Narrow the filters to export a complete file; no partial file was downloaded.',
+            );
+            this.exporting.set(false);
+            return;
+          }
           downloadCsv(
             'ledgers.csv',
             ['Company', 'Ledger', 'Group', 'Closing balance', 'Dr/Cr'],
@@ -142,7 +181,7 @@ export class Ledgers {
               row.group,
               row.balance,
               this.drCr(row.balance),
-            ])
+            ]),
           );
           this.exporting.set(false);
         },

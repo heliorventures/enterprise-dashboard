@@ -87,6 +87,7 @@ export interface BankAccount {
   name: string;
   group: string;
   available: number;
+  rawBalance?: number;
   kind: 'bank' | 'cash';
 }
 

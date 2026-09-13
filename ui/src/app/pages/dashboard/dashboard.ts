@@ -1,237 +1,487 @@
+import {
+  ProjectSummary,
+  projectActivityColumns,
+  reportedMoney,
+} from '../../shared/finance-summary';
+import { CompanySelect } from '../../shared/company-select';
 import { DatePipe } from '@angular/common';
 import { Component, computed, inject, signal } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { DashboardService } from '../../services/dashboard';
-import { DashboardData, FundsOverview } from '../../models/dashboard';
-import { Icon } from '../../shared/icon';
+import {
+  BankAccount,
+  CompanyFinancial,
+  CompanyFunds,
+  DashboardData,
+  LedgerGroupTotal,
+} from '../../models/dashboard';
+import { DataColumn, DataTable } from '../../shared/data-table';
+import { ChartRow, FinancialChart } from '../../shared/financial-chart';
+import { KpiCard } from '../../shared/kpi-card';
+import { PageHeader } from '../../shared/page-header';
+import { LatestRequest } from '../../shared/latest-request';
+import { balanceTone, cleanText, recordKey } from '../../shared/record-columns';
 import { compactInr, fullInr } from '../../shared/money';
-
-const emptyFunds: FundsOverview = {
-  asOf: '',
-  bank: 0,
-  cash: 0,
-  cashAndBank: 0,
-  receivables: 0,
-  payables: 0,
-  uncommitted: 0,
-  lastMonth: { key: '', label: 'Last month', expenses: 0, inflow: 0, expenseCount: 0, voucherCount: 0 },
-  runRate: { monthlyExpense: 0, monthlyInflow: 0, method: 'ledgers', monthsUsed: 0 },
-  threeMonthBudget: 0,
-  afterThreeMonths: 0,
-  runwayMonths: null,
-  forecast: [],
-  history: [],
-  accounts: [],
-  byCompany: [],
-  lastMonthLabel: 'Last month',
-  nextMonthLabel: 'Next month',
-  methodNote: '',
-};
 
 @Component({
   selector: 'app-dashboard',
-  imports: [DatePipe, RouterLink, Icon],
+  imports: [
+    ProjectSummary,
+    CompanySelect,
+    DatePipe,
+    RouterLink,
+    DataTable,
+    FinancialChart,
+    KpiCard,
+    PageHeader,
+  ],
   templateUrl: './dashboard.html',
   styleUrl: './dashboard.css',
 })
 export class Dashboard {
-  private readonly dashboardService = inject(DashboardService);
-
+  private readonly api = inject(DashboardService);
+  private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
+  private readonly request = new LatestRequest();
   readonly selectedCompany = signal('all');
+  readonly companies = signal<DashboardData['companies']>([]);
   readonly loading = signal(true);
   readonly error = signal('');
   readonly data = signal<DashboardData | null>(null);
-
-  readonly selectedLabel = computed(() => {
-    const snapshot = this.data();
-    if (!snapshot || this.selectedCompany() === 'all') {
-      return 'All companies';
-    }
-    return snapshot.companies.find((company) => company.id === this.selectedCompany())?.name || 'Company';
-  });
+  readonly funds = computed(() => this.data()?.funds);
+  readonly selectedLabel = computed(() =>
+    this.selectedCompany() === 'all'
+      ? 'All companies · combined, before eliminations'
+      : this.companies().find((c) => c.id === this.selectedCompany())?.name || 'Selected company',
+  );
+  readonly compactInr = compactInr;
+  readonly fullInr = fullInr;
+  readonly recordKey = recordKey;
+  readonly accountKey = (r: BankAccount) => `${r.companyId}:${r.kind}:${r.name}`;
 
   readonly kpis = computed(() => {
-    const snapshot = this.data();
-    if (!snapshot) {
-      return [];
-    }
-
-    const funds = snapshot.funds || emptyFunds;
+    const d = this.data();
+    if (!d) return [];
+    const f = d.funds;
+    const hasBooks = d.books?.ledgerCount > 0;
     return [
-      { key: 'bank', icon: 'bank', label: 'Bank balance', value: funds.bank, hint: 'Money sitting in bank ledgers today' },
-      { key: 'lastMonth', icon: 'spend', label: `Spent in ${funds.lastMonth.label || 'last month'}`, value: funds.lastMonth.expenses, hint: funds.lastMonth.expenseCount ? `${funds.lastMonth.expenseCount} payment and purchase vouchers` : 'Payment and purchase vouchers' },
-      { key: 'budget', icon: 'budget', label: 'Next 3-month budget', value: funds.threeMonthBudget, hint: `${compactInr(funds.runRate.monthlyExpense)} typical monthly spend` },
-      { key: 'projected', icon: 'forecast', label: 'Cash after 3 months', value: funds.afterThreeMonths, tone: funds.afterThreeMonths >= 0 ? 'up' : 'down', hint: funds.runwayMonths == null ? 'No monthly burn on current run-rate' : `${funds.runwayMonths.toFixed(1)} months of runway` },
-      { key: 'receivables', icon: 'receivables', label: 'Receivables', value: funds.receivables, hint: 'Money customers still owe' },
-      { key: 'payables', icon: 'payables', label: 'Payables', value: funds.payables, hint: 'Already committed to vendors' },
+      {
+        key: 'cash',
+        label: 'Cash & bank on books',
+        value: f && hasBooks ? f.cashAndBank : null,
+        icon: 'bank',
+        hint: 'Reported ledger balances; confirm bank availability.',
+        tone: 'neutral',
+      },
+      {
+        key: 'revenue',
+        label: 'Revenue on books',
+        value: hasBooks ? d.kpis.revenue : null,
+        icon: 'reports',
+        hint: 'Sales and income ledger balances; source period.',
+        tone: 'neutral',
+      },
+      {
+        key: 'profit',
+        label: 'Revenue less expenses',
+        value: hasBooks ? d.kpis.profit : null,
+        icon: 'overview',
+        hint: 'Ledger-based result; not audited net profit.',
+        tone: balanceTone(d.kpis.profit),
+      },
+      {
+        key: 'headroom',
+        label: 'Cash less payables',
+        value: f && hasBooks ? f.cashAndBank - f.payables : null,
+        icon: 'payables',
+        hint: 'Before future spending; payment due dates unavailable.',
+        tone: f ? balanceTone(f.cashAndBank - f.payables) : 'neutral',
+      },
+      {
+        key: 'receivables',
+        label: 'Receivables on books',
+        value: f && hasBooks ? f.receivables : null,
+        icon: 'receivables',
+        hint: 'Collection opportunity; overdue amount unavailable.',
+        tone: 'neutral',
+      },
+      {
+        key: 'forecast',
+        label: '3-month model balance',
+        value: f && hasBooks && f.runRate.monthsUsed > 0 ? f.afterThreeMonths : null,
+        icon: 'forecast',
+        hint: 'Indicative run-rate estimate; not a cash-flow statement.',
+        tone: f ? balanceTone(f.afterThreeMonths) : 'neutral',
+      },
     ];
   });
 
-  readonly funds = computed(() => this.data()?.funds || emptyFunds);
-
-  readonly fundTotals = computed(() => {
-    return this.funds().byCompany.reduce(
-      (sum, row) => ({
-        bank: sum.bank + row.bank,
-        lastMonthExpenses: sum.lastMonthExpenses + row.lastMonthExpenses,
-        lastMonthInflow: sum.lastMonthInflow + (row.lastMonthInflow || 0),
-        nextMonthNeed: sum.nextMonthNeed + row.nextMonthNeed,
-      }),
-      { bank: 0, lastMonthExpenses: 0, lastMonthInflow: 0, nextMonthNeed: 0 },
-    );
+  readonly priorities = computed(() => {
+    const d = this.data();
+    if (!d) return [];
+    const f = d.funds;
+    const rows: {
+      title: string;
+      detail: string;
+      path: string;
+      query: Record<string, string>;
+      action: string;
+      tone: string;
+    }[] = [];
+    if (!d.lastSync || !['ok', 'success', 'completed'].includes(d.lastSync.Status.toLowerCase()))
+      rows.push({
+        title: 'Verify data freshness',
+        detail:
+          'A successful latest import is not confirmed. Check the source before relying on these figures.',
+        path: '/operations',
+        query: {},
+        action: 'Review imports',
+        tone: 'warning',
+      });
+    if (f && f.cashAndBank < f.payables)
+      rows.push({
+        title: `${compactInr(f.payables - f.cashAndBank)} cash-to-payables gap`,
+        detail:
+          'Recorded payables exceed cash and bank balances. Review obligations and their payment dates.',
+        path: '/ledgers',
+        query: { company: this.selectedCompany(), q: 'Creditor' },
+        action: 'Review payables',
+        tone: 'negative',
+      });
+    if (f && f.afterThreeMonths < 0)
+      rows.push({
+        title: 'Model projects a funding gap',
+        detail: `${fullInr(-f.afterThreeMonths)} below zero after three model months. Validate collections and spending assumptions.`,
+        path: '/reports',
+        query: { company: this.selectedCompany() },
+        action: 'Review expenses',
+        tone: 'negative',
+      });
+    if (f && f.receivables > 0)
+      rows.push({
+        title: `${compactInr(f.receivables)} to review for collection`,
+        detail:
+          'Customer ledger balances are not aged here. Confirm recoverability and expected receipt dates.',
+        path: '/ledgers',
+        query: { company: this.selectedCompany(), q: 'Debtor' },
+        action: 'Review receivables',
+        tone: 'neutral',
+      });
+    if (!f || f.runRate.method === 'ledgers')
+      rows.push({
+        title: 'Forecast needs source validation',
+        detail: 'Monthly estimates use ledger balances because usable voucher activity is limited.',
+        path: '/operations',
+        query: {},
+        action: 'Check data',
+        tone: 'warning',
+      });
+    return rows;
   });
 
-  readonly cashflowChart = computed(() => {
-    const funds = this.funds();
-    const rows = [
-      ...funds.history.slice(-6).map((row) => ({ ...row, kind: row.kind || 'actual' })),
-      ...funds.forecast,
-    ];
-    const peak = Math.max(1, ...rows.flatMap((row) => [row.expenses, row.inflow]));
-    return {
-      max: peak,
-      mid: peak / 2,
-      columns: rows.map((row) => ({
-        ...row,
-        short: (row.label || row.key).replace(/ 20\d\d/, ''),
-        expensePct: (row.expenses / peak) * 100,
-        inflowPct: (row.inflow / peak) * 100,
+  readonly activityRows = computed<ChartRow[]>(() => {
+    const f = this.funds();
+    return (f?.history || []).slice(-6).map((r) => ({
+      key: r.key,
+      label: r.label,
+      note: 'Recorded voucher activity',
+      values: [
+        { label: 'Receipts / sales / credit notes', value: r.inflow },
+        { label: 'Payments / purchases / debit notes', value: r.expenses, tone: 'muted' },
+      ],
+    }));
+  });
+  readonly forecastRows = computed<ChartRow[]>(() =>
+    (this.funds()?.forecast || [])
+      .filter((r) => Number.isFinite(r.closingCash))
+      .map((r) => ({
+        key: r.key,
+        label: r.label,
+        note: 'Estimate',
+        values: [{ label: 'Model closing balance', value: r.closingCash! }],
       })),
-    };
-  });
-
-  readonly companyChart = computed(() => {
-    const rows = this.data()?.companyFinancials || [];
-    const peak = Math.max(
-      1,
-      ...rows.flatMap((row) => [row.revenue, row.expenses, Math.abs(row.profit)]),
-    );
-
-    return {
-      max: peak,
-      mid: peak / 2,
-      columns: rows.map((row) => ({
-        id: row.id,
-        name: row.name,
-        short: this.shortLabel(row.name),
-        revenue: row.revenue,
-        expenses: row.expenses,
-        profit: row.profit,
-        revenuePct: (row.revenue / peak) * 100,
-        expensesPct: (row.expenses / peak) * 100,
-        profitPct: (Math.abs(row.profit) / peak) * 100,
+  );
+  readonly companyRows = computed<ChartRow[]>(() =>
+    (this.data()?.companyFinancials || [])
+      .filter((r) => r.ledgerCount > 0)
+      .map((r) => ({
+        key: r.id,
+        label: r.name,
+        link: { path: '/reports', query: { company: r.id } },
+        values: [
+          { label: 'Revenue', value: r.revenue },
+          { label: 'Expenses', value: r.expenses, tone: 'muted' },
+          { label: 'Revenue less expenses', value: r.profit, tone: 'positive' },
+        ],
       })),
-    };
-  });
-
-  readonly mixChart = computed(() => {
-    const kpis = this.data()?.kpis;
-    const items = [
-      { key: 'receivables', label: 'Receivables', value: Math.max(0, kpis?.receivables || 0), color: '#3b6fd4' },
-      { key: 'payables', label: 'Payables', value: Math.max(0, kpis?.payables || 0), color: '#c24b4b' },
-      { key: 'cash', label: 'Cash & bank', value: Math.max(0, this.funds().cashAndBank || kpis?.cash || 0), color: '#1f8a5b' },
+  );
+  readonly liquidityRows = computed<ChartRow[]>(() => {
+    const f = this.funds();
+    if (!f || !this.data()?.books.ledgerCount) return [];
+    return [
+      { key: 'cash', label: 'Cash & bank', values: [{ label: 'On books', value: f.cashAndBank }] },
+      {
+        key: 'payables',
+        label: 'Payables',
+        values: [{ label: 'Obligations on books', value: f.payables, tone: 'muted' }],
+      },
+      {
+        key: 'headroom',
+        label: 'Cash less payables',
+        values: [
+          { label: 'Before future spending', value: f.cashAndBank - f.payables, tone: 'positive' },
+        ],
+      },
     ];
-    const total = items.reduce((sum, item) => sum + item.value, 0);
-    const gap = items.filter((item) => item.value > 0).length > 1 ? 0.08 : 0;
-    let angle = -Math.PI / 2;
-
-    return {
-      total,
-      segments: items.map((item) => {
-        const fraction = total ? item.value / total : 0;
-        const sweep = Math.max(0, fraction * 2 * Math.PI - gap);
-        const start = angle;
-        const end = start + sweep;
-        angle += fraction * 2 * Math.PI;
-        return {
-          ...item,
-          pct: Math.round(fraction * 100),
-          d: this.describeArc(80, 80, 56, start, end),
-        };
-      }),
-    };
   });
+  readonly reportedMoney = reportedMoney;
+  readonly projectColumns = projectActivityColumns;
+  readonly groupKey = (r: LedgerGroupTotal) => r.name;
+  readonly groupColumns: DataColumn<LedgerGroupTotal>[] = [
+    {
+      key: 'name',
+      label: 'Ledger group',
+      value: (r) => r.name,
+      link: (r) => ({
+        path: '/ledgers',
+        query: { company: this.selectedCompany(), group: r.name },
+      }),
+    },
+    { key: 'count', label: 'Ledgers', value: (r) => String(r.count), primary: true },
+    {
+      key: 'balance',
+      label: 'Signed closing balance',
+      value: (r) => fullInr(r.balance),
+      numeric: true,
+      primary: true,
+    },
+  ];
+  readonly fundTotalRows = computed(() => {
+    const rows = this.funds()?.byCompany || [];
+    if (!rows.length) return [];
+    return [
+      {
+        id: '__total',
+        name: 'Combined company totals',
+        bank: rows.reduce((n, r) => n + r.bank, 0),
+        lastMonthExpenses: rows.reduce((n, r) => n + r.lastMonthExpenses, 0),
+        lastMonthInflow: rows.every((r) => r.lastMonthInflow != null)
+          ? rows.reduce((n, r) => n + r.lastMonthInflow!, 0)
+          : undefined,
+        nextMonthNeed: rows.reduce((n, r) => n + r.nextMonthNeed, 0),
+      },
+    ];
+  });
+  readonly totalColumns: DataColumn<{
+    id: string;
+    name: string;
+    bank: number;
+    lastMonthExpenses: number;
+    lastMonthInflow?: number;
+    nextMonthNeed: number;
+  }>[] = [
+    { key: 'name', label: 'Scope', value: (r) => r.name },
+    {
+      key: 'bank',
+      label: 'Bank balance',
+      value: (r) => reportedMoney(r.bank),
+      numeric: true,
+      primary: true,
+    },
+    {
+      key: 'spend',
+      label: 'Last-month spend / estimate',
+      value: (r) => reportedMoney(r.lastMonthExpenses),
+      numeric: true,
+      primary: true,
+    },
+    {
+      key: 'receipts',
+      label: 'Last-month inflow activity',
+      value: (r) => reportedMoney(r.lastMonthInflow),
+      numeric: true,
+      primary: true,
+    },
+    {
+      key: 'need',
+      label: 'Next-month spending estimate',
+      value: (r) => reportedMoney(r.nextMonthNeed),
+      numeric: true,
+      primary: true,
+    },
+  ];
+  readonly runway = computed(() => {
+    const f = this.funds();
+    if (!f || !this.data()?.books.ledgerCount || !f.runRate.monthsUsed) return 'Not available';
+    if (f.cashAndBank <= 0) return '0 months';
+    if (f.runRate.monthlyExpense <= f.runRate.monthlyInflow) return 'No net burn in model';
+    return f.runwayMonths == null ? 'Not available' : `${f.runwayMonths.toFixed(1)} months`;
+  });
+  readonly fundColumns: DataColumn<CompanyFunds>[] = [
+    {
+      key: 'name',
+      label: 'Company',
+      value: (r) => r.name,
+      link: (r) => ({ path: '/dashboard', query: { company: r.id } }),
+    },
+    {
+      key: 'bank',
+      label: 'Bank balance',
+      value: (r) => reportedMoney(r.bank),
+      numeric: true,
+      primary: true,
+    },
+    {
+      key: 'assessment',
+      label: 'Funding assessment',
+      value: (r) =>
+        ({ ok: 'Comfortable', watch: 'Watch', risk: 'Tight' })[r.tone] || 'Not available',
+      secondary: (r) => r.note,
+      primary: true,
+    },
+    {
+      key: 'inflow',
+      label: 'Last-month inflow activity',
+      value: (r) => reportedMoney(r.lastMonthInflow),
+      numeric: true,
+    },
+    {
+      key: 'payments',
+      label: 'Expense review',
+      value: () => 'Open expense report',
+      link: (r) => ({ path: '/reports', query: { company: r.id } }),
+    },
+    {
+      key: 'cash',
+      label: 'Cash & bank',
+      value: (r) => fullInr(r.cashAndBank),
+      numeric: true,
+      primary: true,
+    },
+    {
+      key: 'headroom',
+      label: 'Cash less payables',
+      value: (r) => fullInr(r.cashAndBank - r.payables),
+      tone: (r) => balanceTone(r.cashAndBank - r.payables),
+      numeric: true,
+      primary: true,
+    },
+    {
+      key: 'next',
+      label: 'Next-month model balance',
+      value: (r) => fullInr(r.nextMonthFund),
+      tone: (r) => balanceTone(r.nextMonthFund),
+      numeric: true,
+      primary: true,
+    },
+    {
+      key: 'spend',
+      label: 'Last-month activity',
+      value: (r) => fullInr(r.lastMonthExpenses),
+      secondary: (r) =>
+        r.lastMonthEstimated
+          ? 'Estimated from ledger run-rate'
+          : 'Payments, purchases and debit notes',
+      numeric: true,
+    },
+    {
+      key: 'receivables',
+      label: 'Receivables',
+      value: (r) => fullInr(r.receivables),
+      numeric: true,
+    },
+    { key: 'payables', label: 'Payables', value: (r) => fullInr(r.payables), numeric: true },
+    {
+      key: 'budget',
+      label: 'Monthly model spend',
+      value: (r) => fullInr(r.nextMonthNeed),
+      numeric: true,
+    },
+  ];
+  readonly accountColumns: DataColumn<BankAccount>[] = [
+    // Account identity stays the first column so mobile cards retain their title.
+    {
+      key: 'name',
+      label: 'Account',
+      value: (r) => cleanText(r.name),
+      secondary: (r) => r.companyName,
+      link: (r) => ({
+        path: '/ledgers',
+        query: { company: r.companyId, q: r.name, group: r.group },
+      }),
+    },
+    {
+      key: 'value',
+      label: 'Reported balance',
+      value: (r) => fullInr(r.available),
+      numeric: true,
+      primary: true,
+    },
+    {
+      key: 'type',
+      label: 'Type',
+      value: (r) => (r.kind === 'bank' ? 'Bank' : 'Cash'),
+      primary: true,
+    },
+    {
+      key: 'raw',
+      label: 'Signed source balance',
+      value: (r) => reportedMoney(r.rawBalance),
+      secondary: () => 'Sign preserved for reconciliation; source convention must be confirmed.',
+      numeric: true,
+      primary: true,
+    },
+  ];
+  readonly companyColumns: DataColumn<CompanyFinancial>[] = [
+    { key: 'name', label: 'Company', value: (r) => r.name },
+    ...(['revenue', 'expenses', 'profit', 'receivables', 'payables', 'cashAndBank'] as const).map(
+      (key) => ({
+        key,
+        label: {
+          revenue: 'Revenue',
+          expenses: 'Expenses',
+          profit: 'Revenue less expenses',
+          receivables: 'Receivables',
+          payables: 'Payables',
+          cashAndBank: 'Cash & bank',
+        }[key],
+        value: (r: CompanyFinancial) => (r.ledgerCount ? fullInr(r[key]) : 'Not available'),
+        numeric: true,
+        primary: key === 'profit' || key === 'cashAndBank',
+      }),
+    ),
+    { key: 'ledgers', label: 'Ledgers', value: (r) => String(r.ledgerCount) },
+    { key: 'vouchers', label: 'Vouchers', value: (r) => String(r.voucherCount) },
+  ];
 
   constructor() {
-    this.load();
+    this.route.queryParamMap.pipe(takeUntilDestroyed()).subscribe((params) => {
+      this.selectedCompany.set(params.get('company') || 'all');
+      this.load();
+    });
   }
-
   load() {
     this.loading.set(true);
     this.error.set('');
-    this.dashboardService.getDashboard(this.selectedCompany()).subscribe({
-      next: (dashboard) => {
-        this.data.set({
-          ...dashboard,
-          books: dashboard.books || { ledgerCount: 0, voucherCount: 0, groups: [] },
-          funds: dashboard.funds || emptyFunds,
-        });
+    this.data.set(null);
+    this.request.run(this.api.getDashboard(this.selectedCompany()), {
+      next: (d) => {
+        this.companies.set(d.companies);
+        this.data.set(d);
         this.loading.set(false);
       },
-      error: (err) => {
-        this.error.set(err.error?.error || 'Unable to load dashboard. Confirm the API is running on port 3000.');
+      error: () => {
+        this.error.set('Financial overview could not be loaded. Retry or check Data operations.');
         this.loading.set(false);
       },
     });
   }
-
-  onCompanyChange(event: Event) {
-    this.selectedCompany.set((event.target as HTMLSelectElement).value);
-    this.load();
-  }
-
-  toneLabel(tone: string) {
-    return ({ ok: 'Comfortable', watch: 'Watch', risk: 'Tight' } as Record<string, string>)[tone] || tone;
-  }
-
-  toneIcon(tone: string) {
-    return ({ ok: 'check', watch: 'warning', risk: 'warning' } as Record<string, string>)[tone] || 'info';
-  }
-
-  initials(name: string) {
-    return name
-      .split(' ')
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((part) => part[0])
-      .join('')
-      .toUpperCase();
-  }
-
-  compactInr = compactInr;
-  fullInr = fullInr;
-
-  clean(value: string) {
-    return (value || '').replace(/\u0004/g, '').trim();
-  }
-
-  private shortLabel(name: string) {
-    return this.clean(name)
-      .replace(/\s+(LLP|PVT\.?|LTD\.?|LIMITED|ENTERPRISES|AND PROJECTS)\b/gi, '')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .split(' ')
-      .slice(0, 2)
-      .join(' ');
-  }
-
-  private describeArc(cx: number, cy: number, radius: number, start: number, end: number) {
-    const delta = end - start;
-    if (delta <= 0.01) {
-      return '';
-    }
-
-    const polar = (angle: number) => [cx + radius * Math.cos(angle), cy + radius * Math.sin(angle)];
-
-    if (delta >= Math.PI * 2 - 0.01) {
-      const [x1, y1] = polar(start);
-      const [x2, y2] = polar(start + Math.PI);
-      return `M ${x1} ${y1} A ${radius} ${radius} 0 1 1 ${x2} ${y2} A ${radius} ${radius} 0 1 1 ${x1} ${y1}`;
-    }
-
-    const [x1, y1] = polar(start);
-    const [x2, y2] = polar(end);
-    const large = delta > Math.PI ? 1 : 0;
-    return `M ${x1} ${y1} A ${radius} ${radius} 0 ${large} 1 ${x2} ${y2}`;
+  onCompanyChange(value: string) {
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { company: value },
+      queryParamsHandling: 'merge',
+    });
   }
 }

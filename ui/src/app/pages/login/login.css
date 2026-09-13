@@ -89,3 +89,13 @@ form {
   font-size: 12px;
   line-height: 1.5;
 }
+
+@media (max-width: 480px) {
+  .login {
+    min-height: 100dvh;
+    padding: 20px 16px;
+  }
+  .login-card {
+    padding: 28px 20px;
+  }
+}
