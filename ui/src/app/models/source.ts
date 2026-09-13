@@ -15,6 +15,7 @@ export interface SourceCompany {
   issue_count: number;
 }
 export interface SourceAmount {
+  category_name?: string | null;
   company_id: string;
   name: string;
   amount: string | null;

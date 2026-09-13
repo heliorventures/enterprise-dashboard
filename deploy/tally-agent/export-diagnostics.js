@@ -55,8 +55,9 @@ async function exportXml(config,{collection,company,body,createParser,phase='exp
   const heartbeat=setInterval(()=>log({event:'tally_export_progress',...snapshot()}),10000);
   heartbeat.unref?.();
   try {
+    config.signal?.throwIfAborted();
     const response=await fetch(config.tallyUrl,{method:'POST',headers:{'Content-Type':'application/xml; charset=utf-8'},body,
-      redirect:'error',signal:AbortSignal.timeout(config.requestTimeoutMs)});
+      redirect:'error',signal:config.signal?AbortSignal.any([config.signal,AbortSignal.timeout(config.requestTimeoutMs)]):AbortSignal.timeout(config.requestTimeoutMs)});
     status=response.status;
     const rawType=response.headers?.get('content-type')||'';
     const contentType=rawType.match(/^[a-z0-9.+-]+\/[a-z0-9.+-]+/i)?.[0]||'unspecified';
@@ -71,6 +72,7 @@ async function exportXml(config,{collection,company,body,createParser,phase='exp
     const decoder=new TextDecoder('utf-8',{fatal:true});
     stage='read';
     for await(const part of response.body) {
+      config.signal?.throwIfAborted();
       bytes+=part.length;
       if(bytes>2*1024**3)throw Object.assign(new Error('Tally collection exceeds 2 GiB'),{code:'SOURCE_COLLECTION_LIMIT'});
       stage='decode';const text=decoder.decode(part,{stream:true});stage='parse';xml.write(text);stage='read';

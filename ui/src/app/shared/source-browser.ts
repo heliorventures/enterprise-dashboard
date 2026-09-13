@@ -41,6 +41,11 @@ const text = (row: Row, field: string) => (row[field] == null ? 'Unavailable' : 
       [error]="error()"
       empty="No records are available for this selection."
     />
+    @if (error()) {
+      <button class="btn ghost" type="button" (click)="retry()">
+        {{ staleCursor() ? 'Reload first page' : 'Retry loading records' }}
+      </button>
+    }
     <nav class="source-pager" [attr.aria-label]="title() + ' pages'">
       <button
         type="button"
@@ -53,7 +58,11 @@ const text = (row: Row, field: string) => (row[field] == null ? 'Unavailable' : 
         Previous
       </button>
       <span aria-live="polite">
-        @if (mode() === 'details') {
+        @if (loading()) {
+          Loading records
+        } @else if (error()) {
+          Records unavailable
+        } @else if (mode() === 'details') {
           {{ rows().length }} records on this page
         } @else {
           Page {{ page() }} · {{ total() }} records
@@ -132,7 +141,9 @@ export class SourceBrowser {
   readonly rows = signal<Row[]>([]);
   readonly total = signal(0);
   readonly nextCursor = signal<string | null>(null);
-  private cursorHistory: string[] = [];
+  private cursorParents = new Map<string, string>();
+  readonly staleCursor = signal(false);
+  private readonly revision = signal(0);
   private lastScope = '';
   readonly loading = signal(false);
   readonly error = signal('');
@@ -260,8 +271,11 @@ export class SourceBrowser {
   constructor() {
     effect((onCleanup) => {
       this.refreshKey();
+      this.revision();
       const mode = this.mode();
       const params: Record<string, string | number> = { page: this.page(), pageSize: 25 };
+      const company = this.params().get('company');
+      if (company) params['company'] = company;
       if (mode === 'issues' && this.batch()) params['batch'] = this.batch();
       if (mode === 'masters' && this.collection()) params['collection'] = this.collection();
       if (mode === 'details') {
@@ -272,7 +286,7 @@ export class SourceBrowser {
           ),
         );
         if (scope !== this.lastScope) {
-          this.cursorHistory = [];
+          this.cursorParents.clear();
           this.lastScope = scope;
         }
         const cursor = this.params().get('detailsCursor');
@@ -291,6 +305,7 @@ export class SourceBrowser {
       this.total.set(0);
       this.loading.set(true);
       this.error.set('');
+      this.staleCursor.set(false);
       const endpoint = ['masters', 'details'].includes(mode)
         ? `/api/reports/source/${mode}`
         : `/api/tally/${mode}`;
@@ -304,15 +319,25 @@ export class SourceBrowser {
         error: (error) => {
           this.error.set(
             error.status === 409
-              ? 'The published data or filters changed. Use Previous to return to the first page.'
-              : 'Unable to load source records. Check API availability and migrations.',
+              ? 'The published data or filters changed. Reload the first page to continue.'
+              : 'Unable to load source records. Retry loading this selection.',
           );
-          if (error.status === 409) this.cursorHistory = [];
+          this.staleCursor.set(error.status === 409);
+          if (error.status === 409) this.cursorParents.clear();
           this.loading.set(false);
         },
       });
       onCleanup(() => request.unsubscribe());
     });
+  }
+  retry() {
+    if (this.staleCursor() && this.params().get('detailsCursor')) {
+      void this.router.navigate([], {
+        relativeTo: this.route,
+        queryParams: { detailsCursor: null, detailsPage: null },
+        queryParamsHandling: 'merge',
+      });
+    } else this.revision.update((n) => n + 1);
   }
   private sourceLink(r: Row) {
     return {
@@ -328,9 +353,10 @@ export class SourceBrowser {
     if (this.mode() === 'details') {
       let cursor: string | null;
       if (page > this.page()) {
-        this.cursorHistory.push(this.params().get('detailsCursor') || '');
         cursor = this.nextCursor();
-      } else cursor = this.cursorHistory.pop() || null;
+        if (!cursor) return;
+        this.cursorParents.set(cursor, this.params().get('detailsCursor') || '');
+      } else cursor = this.cursorParents.get(this.params().get('detailsCursor') || '') || null;
       void this.router.navigate([], {
         relativeTo: this.route,
         queryParams: { detailsCursor: cursor || null, detailsPage: null },

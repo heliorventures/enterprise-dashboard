@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
+  <title>Helior Finance Sync</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="renderer.js" defer></script>
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand"><img src="../../generated/brand-mark.svg" width="46" height="46" alt=""><div><h1>Helior Finance Sync</h1><p>Your Tally companies, connected to Finance.</p></div></div>
+    <span class="platform">Tally → Finance</span>
+  </header>
+  <main>
+    <p id="test-banner" class="test-banner" hidden>TEST BUILD · Connection checks only. Ask your administrator for a configured installer to sync data.</p>
+    <div class="intro"><h2>Bring your accounts up to date</h2><p>Open Tally, load your companies and sign in. Then sync when you’re ready.</p></div>
+    <section class="connection card" aria-labelledby="connection-title">
+      <div class="connection-top"><div><div class="eyebrow">CONNECTION</div><h3 id="connection-title"><span id="status-dot" class="dot"></span><span id="connection-label">Ready to check Tally</span></h3></div><button id="check" class="secondary">Check connection</button></div>
+      <p id="message" role="status" aria-live="polite">Checking application status…</p>
+      <div class="meta"><span>Last successful sync <strong id="last-sync">No completed sync yet</strong></span><span>Saved uploads <strong id="pending">0 pending</strong></span></div>
+      <p id="pending-note" class="note" hidden></p>
+    </section>
+    <section class="card" aria-labelledby="companies-title">
+      <div class="section-heading"><div><h3 id="companies-title">Companies to sync</h3><p>All accessible companies are selected for each new run.</p></div><span id="selected-count" class="count">0 selected</span></div>
+      <label id="all-row" class="select-all" hidden><input id="select-all" type="checkbox"> Select all companies</label>
+      <div id="companies" class="companies"><div class="empty">Your companies will appear here after checking Tally.</div></div>
+    </section>
+    <section id="progress-card" class="card" aria-labelledby="progress-title" hidden>
+      <div class="section-heading"><h3 id="progress-title">Sync progress</h3><span id="elapsed" class="muted"></span></div>
+      <p id="activity" role="status" aria-live="polite"></p>
+      <progress id="progress" aria-label="Current sync progress"></progress>
+      <div id="results" class="results"></div>
+    </section>
+    <details class="details"><summary>Recent activity &amp; help</summary><p class="note">If a company is missing, load it and complete its login in Tally, then check again. Tally must stay open during extraction.</p><div id="history"></div><button id="export" class="secondary">Export diagnostic log</button><p id="export-result" role="status"></p></details>
+  </main>
+  <footer><p id="footer-note">No changes are made to your Tally data.</p><div class="actions"><button id="stop" class="secondary" hidden>Stop sync</button><button id="sync" class="primary" disabled>Sync now <span aria-hidden="true">→</span></button></div></footer>
+</body>
+</html>

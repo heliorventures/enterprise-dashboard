@@ -106,6 +106,13 @@ import { DataColumn, DataTable } from './data-table';
               are confirmed.
             </p>
           }
+          @if (incompleteCategories(); as missing) {
+            <p class="banner">
+              {{ missing }} cost-centre or inventory categories have missing amounts and are
+              excluded from these charts. Review the detailed source records and batch issues before
+              using totals.
+            </p>
+          }
           <div class="source-charts">
             <app-financial-chart
               title="Balances by account classification"
@@ -118,7 +125,7 @@ import { DataColumn, DataTable } from './data-table';
               description="Signed source postings by month; not reconciled available cash. Debit and credit directions have not been reinterpreted."
               [unit]="selected.currency || 'Source currency unspecified'"
               [rows]="postings()"
-              empty="Unavailable: complete accounting postings and classified bank/cash ledgers are required."
+              [empty]="postingEmpty()"
             />
             <app-financial-chart
               title="Cost-centre allocations"
@@ -139,7 +146,11 @@ import { DataColumn, DataTable } from './data-table';
             {{ masterCount() }} master records loaded. Invoice ageing and budget comparisons require
             due dates, settlements and approved budgets; unavailable inputs are not shown as zero.
           </p>
-          <details (toggle)="detailsOpen.set($any($event.target).open)">
+          <details
+            aria-label="Detailed source records"
+            [open]="detailsOpen()"
+            (toggle)="detailsOpen.set($any($event.target).open)"
+          >
             <summary>Detailed source records</summary>
             <nav aria-label="Financial record types">
               <a
@@ -295,6 +306,19 @@ export class SourceInsights {
       link: (r) => ({ path: '/operations', query: r.batch_id ? { batch: r.batch_id } : undefined }),
     },
   ];
+  readonly incompleteCategories = computed(
+    () =>
+      [...(this.data()?.allocations || []), ...(this.data()?.inventory || [])].filter(
+        (r) => r.company_id === this.company() && r.valued !== undefined && r.valued !== r.count,
+      ).length,
+  );
+  readonly postingEmpty = computed(() =>
+    !this.selected()?.coverage?.uniformCurrency
+      ? 'Unavailable: the reporting currency needs confirmation.'
+      : !this.selected()?.coverage?.postingsComplete
+        ? 'Unavailable: complete accounting postings are required.'
+        : 'No classified bank or cash postings were found in the selected period.',
+  );
   readonly groups = computed(() => this.chart(this.data()?.groups));
   readonly postings = computed(() =>
     this.selected()?.coverage?.postingsComplete ? this.chart(this.data()?.postings) : [],
@@ -309,6 +333,10 @@ export class SourceInsights {
         .reduce((n, m) => n + m.count, 0) || 0,
   );
   constructor() {
+    effect(() => {
+      if (this.params().get('detailType') || this.params().get('detailsCursor'))
+        this.detailsOpen.set(true);
+    });
     effect(() => {
       this.company();
       this.periodQuery();
@@ -331,9 +359,7 @@ export class SourceInsights {
           this.loading.set(false);
         },
         error: () => {
-          this.error.set(
-            'Unable to load source analysis. Check the API migration and sync status.',
-          );
+          this.error.set('Unable to load source analysis. Use Refresh analysis to retry.');
           this.loading.set(false);
         },
       });
@@ -345,10 +371,15 @@ export class SourceInsights {
     const form = new FormData(event.target as HTMLFormElement);
     const fromMonth = String(form.get('fromMonth') || ''),
       toMonth = String(form.get('toMonth') || '');
-    if (!fromMonth || !toMonth || fromMonth > toMonth) {
+    if (
+      !/^[1-9]\d{3}-(0[1-9]|1[0-2])$/.test(fromMonth) ||
+      !/^[1-9]\d{3}-(0[1-9]|1[0-2])$/.test(toMonth) ||
+      fromMonth > toMonth
+    ) {
       this.error.set('Choose a valid start and end month.');
       return;
     }
+    this.error.set('');
     void this.router.navigate([], {
       relativeTo: this.route,
       queryParams: { fromMonth, toMonth, detailsCursor: null, detailsPage: null },
@@ -356,6 +387,7 @@ export class SourceInsights {
     });
   }
   resetPeriod() {
+    this.error.set('');
     this.draftFrom.set(null);
     this.draftTo.set(null);
     void this.router.navigate([], {
@@ -376,7 +408,7 @@ export class SourceInsights {
       )
       .map((r, i) => ({
         key: `${r.name}:${i}`,
-        label: r.name,
+        label: r.category_name ? `${r.name} / ${r.category_name}` : r.name,
         note: `${r.count} source records`,
         values: [
           {

@@ -48,6 +48,13 @@ describe('Source reporting evidence boundaries', () => {
     expect(component.groups()[0].values[0].value).toBe(-100);
     expect(component.postings()).toEqual([]);
     expect(component.allocations()).toEqual([]);
+    expect(component.incompleteCategories()).toBe(1);
+    expect(component.postingEmpty()).toContain('Unavailable');
+    const emptyPeriod = result();
+    emptyPeriod.companies[0].coverage!.postingsComplete = true;
+    emptyPeriod.postings = [];
+    component.data.set(emptyPeriod);
+    expect(component.postingEmpty()).toContain('selected period');
     const unknown = result();
     unknown.companies[0].coverage!.uniformCurrency = false;
     component.data.set(unknown);
@@ -84,5 +91,33 @@ describe('Source reporting evidence boundaries', () => {
     await fixture.whenStable();
     fixture.detectChanges();
     http.expectOne('/api/reports/source?company=1').flush(result());
+  });
+  it('opens linked details and keeps them open after refreshing analysis', async () => {
+    const { Router } = await import('@angular/router');
+    const router = TestBed.inject(Router),
+      http = TestBed.inject(HttpTestingController);
+    await router.navigateByUrl('/?company=1&detailType=allocation');
+    const fixture = TestBed.createComponent(SourceInsights);
+    fixture.componentRef.setInput('company', '1');
+    fixture.detectChanges();
+    http.expectOne('/api/reports/source?company=1').flush(result());
+    fixture.detectChanges();
+    expect(
+      fixture.nativeElement.querySelector('details[aria-label="Detailed source records"]').open,
+    ).toBe(true);
+    const detail = http.expectOne((r) => r.url === '/api/reports/source/details');
+    expect(detail.request.params.get('detailType')).toBe('allocation');
+    detail.flush({ items: [], total: null, nextCursor: null });
+    fixture.componentInstance.revision.update((n) => n + 1);
+    fixture.detectChanges();
+    http.expectOne('/api/reports/source?company=1').flush(result());
+    fixture.detectChanges();
+    expect(
+      fixture.nativeElement.querySelector('details[aria-label="Detailed source records"]').open,
+    ).toBe(true);
+    http
+      .expectOne((r) => r.url === '/api/reports/source/details')
+      .flush({ items: [], total: null, nextCursor: null });
+    http.verify();
   });
 });

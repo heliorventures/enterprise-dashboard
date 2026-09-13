@@ -6,7 +6,7 @@ import {
 } from '../../shared/finance-summary';
 import { CompanySelect } from '../../shared/company-select';
 import { DatePipe } from '@angular/common';
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, DestroyRef, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { DashboardService } from '../../services/dashboard';
@@ -458,8 +458,15 @@ export class Dashboard {
   ];
 
   constructor() {
+    inject(DestroyRef).onDestroy(() => {
+      this.request.cancel();
+    });
+    let previousCompany: string | undefined;
     this.route.queryParamMap.pipe(takeUntilDestroyed()).subscribe((params) => {
-      this.selectedCompany.set(params.get('company') || 'all');
+      const company = params.get('company') || 'all';
+      this.selectedCompany.set(company);
+      if (company === previousCompany) return;
+      previousCompany = company;
       this.load();
     });
   }
@@ -482,7 +489,7 @@ export class Dashboard {
   onCompanyChange(value: string) {
     void this.router.navigate([], {
       relativeTo: this.route,
-      queryParams: { company: value },
+      queryParams: { company: value, detailsCursor: null, detailsPage: null },
       queryParamsHandling: 'merge',
     });
   }

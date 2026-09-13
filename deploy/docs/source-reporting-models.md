@@ -55,7 +55,7 @@ All 13 configured collection types now have a reporting path. This is a projecti
 - Migration application and repeatability tested on an isolated PostgreSQL 16 container with no production data.
 - API suite: 42 tests passed, including a 50,100-voucher upload, complete source-model publication, rejected follow-up preservation, simulated publication rollback and consistent/read-only reporting queries.
 - Agent suite: 31 tests passed using mocked exports and local fixtures. This does not verify the remote Tally version/customizations.
-- UI suite: 34 tests passed, including stale-request cancellation, missing-data/currency gates and existing responsive component behavior.
+- UI suite: 41 tests passed, including stale-request cancellation, missing-data/currency gates and existing responsive component behavior.
 - Angular production build passed. Browser layout, remote Tally acceptance and production reconciliation remain release checks.
 
 ## Growth and storage operations
@@ -85,3 +85,7 @@ See [the machine-readable result](reporting-benchmark-2026-09-13.json). Five syn
 Initial sync per 10,000-voucher company took 8.58 to 14.67 seconds; unchanged repeat sync took 3.85 to 6.22 seconds. All 100,000 unchanged postings kept their original evidence batch. These timings include source parsing/validation and sync publication, but exclude remote export and archive transfer. Measurements invoke report service functions over local PostgreSQL; HTTP transport, authentication middleware and browser rendering are excluded. Query samples were 15 sequential calls, and five groups for concurrent requests; this is a small local diagnostic, not a sustained production load test. UI regression tests ran on the same workstation during the benchmark, so compare magnitudes rather than treating differences between runs as guarantees.
 
 The benchmark initially exposed a 30-second summary timeout caused by stale planner statistics after a company bulk load. Statistics are now refreshed before summary joins. The populated-schema upgrade test also verifies that deferred backfill checks are completed before new foreign keys are added.
+
+## Acceptance follow-up
+
+See [the acceptance review](acceptance-review-2026-09-13.md) for additional navigation, company-selection, failure-recovery and authenticated HTTP verification. Automated acceptance is passing; real browser and remote Tally acceptance remain unverified.

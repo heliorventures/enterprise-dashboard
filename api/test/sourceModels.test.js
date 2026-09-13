@@ -298,6 +298,38 @@ test(
     );
     assert.equal(result.allocations[0].amount, "-10.00");
     assert.equal(result.postings[0].amount, "10.00");
+    // Exercise the real authenticated HTTP/SQL contract used by the UI.
+    const { app } = require("../src/server");
+    const server = app.listen(0, "127.0.0.1");
+    await new Promise((resolve) => server.once("listening", resolve));
+    try {
+      const base = `http://127.0.0.1:${server.address().port}`;
+      const cookie =
+        "helior_session=" +
+        require("../src/auth").sign(require("../src/config").dashboardUser);
+      const paths = [
+        "/api/companies",
+        `/api/reports/source?company=${first.companyId}&fromMonth=2026-04&toMonth=2026-04`,
+        `/api/reports/source/masters?company=${first.companyId}`,
+        `/api/reports/source/details?company=${first.companyId}`,
+        "/api/tally/archives",
+        "/api/tally/issues?batch=model-valid",
+        "/api/tally/source-record?batch=model-valid&collection=LEDGER&ordinal=0",
+      ];
+      for (const path of paths) {
+        assert.equal((await fetch(base + path)).status, 401);
+        const response = await fetch(base + path, { headers: { cookie } });
+        assert.equal(response.status, 200, path);
+        const body = await response.json();
+        if (path.startsWith("/api/reports/source?"))
+          assert.equal(body.postings[0].amount, "10.00");
+        if (path.includes("source-record"))
+          assert.equal(body.payload.tag, "LEDGER");
+      }
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+
     assert.equal(
       (
         await db.query(
@@ -359,6 +391,16 @@ test(
       cursor: page1.nextCursor,
     });
     assert.equal(page2.hasMore, false);
+    await unpack.unpackBatch("model-valid", { force: true });
+    await assert.rejects(
+      reports.details({
+        company: String(first.companyId),
+        pageSize: 1,
+        cursor: page1.nextCursor,
+      }),
+      (error) => error.status === 409,
+    );
+
     assert.notEqual(page1.items[0].id, page2.items[0].id);
     assert.equal(
       (

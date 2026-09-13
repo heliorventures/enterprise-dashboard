@@ -1,0 +1,4 @@
+generated/
+release/
+test-artifacts/
+.env.local

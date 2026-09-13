@@ -1,3 +1,4 @@
+import { CompanyDirectory } from '../../services/company-directory';
 import { FilterPanel } from '../../shared/filter-panel';
 import { CompanySelect } from '../../shared/company-select';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -8,13 +9,14 @@ import { ledgerColumns, recordKey } from '../../shared/record-columns';
 import { Component, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 import { DashboardService } from '../../services/dashboard';
-import { CompanyOption, LedgerRow } from '../../models/books';
+import { LedgerRow } from '../../models/books';
 import { compactInr, drCr, fullInr } from '../../shared/money';
 import { downloadCsv } from '../../shared/csv';
 import { Icon } from '../../shared/icon';
 import { Pager } from '../../shared/pager';
 
 @Component({
+  providers: [CompanyDirectory],
   selector: 'app-ledgers',
   imports: [FilterPanel, CompanySelect, DataTable, PageHeader, Pager, Icon],
   templateUrl: './ledgers.html',
@@ -40,7 +42,8 @@ export class Ledgers {
   readonly total = signal(0);
   readonly items = signal<LedgerRow[]>([]);
   readonly groups = signal<string[]>([]);
-  readonly companies = signal<CompanyOption[]>([]);
+  private readonly directory = inject(CompanyDirectory);
+  readonly companies = this.directory.companies;
 
   readonly compactInr = compactInr;
   readonly fullInr = fullInr;
@@ -65,13 +68,6 @@ export class Ledgers {
   );
 
   constructor() {
-    this.api
-      .getDashboard('all')
-      .pipe(takeUntilDestroyed())
-      .subscribe({
-        next: (dashboard) => this.companies.set(dashboard.companies),
-        error: () => undefined,
-      });
     this.route.queryParamMap.pipe(takeUntilDestroyed()).subscribe((params) => {
       this.company.set(params.get('company') || 'all');
       this.group.set(params.get('group') || '');

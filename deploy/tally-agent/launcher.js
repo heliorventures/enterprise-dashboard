@@ -5,8 +5,8 @@ const os=require('node:os');
 const {createHash,randomUUID}=require('node:crypto');
 const {run}=require('./agent');
 async function withLock(configFile,work) {
-  const configPath=path.resolve(configFile);
-  const config=JSON.parse(fs.readFileSync(configPath,'utf8'));
+  const configPath=typeof configFile==='string'?path.resolve(configFile):path.resolve('config.json');
+  const config=typeof configFile==='string'?JSON.parse(fs.readFileSync(configPath,'utf8')):configFile;
   const state=path.resolve(path.dirname(configPath),config.stateDirectory || 'state');
   fs.mkdirSync(state,{recursive:true});
   const canonical=fs.realpathSync(state);

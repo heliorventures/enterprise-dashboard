@@ -1,16 +1,11 @@
+import { CompanyDirectory } from '../../services/company-directory';
 import { SourceInsights } from '../../shared/source-insights';
 import { ProjectSummary, projectActivityColumns } from '../../shared/finance-summary';
 import { CompanySelect } from '../../shared/company-select';
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, DestroyRef, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
-import {
-  CompanyOption,
-  ExpenseReport,
-  ProjectReport,
-  ProjectResult,
-  VoucherRow,
-} from '../../models/books';
+import { ExpenseReport, ProjectReport, ProjectResult, VoucherRow } from '../../models/books';
 import { DashboardService } from '../../services/dashboard';
 import { DataColumn, DataTable, RecordLink } from '../../shared/data-table';
 import { ChartRow, FinancialChart } from '../../shared/financial-chart';
@@ -37,6 +32,7 @@ interface ExpenseView {
 }
 
 @Component({
+  providers: [CompanyDirectory],
   selector: 'app-reports',
   imports: [
     SourceInsights,
@@ -70,7 +66,8 @@ export class Reports {
   readonly voucherTotal = signal(0);
   readonly loadingVouchers = signal(false);
   readonly voucherError = signal('');
-  readonly companies = signal<CompanyOption[]>([]);
+  private readonly directory = inject(CompanyDirectory);
+  readonly companies = this.directory.companies;
   readonly compactInr = compactInr;
   readonly fullInr = fullInr;
   readonly lastMonthEnd = monthEnd;
@@ -194,13 +191,19 @@ export class Reports {
   readonly projectColumns = projectActivityColumns;
 
   constructor() {
-    this.api
-      .getDashboard('all')
-      .pipe(takeUntilDestroyed())
-      .subscribe({ next: (d) => this.companies.set(d.companies), error: () => undefined });
+    inject(DestroyRef).onDestroy(() => {
+      this.reportRequest.cancel();
+      this.projectRequest.cancel();
+      this.voucherRequest.cancel();
+    });
+
+    let previousCompany: string | undefined;
     this.route.queryParamMap.pipe(takeUntilDestroyed()).subscribe((params) => {
-      this.company.set(params.get('company') || 'all');
+      const company = params.get('company') || 'all';
+      this.company.set(company);
       this.group.set(params.get('group') || '');
+      if (company === previousCompany) return;
+      previousCompany = company;
       this.load();
     });
   }

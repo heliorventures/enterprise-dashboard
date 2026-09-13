@@ -179,7 +179,7 @@ async function details(query = {}, client) {
     period = await periodOf(query, id, client);
   const published = (
     await client.query(
-      `SELECT s.company_id,s.batch_id FROM finance_snapshots s JOIN "Companies" c ON c."CompanyID"=s.company_id WHERE c."IsActive" AND ($1=0 OR s.company_id=$1) ORDER BY s.company_id`,
+      `SELECT s.company_id,s.batch_id,s.model_version,s.applied_at FROM finance_snapshots s JOIN "Companies" c ON c."CompanyID"=s.company_id WHERE c."IsActive" AND ($1=0 OR s.company_id=$1) ORDER BY s.company_id`,
       [id],
     )
   ).rows;

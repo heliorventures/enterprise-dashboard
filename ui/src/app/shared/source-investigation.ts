@@ -17,6 +17,7 @@ import { SourceBrowser } from './source-browser';
         }
         @if (error()) {
           <p class="banner" role="alert">{{ error() }}</p>
+          <button class="btn ghost" type="button" (click)="retry()">Retry loading record</button>
         }
         @if (record()) {
           <pre tabindex="0" aria-label="Source record JSON">{{ record() }}</pre>
@@ -71,12 +72,14 @@ export class SourceInvestigation {
   private readonly params = toSignal(this.route.queryParamMap, {
     initialValue: this.route.snapshot.queryParamMap,
   });
+  private readonly revision = signal(0);
   readonly record = signal('');
   readonly error = signal('');
   readonly loading = signal(false);
   readonly location = signal('');
   constructor() {
     effect((onCleanup) => {
+      this.revision();
       const p = this.params(),
         batch = p.get('batch'),
         collection = p.get('sourceCollection'),
@@ -105,6 +108,9 @@ export class SourceInvestigation {
         });
       onCleanup(() => request.unsubscribe());
     });
+  }
+  retry() {
+    this.revision.update((n) => n + 1);
   }
   close() {
     void this.router.navigate([], {

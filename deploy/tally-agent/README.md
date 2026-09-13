@@ -1,5 +1,7 @@
 # TallyPrime sender for Windows
 
+For an interactive Windows app with company selection, progress and an EXE installer, see [Helior Finance Sync](../../desktop/finance-sync/README.md). It reuses this source agent and the existing API. The command-line and scheduled entry points retain their existing default behavior.
+
 `tally-008` corrects source parsing for confirmed Tally U+0004/U+0005 controls (numeric references and literal characters), preserving their decoded values in JSON. It uses a narrow adapter over the pinned saxes 6 parser; it does not globally disable XML validation or convert all exports to XML 1.1. Escaped text, CDATA references, Unicode text, and control markers retain their values. Source diagnostics show `tallyControlCharacters` parser counters. Existing source API/schema version 1 already stores these values; no new migration is needed beyond 004.
 
 `tally-007` adds detailed export logging to the same dry-run command: request/response events, progress every 10 seconds, underlying network/parser codes, XML path/line/column, offending numeric character references when available, received byte/record counters and a final failed-collection summary. It does not alter source values or automatically repair malformed XML. Send the `tally_export_failed` events to diagnose failed captures; raw accounting values and response bodies are not printed.

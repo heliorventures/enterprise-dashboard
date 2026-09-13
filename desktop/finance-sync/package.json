@@ -1,0 +1,27 @@
+{
+  "name": "helior-finance-sync",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Synchronize accessible Tally companies with Helior Finance",
+  "author": "Helior",
+  "main": "src/main.js",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "prepare:app": "node scripts/prepare.js",
+    "start": "npm run prepare:app && node scripts/launch-electron.js .",
+    "build": "npm run prepare:app && electron-builder --config electron-builder.config.js --win nsis --x64 --publish never",
+    "build:test": "node scripts/prepare.js --test && electron-builder --config electron-builder.config.js --win nsis --x64 --publish never --config.extraMetadata.version=1.0.0-test --config.artifactName=Helior-Finance-Sync-TEST-Setup.exe",
+    "smoke": "node scripts/launch-electron.js scripts/smoke.js"
+  },
+  "dependencies": {
+    "saxes": "6.0.0"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "2.6.2",
+    "electron": "44.3.0",
+    "electron-builder": "26.15.3"
+  }
+}

@@ -34,11 +34,12 @@ async function deliver(config, token, directory, manifest, log, fetcher=fetch, s
   async function post(operation, value) {
     const body=JSON.stringify(value);
     for (let attempt=0; attempt<4; attempt++) {
+      config.signal?.throwIfAborted();
       try {
         requestBytes+=Buffer.byteLength(body);
         const response=await fetcher(`${config.apiUrl}/api/ingest/tally/${endpoint}${operation}`, {
           method:'POST', headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`},
-          body, redirect:'error', signal:AbortSignal.timeout(config.requestTimeoutMs) });
+          body, redirect:'error', signal:config.signal?AbortSignal.any([config.signal,AbortSignal.timeout(config.requestTimeoutMs)]):AbortSignal.timeout(config.requestTimeoutMs) });
         if (response.status!==200) {
           const error=Object.assign(new Error(`API ${operation}: HTTP ${response.status}`),{retryable:response.status===429 || response.status>=500});
           await response.body?.cancel(); throw error;
@@ -47,6 +48,7 @@ async function deliver(config, token, directory, manifest, log, fetcher=fetch, s
         if (result.ok!==true || result.batchId!==manifest.batchId) throw Object.assign(new Error('API acknowledgement is invalid'),{retryable:false});
         return result;
       } catch (error) {
+        config.signal?.throwIfAborted();
         if (error.retryable===false || attempt===3) throw Object.assign(error,{retries,requestBytes,chunksAcknowledged});
         retries++;
         log({event:'retry',company:manifest.company.name,batchId:manifest.batchId,operation,attempt:attempt+1});
@@ -55,10 +57,13 @@ async function deliver(config, token, directory, manifest, log, fetcher=fetch, s
     }
   }
   const begun = await post('begin',manifest);
+  log({event:'upload_started',company:manifest.company.name,batchId:manifest.batchId,chunkCount:manifest.chunkCount});
   for (let index=0; !begun.completed && index<manifest.chunkCount; index++) {
     const payload=JSON.parse(fs.readFileSync(path.join(directory,`${index}.json`),'utf8'));
     await post('chunk',{batchId:manifest.batchId,index,...payload}); chunksAcknowledged++;
+    log({event:'upload_progress',company:manifest.company.name,batchId:manifest.batchId,chunksAcknowledged,chunkCount:manifest.chunkCount});
   }
+  log({event:'upload_finalizing',company:manifest.company.name,batchId:manifest.batchId});
   const result=await post('complete',{batchId:manifest.batchId});
   if(sourceMode) {
     const expected=manifest.collections.every(c=>c.status==='success')&&manifest.consistency!=='changed'?'complete':'partial';

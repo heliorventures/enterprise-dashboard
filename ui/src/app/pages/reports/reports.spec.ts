@@ -86,4 +86,16 @@ describe('Reports scope and loading', () => {
       query: { company: '1', q: 'Rent', from: '2026-08-01', to: '2026-08-31' },
     });
   });
+  it('does not reload the page report for source navigation and cancels requests on leave', async () => {
+    const { Router } = await import('@angular/router');
+    const router = TestBed.inject(Router),
+      http = TestBed.inject(HttpTestingController);
+    const fixture = TestBed.createComponent(Reports);
+    const pending = http.expectOne('/api/reports/expenses?company=all');
+    await router.navigateByUrl('/?detailType=posting&detailsCursor=b');
+    expect(pending.cancelled).toBe(false);
+    http.expectNone('/api/reports/expenses?company=all');
+    fixture.destroy();
+    expect(pending.cancelled).toBe(true);
+  });
 });

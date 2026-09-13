@@ -40,6 +40,7 @@ async function capture(config,company,directory,log) {
   const capturedAt=new Date().toISOString(),collections=[];
   let storedBytes=0;
   for(const collection of Object.keys(source.CATALOG)) {
+    config.signal?.throwIfAborted();
     const file=path.join(directory,`${collection}.jsonl`);
     let count=0,sourceBytes=0;
     const collectionStarted=Date.now();
@@ -63,6 +64,7 @@ async function capture(config,company,directory,log) {
     } catch(error) {
       // Never label the prefix of a truncated/failed collection as complete.
       fs.unlinkSync(file);
+      config.signal?.throwIfAborted();
       collections.push({name:collection,status:'failed',count:0});
       log({event:'source_collection_failed',company:company.name,collection,error:error.message,
         discardedRecords:count,durationMs:Date.now()-collectionStarted,diagnostic:error.exportDiagnostic||null});
@@ -76,9 +78,10 @@ async function capture(config,company,directory,log) {
     if(after.length!==1||after[0].NAME!==company.name) consistency='changed';
     else if(JSON.stringify([after[0].LASTALTERID||'',after[0].LASTVCHID||''])!==company.marker) consistency='changed';
     else if(company.marker!=='["",""]') consistency='stable';
-  } catch(error) {consistency='changed';log({event:'source_consistency_failed',company:company.name,error:error.message,diagnostic:error.exportDiagnostic||null});}
+  } catch(error) {config.signal?.throwIfAborted();consistency='changed';log({event:'source_consistency_failed',company:company.name,error:error.message,diagnostic:error.exportDiagnostic||null});}
   log({event:'source_consistency_finished',company:company.name,consistency});
   const stats=await pack(directory,collections);
+  config.signal?.throwIfAborted();
   const manifest={batchId:path.basename(directory),capturedAt,company:{name:company.name,externalId:company.externalId},
     schemaVersion:1,profile:'company-business-v1',collections,consistency,...stats};
   saveJson(path.join(directory,'manifest.json'),manifest);
@@ -86,8 +89,19 @@ async function capture(config,company,directory,log) {
   for(const c of collections.filter(c=>c.status==='success')) fs.unlinkSync(path.join(directory,`${c.name}.jsonl`));
   return manifest;
 }
-async function run(configFile,dryRun=false) {
-  const base=path.dirname(path.resolve(configFile)),config=JSON.parse(fs.readFileSync(configFile,'utf8'));
+async function discoverCompanies(config) {
+  const companies=[];
+  await tally.extract(config,'COMPANY',null,row=>companies.push({name:tally.required(row.NAME,200,'company name'),
+    externalId:tally.required(row.GUID,200,'company GUID'),marker:JSON.stringify([row.LASTALTERID||'',row.LASTVCHID||''])}));
+  if(!companies.length) throw Object.assign(new Error('No source companies exposed by Tally'),{code:'NO_COMPANIES'});
+  if(new Set(companies.map(c=>c.externalId)).size!==companies.length) throw new Error('Duplicate source company GUIDs');
+  return companies;
+}
+async function run(configFile,dryRun=false,options={}) {
+  const base=path.dirname(path.resolve(configFile)),config={...(options.config||JSON.parse(fs.readFileSync(configFile,'utf8')))};
+  if(options.selectedCompanyIds!==undefined&&(!Array.isArray(options.selectedCompanyIds)||!options.selectedCompanyIds.length||options.selectedCompanyIds.some(id=>typeof id!=='string'||!id))) throw new Error('Select at least one company; invalid selection');
+  const selected=options.selectedCompanyIds===undefined?null:new Set(options.selectedCompanyIds);
+  config.signal=options.signal;
   const api=new URL(config.apiUrl),url=new URL(config.tallyUrl);
   if(api.protocol!=='https:'||api.username||api.password||api.search||api.hash||api.pathname!=='/') throw new Error('apiUrl must be an HTTPS origin without credentials');
   if(!['http:','https:'].includes(url.protocol)||url.username||url.password) throw new Error('Invalid tallyUrl');
@@ -101,7 +115,10 @@ async function run(configFile,dryRun=false) {
   const log=fields=>{
     if(fields.event==='source_collection_failed')failedCollections.push({company:fields.company,collection:fields.collection,
       error:fields.error,errorCodes:fields.diagnostic?.errorCodes||[],requestId:fields.diagnostic?.requestId||null});
-    const line=JSON.stringify({at:new Date().toISOString(),runId,...fields});fs.appendFileSync(logFile,line+'\n',{mode:0o600});console.log(line);
+    const event={at:new Date().toISOString(),runId,...fields};
+    const line=JSON.stringify(event);fs.appendFileSync(logFile,line+'\n',{mode:0o600});
+    if(!options.quiet)console.log(line);
+    options.onEvent?.(event);
   };
   config.exportLog=log;
   let succeeded=0,failed=0,recordCount=0;
@@ -110,37 +127,47 @@ async function run(configFile,dryRun=false) {
     const retention=config.logRetentionDays??30;
     if(!Number.isInteger(retention)||retention<1) throw new Error('Invalid logRetentionDays');
     for(const file of fs.readdirSync(logs)) if(/^[\dTZ-]+-[a-f0-9-]+\.jsonl$/.test(file)&&fs.statSync(path.join(logs,file)).mtimeMs<Date.now()-retention*86400000) fs.unlinkSync(path.join(logs,file));
-    const token=dryRun ? '' : config.tokenEnvironmentVariable ? (process.env[config.tokenEnvironmentVariable]||'').trim()
+    config.signal?.throwIfAborted();
+    const token=dryRun ? '' : options.token!==undefined?options.token:config.tokenEnvironmentVariable ? (process.env[config.tokenEnvironmentVariable]||'').trim()
       : fs.readFileSync(path.resolve(base,config.tokenFile||'token.txt'),'utf8').trim();
     if(!dryRun&&(token.length<32||/[\r\n]/.test(token))) throw new Error('Token file must contain TALLY_INGEST_TOKEN');
     const seen=new Set();
+    // Interactive runs must revalidate selected identities before any delivery.
+    // CLI runs retain their established outbox-first behavior.
+    let companies;
+    if(selected) {
+      companies=await discoverCompanies(config);
+      if([...selected].some(id=>!companies.some(c=>c.externalId===id))) throw new Error('A selected company is no longer available. Load it in Tally and check again.');
+    }
     async function send(directory,m) {
       try {
-        const result=await deliver(config,token,directory,m,log);
+        const result=await deliver(config,token,directory,m,fields=>log({companyExternalId:m.company.externalId,...fields}));
         fs.rmSync(directory,{recursive:true});
         recordCount+=m.recordCount;
         if(result.coverageStatus==='complete') succeeded++;else failed++;
-        log({event:'source_snapshot_saved',company:m.company.name,batchId:m.batchId,records:m.recordCount,...result});
-      } catch(error) {failed++;log({event:'source_upload_failed',company:m.company.name,batchId:m.batchId,error:error.message});}
+        log({event:'source_snapshot_saved',companyExternalId:m.company.externalId,company:m.company.name,batchId:m.batchId,records:m.recordCount,...result});
+      } catch(error) {config.signal?.throwIfAborted();failed++;log({event:'source_upload_failed',companyExternalId:m.company.externalId,company:m.company.name,batchId:m.batchId,error:error.message});}
     }
     if(!dryRun) for(const id of fs.readdirSync(outbox).sort()) {
+      config.signal?.throwIfAborted();
       if(!/^[a-f0-9-]{36}$/.test(id)) continue;
       const directory=path.join(outbox,id),file=path.join(directory,'manifest.json');
       if(!fs.existsSync(file)) {fs.rmSync(directory,{recursive:true});continue;}
-      const m=JSON.parse(fs.readFileSync(file,'utf8'));seen.add(m.company.externalId);await send(directory,m);
+      const m=JSON.parse(fs.readFileSync(file,'utf8'));
+      if(selected&&!selected.has(m.company.externalId))continue;
+      seen.add(m.company.externalId);
+      log({event:'source_pending_retry',companyExternalId:m.company.externalId,company:m.company.name,batchId:m.batchId});
+      await send(directory,m);
     }
-    await ensureTally(config,base,log);
-    const companies=[];
-    await tally.extract(config,'COMPANY',null,row=>companies.push({name:tally.required(row.NAME,200,'company name'),
-      externalId:tally.required(row.GUID,200,'company GUID'),marker:JSON.stringify([row.LASTALTERID||'',row.LASTVCHID||''])}));
-    if(!companies.length) throw new Error('No source companies exposed by Tally');
-    if(new Set(companies.map(c=>c.externalId)).size!==companies.length) throw new Error('Duplicate source company GUIDs');
+    if(!companies) {await ensureTally(config,base,log);companies=await discoverCompanies(config);}
     log({event:'companies_discovered',count:companies.length});
     for(const company of companies) {
+      config.signal?.throwIfAborted();
+      if(selected&&!selected.has(company.externalId))continue;
       if(seen.has(company.externalId)) {log({event:'source_company_skipped',company:company.name,reason:'Pending capture retried this run'});continue;}
       const directory=path.join(dryRun?path.join(state,'source-preview'):outbox,randomUUID());
       try {
-        const m=await capture(config,company,directory,log);
+        const m=await capture(config,company,directory,fields=>log({companyExternalId:company.externalId,...fields}));
         if(dryRun) {
           const complete=m.collections.every(c=>c.status==='success')&&m.consistency!=='changed';
           if(complete)succeeded++;else failed++;
@@ -148,12 +175,13 @@ async function run(configFile,dryRun=false) {
           log({event:'source_preview',company:company.name,directory,records:m.recordCount,coverageStatus:complete?'complete':'partial',consistency:m.consistency});
         } else await send(directory,m);
       } catch(error) {
-        failed++;log({event:'source_capture_failed',company:company.name,error:error.message});
         if(fs.existsSync(directory)&&!fs.existsSync(path.join(directory,'manifest.json'))) fs.rmSync(directory,{recursive:true});
+        config.signal?.throwIfAborted();
+        failed++;log({event:'source_capture_failed',companyExternalId:company.externalId,company:company.name,error:error.message});
       }
     }
-  } catch(error) {failed++;log({event:'run_failure',error:error.message,diagnostic:error.exportDiagnostic||null});}
-  finally {log({event:'run_finished',mode:'source',dryRun,succeeded,failed,records:recordCount,failedCollections,durationMs:Date.now()-started});}
+  } catch(error) {failed++;log({event:config.signal?.aborted?'run_cancelled':'run_failure',error:config.signal?.aborted?'Sync stopped. Completed captures remain available for retry.':error.message,diagnostic:error.exportDiagnostic||null});}
+  finally {log({event:'run_finished',mode:'source',dryRun,cancelled:config.signal?.aborted===true,succeeded,failed,records:recordCount,failedCollections,durationMs:Date.now()-started});}
   return failed?1:0;
 }
-module.exports={run,capture,pack};
+module.exports={run,capture,pack,discoverCompanies};

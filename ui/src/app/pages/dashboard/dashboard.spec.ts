@@ -155,4 +155,16 @@ describe('Dashboard', () => {
         .value(fixture.componentInstance.fundTotalRows()[0]),
     ).toBe('Not available');
   });
+  it('does not reload the page report for source navigation and cancels requests on leave', async () => {
+    const { Router } = await import('@angular/router');
+    const router = TestBed.inject(Router),
+      http = TestBed.inject(HttpTestingController);
+    const fixture = TestBed.createComponent(Dashboard);
+    const pending = http.expectOne('/api/dashboard?company=all');
+    await router.navigateByUrl('/?detailType=posting&detailsCursor=b');
+    expect(pending.cancelled).toBe(false);
+    http.expectNone('/api/dashboard?company=all');
+    fixture.destroy();
+    expect(pending.cancelled).toBe(true);
+  });
 });

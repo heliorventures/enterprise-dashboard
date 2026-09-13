@@ -59,4 +59,62 @@ describe('Source cursor navigation', () => {
     reset.flush({ ...response, nextCursor: null });
     http.verify();
   });
+  it('preserves Previous after browser-history navigation and provides retry on failure', async () => {
+    const router = TestBed.inject(Router),
+      http = TestBed.inject(HttpTestingController);
+    await router.navigateByUrl('/?company=1');
+    const fixture = TestBed.createComponent(SourceBrowser);
+    fixture.componentRef.setInput('mode', 'details');
+    fixture.componentRef.setInput('title', 'Records');
+    fixture.detectChanges();
+    const respond = (cursor: string | null) =>
+      http
+        .expectOne((r) => r.url === '/api/reports/source/details')
+        .flush({ items: [], total: null, nextCursor: cursor });
+    respond('b');
+    fixture.componentInstance.go(2);
+    await fixture.whenStable();
+    fixture.detectChanges();
+    respond('c');
+    fixture.componentInstance.go(2);
+    await fixture.whenStable();
+    fixture.detectChanges();
+    respond(null);
+    await router.navigateByUrl('/?company=1&detailsCursor=b');
+    fixture.detectChanges();
+    respond('c');
+    fixture.componentInstance.go(0);
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const first = http.expectOne((r) => r.url === '/api/reports/source/details');
+    expect(first.request.params.has('cursor')).toBe(false);
+    first.flush({}, { status: 500, statusText: 'Unavailable' });
+    fixture.detectChanges();
+    const retry = Array.from(fixture.nativeElement.querySelectorAll('button')).find((b: any) =>
+      b.textContent.includes('Retry'),
+    ) as HTMLButtonElement;
+    expect(retry).toBeTruthy();
+    retry.click();
+    fixture.detectChanges();
+    respond(null);
+    http.verify();
+  });
+  it('passes the selected company to master and archive browsing', async () => {
+    const router = TestBed.inject(Router),
+      http = TestBed.inject(HttpTestingController);
+    await router.navigateByUrl('/?company=2');
+    const fixture = TestBed.createComponent(SourceBrowser);
+    fixture.componentRef.setInput('mode', 'masters');
+    fixture.componentRef.setInput('title', 'Masters');
+    fixture.detectChanges();
+    const request = http.expectOne((r) => r.url === '/api/reports/source/masters');
+    expect(request.request.params.get('company')).toBe('2');
+    request.flush({ items: [], total: 0 });
+    fixture.componentRef.setInput('mode', 'archives');
+    fixture.detectChanges();
+    const archive = http.expectOne((r) => r.url === '/api/tally/archives');
+    expect(archive.request.params.get('company')).toBe('2');
+    archive.flush({ items: [], total: 0 });
+    http.verify();
+  });
 });
