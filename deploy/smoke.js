@@ -18,8 +18,8 @@ const assert = require('node:assert/strict');
   assert.equal(unpackUnauthorized.status, 401);
   const db=require('./src/db');
   try {
-    const result=await db.query("SELECT version FROM schema_migrations WHERE version='004_tally_source_archive.sql'");
-    assert.equal(result.rowCount,1,'Source archive migration must be applied');
+    const result=await db.query("SELECT version FROM schema_migrations WHERE version IN ('004_tally_source_archive.sql','010_project_source_keys.sql')");
+    assert.equal(result.rowCount,2,'Source archive and project key migrations must be applied');
     await db.query('SELECT 1 FROM tally_source_latest LIMIT 0');
     await db.query('SELECT 1 FROM tally_source_records LIMIT 0');
   } finally {await db.close();}

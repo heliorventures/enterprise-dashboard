@@ -95,6 +95,10 @@ function credentialsOk(username, password) {
 }
 
 function requireSession(req, res, next) {
+  if (!config.dashboardPassword) {
+    req.user = { name: config.dashboardUser };
+    return next();
+  }
   const user = verify(readCookie(req));
   if (!user) return res.status(401).json({ error: 'Sign in required' });
   req.user = user;

@@ -17,3 +17,14 @@ test('signed sessions verify for the configured user and expire', () => {
   assert.equal(auth.credentialsOk(config.dashboardUser, 'wrong'), false);
   assert.equal(auth.credentialsOk('other', config.dashboardPassword), false);
 });
+
+test('session gate is open when the API has no dashboard password', () => {
+  const previous = config.dashboardPassword;
+  config.dashboardPassword = '';
+  const req = {};
+  let nextCalled = false;
+  auth.requireSession(req, {}, () => { nextCalled = true; });
+  assert.equal(nextCalled, true);
+  assert.equal(req.user.name, config.dashboardUser);
+  config.dashboardPassword = previous;
+});
