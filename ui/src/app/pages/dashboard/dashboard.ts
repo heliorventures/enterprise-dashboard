@@ -25,6 +25,11 @@ import { LatestRequest } from '../../shared/latest-request';
 import { balanceTone, cleanText, recordKey } from '../../shared/record-columns';
 import { compactInr, fullInr } from '../../shared/money';
 
+interface FundingRow extends Partial<CompanyFunds> {
+  id: string;
+  name: string;
+}
+
 @Component({
   selector: 'app-dashboard',
   imports: [
@@ -265,60 +270,31 @@ export class Dashboard {
       primary: true,
     },
   ];
-  readonly fundTotalRows = computed(() => {
+  readonly fundTotalRows = computed<FundingRow[]>(() => {
     const rows = this.funds()?.byCompany || [];
     if (!rows.length) return [];
+    const sum = (key: keyof CompanyFunds) =>
+      rows.every((row) => typeof row[key] === 'number' && Number.isFinite(row[key]))
+        ? rows.reduce((total, row) => total + (row[key] as number), 0)
+        : undefined;
     return [
       {
         id: '__total',
         name: 'Combined company totals',
-        bank: rows.reduce((n, r) => n + r.bank, 0),
-        lastMonthExpenses: rows.reduce((n, r) => n + r.lastMonthExpenses, 0),
-        lastMonthInflow: rows.every((r) => r.lastMonthInflow != null)
-          ? rows.reduce((n, r) => n + r.lastMonthInflow!, 0)
-          : undefined,
-        nextMonthNeed: rows.reduce((n, r) => n + r.nextMonthNeed, 0),
+        bank: sum('bank'),
+        cash: sum('cash'),
+        cashAndBank: sum('cashAndBank'),
+        payables: sum('payables'),
+        receivables: sum('receivables'),
+        lastMonthExpenses: sum('lastMonthExpenses'),
+        lastMonthInflow: sum('lastMonthInflow'),
+        nextMonthNeed: sum('nextMonthNeed'),
+        nextMonthFund: sum('nextMonthFund'),
       },
     ];
   });
-  readonly totalColumns: DataColumn<{
-    id: string;
-    name: string;
-    bank: number;
-    lastMonthExpenses: number;
-    lastMonthInflow?: number;
-    nextMonthNeed: number;
-  }>[] = [
-    { key: 'name', label: 'Scope', value: (r) => r.name },
-    {
-      key: 'bank',
-      label: 'Bank balance',
-      value: (r) => reportedMoney(r.bank),
-      numeric: true,
-      primary: true,
-    },
-    {
-      key: 'spend',
-      label: 'Last-month spend / estimate',
-      value: (r) => reportedMoney(r.lastMonthExpenses),
-      numeric: true,
-      primary: true,
-    },
-    {
-      key: 'receipts',
-      label: 'Last-month inflow activity',
-      value: (r) => reportedMoney(r.lastMonthInflow),
-      numeric: true,
-      primary: true,
-    },
-    {
-      key: 'need',
-      label: 'Next-month spending estimate',
-      value: (r) => reportedMoney(r.nextMonthNeed),
-      numeric: true,
-      primary: true,
-    },
-  ];
+  readonly fundingHeadroom = (row: FundingRow) =>
+    row.cashAndBank != null && row.payables != null ? row.cashAndBank - row.payables : undefined;
   readonly runway = computed(() => {
     const f = this.funds();
     if (!f || !this.data()?.books.ledgerCount || !f.runRate.monthsUsed) return 'Not available';
@@ -326,26 +302,19 @@ export class Dashboard {
     if (f.runRate.monthlyExpense <= f.runRate.monthlyInflow) return 'No net burn in model';
     return f.runwayMonths == null ? 'Not available' : `${f.runwayMonths.toFixed(1)} months`;
   });
-  readonly fundColumns: DataColumn<CompanyFunds>[] = [
+  readonly fundColumns: DataColumn<FundingRow>[] = [
     {
       key: 'name',
       label: 'Company',
       value: (r) => r.name,
       link: (r) => ({ path: '/dashboard', query: { company: r.id } }),
+      linkDisabled: (r) => r.id === '__total',
     },
     {
       key: 'bank',
       label: 'Bank balance',
       value: (r) => reportedMoney(r.bank),
       numeric: true,
-      primary: true,
-    },
-    {
-      key: 'assessment',
-      label: 'Funding assessment',
-      value: (r) =>
-        ({ ok: 'Comfortable', watch: 'Watch', risk: 'Tight' })[r.tone] || 'Not available',
-      secondary: (r) => r.note,
       primary: true,
     },
     {
@@ -355,56 +324,85 @@ export class Dashboard {
       numeric: true,
     },
     {
-      key: 'payments',
-      label: 'Expense review',
-      value: () => 'Open expense report',
-      link: (r) => ({ path: '/reports', query: { company: r.id } }),
-    },
-    {
       key: 'cash',
       label: 'Cash & bank',
-      value: (r) => fullInr(r.cashAndBank),
+      value: (r) => reportedMoney(r.cashAndBank),
       numeric: true,
       primary: true,
     },
     {
       key: 'headroom',
       label: 'Cash less payables',
-      value: (r) => fullInr(r.cashAndBank - r.payables),
-      tone: (r) => balanceTone(r.cashAndBank - r.payables),
+      value: (r) => reportedMoney(this.fundingHeadroom(r)),
+      tone: (r) =>
+        this.fundingHeadroom(r) == null ? 'neutral' : balanceTone(this.fundingHeadroom(r)!),
       numeric: true,
       primary: true,
     },
     {
       key: 'next',
       label: 'Next-month model balance',
-      value: (r) => fullInr(r.nextMonthFund),
-      tone: (r) => balanceTone(r.nextMonthFund),
+      value: (r) => reportedMoney(r.nextMonthFund),
+      tone: (r) => (r.nextMonthFund == null ? 'neutral' : balanceTone(r.nextMonthFund)),
       numeric: true,
       primary: true,
     },
     {
       key: 'spend',
-      label: 'Last-month activity',
-      value: (r) => fullInr(r.lastMonthExpenses),
-      secondary: (r) =>
-        r.lastMonthEstimated
-          ? 'Estimated from ledger run-rate'
-          : 'Payments, purchases and debit notes',
+      label: 'Last-month spend / estimate',
+      value: (r) => reportedMoney(r.lastMonthExpenses),
       numeric: true,
     },
     {
       key: 'receivables',
       label: 'Receivables',
-      value: (r) => fullInr(r.receivables),
+      value: (r) => reportedMoney(r.receivables),
       numeric: true,
     },
-    { key: 'payables', label: 'Payables', value: (r) => fullInr(r.payables), numeric: true },
+    { key: 'payables', label: 'Payables', value: (r) => reportedMoney(r.payables), numeric: true },
     {
       key: 'budget',
-      label: 'Monthly model spend',
-      value: (r) => fullInr(r.nextMonthNeed),
+      label: 'Next-month spending estimate',
+      value: (r) => reportedMoney(r.nextMonthNeed),
       numeric: true,
+    },
+    {
+      key: 'assessment',
+      label: 'Funding assessment',
+      value: (r) =>
+        r.id === '__total'
+          ? '-'
+          : { ok: 'Comfortable', watch: 'Watch', risk: 'Tight' }[r.tone!] || 'Not available',
+      status: (r) =>
+        r.id === '__total'
+          ? null
+          : {
+              label:
+                { ok: 'Comfortable', watch: 'Watch', risk: 'Tight' }[r.tone!] || 'Not available',
+              detail:
+                (r.note || 'No supporting assessment is available.') +
+                (r.lastMonthExpenses == null
+                  ? ''
+                  : r.lastMonthEstimated
+                    ? ' Last-month spending is estimated from the ledger run-rate.'
+                    : ' Last-month activity includes payments, purchases and debit notes.'),
+              tone:
+                r.tone === 'risk'
+                  ? 'negative'
+                  : r.tone === 'watch'
+                    ? 'warning'
+                    : r.tone === 'ok'
+                      ? 'positive'
+                      : 'neutral',
+            },
+      primary: true,
+    },
+    {
+      key: 'payments',
+      label: 'Expense review',
+      value: (r) => (r.id === '__total' ? '-' : 'Review'),
+      link: (r) => ({ path: '/reports', query: { company: r.id } }),
+      linkDisabled: (r) => r.id === '__total',
     },
   ];
   readonly accountColumns: DataColumn<BankAccount>[] = [

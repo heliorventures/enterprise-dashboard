@@ -52,6 +52,19 @@ describe('DataTable', () => {
     expect(fixture.nativeElement.querySelectorAll('th[scope=col]')).toHaveLength(3);
     expect(fixture.nativeElement.textContent).toContain(row.name);
   });
+  it('aligns totals under the same columns and preserves totals in mobile cards', async () => {
+    const fixture = await render();
+    fixture.componentRef.setInput('footerRows', [
+      { ...row, id: 2, name: 'Combined company totals' },
+    ]);
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('tfoot')?.textContent).toContain(
+      'Combined company totals',
+    );
+    expect(fixture.nativeElement.querySelector('.mobile-records')?.textContent).toContain(
+      'Combined company totals',
+    );
+  });
   it('hides old rows while loading and distinguishes failures from empty results', async () => {
     const fixture = await render();
     fixture.componentRef.setInput('loading', true);

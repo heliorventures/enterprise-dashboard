@@ -57,7 +57,12 @@ import { ChartRow, FinancialChart } from './financial-chart';
         </button>
       </form>
       @if (error()) {
-        <p class="banner" role="alert">{{ error() }}</p>
+        <p class="banner" role="alert">
+          {{ error() }}
+          <button type="button" class="btn ghost" (click)="retry()" [disabled]="loading()">
+            Retry analysis
+          </button>
+        </p>
       }
     </ng-template>
     @if (data()?.period; as period) {
@@ -70,7 +75,12 @@ import { ChartRow, FinancialChart } from './financial-chart';
       <p role="status">Loading source analysis…</p>
     }
     @if (error()) {
-      <p class="banner" role="alert">{{ error() }}</p>
+      <p class="banner" role="alert">
+        {{ error() }}
+        <button type="button" class="btn ghost" (click)="retry()" [disabled]="loading()">
+          Retry analysis
+        </button>
+      </p>
     }
     @if (data(); as report) {
       @if (unpublished()) {
@@ -276,6 +286,8 @@ export class SourceInsights {
   readonly draftTo = signal<string | null>(null);
   readonly filters = viewChild<TemplateRef<unknown>>('filters');
   readonly refreshKey = input(0);
+  readonly retryKey = signal(0);
+  readonly retry = () => this.retryKey.update((value) => value + 1);
   readonly company = input('all');
   readonly detailsOpen = signal(false);
   readonly data = signal<SourceOverview | null>(null);
@@ -321,6 +333,7 @@ export class SourceInsights {
     });
     effect((onCleanup) => {
       this.refreshKey();
+      this.retryKey();
       const company = this.company();
       const params: Record<string, string> = { company };
       for (const [name, value] of Object.entries(JSON.parse(this.periodQuery()))) {
@@ -335,7 +348,7 @@ export class SourceInsights {
           this.loading.set(false);
         },
         error: () => {
-          this.error.set('Unable to load source analysis. Use the page Refresh button to retry.');
+          this.error.set('Unable to load source analysis. Retry to load this analysis.');
           this.loading.set(false);
         },
       });

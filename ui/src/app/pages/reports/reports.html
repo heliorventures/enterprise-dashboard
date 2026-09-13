@@ -23,14 +23,6 @@
           <a routerLink="/operations">View reporting coverage &amp; validation</a>
         </section>
       </app-page-drawer>
-      <button
-        class="btn ghost"
-        type="button"
-        (click)="load()"
-        [disabled]="loading() || source.loading()"
-      >
-        Refresh
-      </button>
     </div>
   </app-page-header>
   <div class="scope-line">
@@ -43,7 +35,9 @@
     }
   </div>
   @if (error()) {
-    <p class="banner" role="alert">{{ error() }}</p>
+    <p class="banner" role="alert">
+      {{ error() }} <button class="btn ghost" type="button" (click)="load()">Retry reports</button>
+    </p>
   }
   @if (loading()) {
     <p class="empty" role="status">Loading expense books…</p>
@@ -110,7 +104,10 @@
     @if (loadingProjects()) {
       <p role="status">Loading project results…</p>
     } @else if (projectError()) {
-      <p class="banner" role="alert">{{ projectError() }}</p>
+      <p class="banner" role="alert">
+        {{ projectError() }}
+        <button class="btn ghost" type="button" (click)="load()">Retry projects</button>
+      </p>
     } @else {
       @if (projects(); as projectReport) {
         <app-project-summary
@@ -169,6 +166,9 @@
         [loading]="loadingVouchers()"
         [error]="voucherError()"
       />
+      @if (voucherError()) {
+        <button type="button" class="btn ghost" (click)="load()">Retry voucher activity</button>
+      }
       @if (!loadingVouchers() && !voucherError()) {
         <p class="section-copy">
           Showing {{ vouchers().length }} of {{ voucherTotal() }} matching vouchers.

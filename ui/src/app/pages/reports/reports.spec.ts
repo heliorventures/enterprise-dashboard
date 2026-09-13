@@ -98,7 +98,7 @@ describe('Reports scope and loading', () => {
     fixture.destroy();
     expect(pending.cancelled).toBe(true);
   });
-  it('renders period controls in the shared drawer and refreshes analysis from the single page action', async () => {
+  it('renders period controls in the shared drawer without a routine refresh action', async () => {
     const fixture = TestBed.createComponent(Reports),
       http = TestBed.inject(HttpTestingController);
     http.expectOne('/api/companies').flush([]);
@@ -108,24 +108,22 @@ describe('Reports scope and loading', () => {
       .expectOne('/api/reports/projects?company=all')
       .flush({ companies: [], projectCount: 0, linkedVoucherCount: 0 });
     fixture.detectChanges();
-    http
-      .expectOne('/api/reports/source?company=all')
-      .flush({
-        companies: [],
-        groups: [],
-        postings: [],
-        allocations: [],
-        inventory: [],
-        masters: [],
-        period: { fromMonth: '2026-04', toMonth: '2026-09' },
-      });
+    http.expectOne('/api/reports/source?company=all').flush({
+      companies: [],
+      groups: [],
+      postings: [],
+      allocations: [],
+      inventory: [],
+      masters: [],
+      period: { fromMonth: '2026-04', toMonth: '2026-09' },
+    });
     await fixture.whenStable();
     const el = fixture.nativeElement as HTMLElement;
     expect(el.querySelectorAll('dialog input[type="month"]').length).toBe(2);
     const refresh = Array.from(el.querySelectorAll('button')).filter(
       (b) => b.textContent?.trim() === 'Refresh',
     );
-    expect(refresh.length).toBe(1);
+    expect(refresh.length).toBe(0);
     expect(el.textContent).not.toContain('Refresh analysis');
     expect(el.textContent).not.toContain('Reporting model');
     const form = el.querySelector('dialog form')!;
@@ -148,23 +146,6 @@ describe('Reports scope and loading', () => {
       period: { fromMonth: '2026-07', toMonth: '2026-09' },
     });
     await fixture.whenStable();
-    refresh[0].click();
-    fixture.detectChanges();
-    http
-      .expectOne('/api/reports/source?company=all&fromMonth=2026-07&toMonth=2026-09')
-      .flush({
-        companies: [],
-        groups: [],
-        postings: [],
-        allocations: [],
-        inventory: [],
-        masters: [],
-      });
-    http.expectOne('/api/reports/expenses?company=all').flush(report);
-    http
-      .expectOne('/api/reports/projects?company=all')
-      .flush({ companies: [], projectCount: 0, linkedVoucherCount: 0 });
-    http.expectOne((r) => r.url === '/api/vouchers').flush({ items: [], total: 0 });
     http.verify();
   });
 });

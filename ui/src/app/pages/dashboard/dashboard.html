@@ -42,13 +42,12 @@
           </section>
         }
       </app-page-drawer>
-      <button type="button" class="btn primary" (click)="load()" [disabled]="loading()">
-        {{ loading() ? 'Refreshing…' : 'Refresh' }}
-      </button>
     </div>
   </app-page-header>
   @if (error()) {
-    <p class="banner" role="alert">{{ error() }}</p>
+    <p class="banner" role="alert">
+      {{ error() }} <button class="btn ghost" type="button" (click)="load()">Retry overview</button>
+    </p>
   }
   @if (loading()) {
     <p class="empty" role="status">Loading financial overview…</p>
@@ -79,6 +78,27 @@
         />
       }
     </section>
+    @if (dashboard.books.ledgerCount && funds(); as fund) {
+      <article class="panel">
+        <header>
+          <div>
+            <h2>Company funding position</h2>
+            <p>
+              Book balances and spending estimates. Totals combine the companies below, before
+              eliminations. Hover, focus or tap an assessment icon for its basis.
+            </p>
+          </div>
+        </header>
+        <app-data-table
+          label="Company funding position"
+          [rows]="fund.byCompany"
+          [footerRows]="fundTotalRows()"
+          [columns]="fundColumns"
+          [rowKey]="recordKey"
+          [compact]="true"
+        />
+      </article>
+    }
     <div class="chart-grid">
       <app-financial-chart
         [compact]="true"
@@ -203,40 +223,7 @@
               </div>
             </details>
           </article>
-          <article class="panel">
-            <header>
-              <div>
-                <h2>Company funding position</h2>
-                <p>
-                  Keep individual company obligations visible even when the combined balance is
-                  positive.
-                </p>
-              </div>
-            </header>
-            <app-data-table
-              label="Company funding position"
-              [rows]="fund.byCompany"
-              [columns]="fundColumns"
-              [rowKey]="recordKey"
-            />
-          </article>
-          <article class="panel">
-            <header>
-              <div>
-                <h2>Company totals</h2>
-                <p>
-                  Sum of the company funding rows above. Spending includes estimates where the
-                  source lacks usable activity; no consolidation eliminations.
-                </p>
-              </div>
-            </header>
-            <app-data-table
-              label="Company funding totals"
-              [rows]="fundTotalRows()"
-              [columns]="totalColumns"
-              [rowKey]="recordKey"
-            />
-          </article>
+
           <article class="panel">
             <details>
               <summary>Bank and cash account details ({{ fund.accounts.length }})</summary>

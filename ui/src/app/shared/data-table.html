@@ -1,6 +1,8 @@
 <ng-template #cell let-row let-column="column">
-  @if (column.link; as linkFor) {
-    <a [routerLink]="linkFor(row).path" [queryParams]="linkFor(row).query">{{
+  @if (column.status?.(row); as status) {
+    <app-status-hint [status]="status" />
+  } @else if (column.link && !column.linkDisabled?.(row)) {
+    <a [routerLink]="column.link(row).path" [queryParams]="column.link(row).query">{{
       column.value(row)
     }}</a>
   } @else {
@@ -51,11 +53,27 @@
           </tr>
         }
       </tbody>
+      @if (footerRows().length) {
+        <tfoot>
+          @for (row of footerRows(); track rowKey()(row)) {
+            <tr>
+              @for (column of columns(); track column.key) {
+                <td [class.numeric]="column.numeric">
+                  <ng-container
+                    [ngTemplateOutlet]="cell"
+                    [ngTemplateOutletContext]="{ $implicit: row, column: column }"
+                  />
+                </td>
+              }
+            </tr>
+          }
+        </tfoot>
+      }
     </table>
   </div>
   <ul class="mobile-records" [attr.aria-label]="label()">
-    @for (row of rows(); track rowKey()(row)) {
-      <li>
+    @for (row of mobileRows(); track rowKey()(row)) {
+      <li [class.total-record]="footerRows().includes(row)">
         <dl>
           @for (column of primary(); track column.key; let first = $first) {
             <div [class.record-title]="first">

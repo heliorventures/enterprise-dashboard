@@ -134,7 +134,7 @@ describe('Dashboard', () => {
       'Headroom after 3-month budget',
       'Ledger groups',
       'Projects',
-      'Company totals',
+      'Company funding position',
     ])
       expect(text).toContain(label);
     expect(fixture.componentInstance.groupColumns[0].link!(d.books.groups[0])).toEqual({
@@ -168,9 +168,33 @@ describe('Dashboard', () => {
     ];
     TestBed.inject(HttpTestingController).expectOne('/api/dashboard?company=all').flush(d);
     expect(fixture.componentInstance.fundTotalRows()[0].lastMonthInflow).toBeUndefined();
+    expect(fixture.componentInstance.fundColumns.slice(-2).map((column) => column.key)).toEqual([
+      'assessment',
+      'payments',
+    ]);
+    expect(fixture.componentInstance.fundTotalRows()[0].bank).toBe(10);
     expect(
-      fixture.componentInstance.totalColumns
-        .find((c) => c.key === 'receipts')!
+      fixture.componentInstance.fundColumns.find((column) => column.key === 'assessment')!.status!(
+        fixture.componentInstance.fundTotalRows()[0],
+      ),
+    ).toBeNull();
+    fixture.detectChanges();
+    const el = fixture.nativeElement as HTMLElement;
+    const table = el.querySelector('app-data-table')!;
+    expect(table.querySelector('tfoot')?.textContent).toContain('Combined company totals');
+    expect(
+      table.compareDocumentPosition(el.querySelector('.chart-grid')!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      Array.from(el.querySelectorAll('button')).some(
+        (button) => button.textContent?.trim() === 'Refresh',
+      ),
+    ).toBe(false);
+
+    expect(
+      fixture.componentInstance.fundColumns
+        .find((c) => c.key === 'inflow')!
         .value(fixture.componentInstance.fundTotalRows()[0]),
     ).toBe('Not available');
   });

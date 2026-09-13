@@ -132,3 +132,34 @@ small {
     font-size: 13px;
   }
 }
+
+tfoot,
+.total-record {
+  background: var(--surface-tint);
+  font-weight: 650;
+}
+tfoot td {
+  border-top: 2px solid var(--line-strong);
+}
+:host(.compact) .desktop-table {
+  max-height: none;
+}
+:host(.compact) th,
+:host(.compact) td {
+  padding: 10px 12px;
+  min-width: 108px;
+}
+:host(.compact) th {
+  white-space: normal;
+  max-width: 150px;
+}
+:host(.compact) td:first-child {
+  min-width: 190px;
+  max-width: 250px;
+}
+:host(.compact) td {
+  vertical-align: middle;
+}
+:host(.compact) td:nth-last-child(-n + 2) {
+  text-align: center;
+}
