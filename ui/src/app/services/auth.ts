@@ -14,9 +14,11 @@ export class Auth {
 
   private readonly current = signal<AuthUser | null>(null);
   private readonly loaded = signal(false);
+  private readonly publicAccess = signal(false);
 
   readonly user = computed(() => this.current());
   readonly ready = computed(() => this.loaded());
+  readonly open = computed(() => this.publicAccess());
 
   constructor() {
     void this.ensure();
@@ -25,8 +27,9 @@ export class Auth {
   async ensure() {
     if (this.loaded()) return;
     try {
-      const result = await firstValueFrom(this.http.get<{ user: AuthUser }>('/api/auth/session'));
+      const result = await firstValueFrom(this.http.get<{ user: AuthUser; open?: boolean }>('/api/auth/session'));
       this.current.set(result.user);
+      this.publicAccess.set(result.open === true);
     } catch {
       this.current.set(null);
     } finally {

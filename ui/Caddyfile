@@ -17,17 +17,12 @@
     handle @sender {
         reverse_proxy enterprise-dashboard-api:3000
     }
+    handle /api/* {
+        reverse_proxy enterprise-dashboard-api:3000
+    }
     handle {
-        basic_auth {
-            {$DASHBOARD_USER} {$DASHBOARD_PASSWORD_HASH}
-        }
-        handle /api/* {
-            reverse_proxy enterprise-dashboard-api:3000
-        }
-        handle {
-            root * /srv
-            try_files {path} /index.html
-            file_server
-        }
+        root * /srv
+        try_files {path} /index.html
+        file_server
     }
 }

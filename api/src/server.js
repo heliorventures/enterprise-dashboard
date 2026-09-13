@@ -197,7 +197,9 @@ app.use((error, _req, res, _next) => res.status(error.status || 500).json({ erro
 
 async function start() {
   if (config.production && config.ingestToken.length < 32) throw new Error('TALLY_INGEST_TOKEN must contain at least 32 characters');
-  if (config.production && config.dashboardPassword.length < 8) throw new Error('DASHBOARD_PASSWORD must contain at least 8 characters');
+  if (config.production && config.dashboardPassword.length < 8) {
+    throw new Error('DASHBOARD_PASSWORD must contain at least 8 characters');
+  }
   await db.query('SELECT version FROM schema_migrations LIMIT 1');
   const server = app.listen(config.port, config.host, () => console.log('API listening on port ' + config.port));
   for (const signal of ['SIGTERM', 'SIGINT']) process.once(signal, () => {
