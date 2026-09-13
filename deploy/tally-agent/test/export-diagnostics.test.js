@@ -22,12 +22,12 @@ test('connection failures report nested causes and actionable endpoint without c
   assert.ok(codes(new AggregateError([Object.assign(new Error(),{code:'ENOTFOUND'})])).includes('ENOTFOUND'));
 });
 test('numeric XML reference failure reports the exact location and parser category, not record contents',async()=>{
-  await scenario(async()=>new Response(envelope('<GROUP NAME="PRIVATE_LEDGER"><PARENT>&#4; Private Amount 123.45</PARENT></GROUP>'),{headers:{'Content-Type':'application/xml; charset=utf-8'}}),async(config,events)=>{
+  await scenario(async()=>new Response(envelope('<GROUP NAME="PRIVATE_LEDGER"><PARENT>&#0; Private Amount 123.45</PARENT></GROUP>'),{headers:{'Content-Type':'application/xml; charset=utf-8'}}),async(config,events)=>{
     await assert.rejects(()=>source.extract(config,'GROUP','Company',()=>{}),/valid XML/);
     const e=events.find(e=>e.event==='tally_export_failed');
     assert.equal(e.stage,'parse');assert.equal(e.httpStatus,200);assert.ok(e.bytesReceived>0);
     assert.ok(e.errorCodes.includes('XML_INVALID_CHARACTER_REFERENCE'));
-    assert.equal(e.xmlCharacterReference,'&#4;');
+    assert.equal(e.xmlCharacterReference,'&#0;');
     assert.equal(e.xmlPath,'/ENVELOPE/BODY/DATA/COLLECTION/GROUP/PARENT');
     assert.equal(e.xmlLine,2);assert.ok(e.xmlColumn>0);assert.equal(e.recordsReceived,0);
     assert.ok(!JSON.stringify(events).includes('PRIVATE_LEDGER'));assert.ok(!JSON.stringify(events).includes('123.45'));

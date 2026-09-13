@@ -1,4 +1,4 @@
-const {SaxesParser}=require('saxes');
+const {TallySourceParser}=require('./tally-source-parser');
 const {exportXml,xmlCode,xmlReference}=require('./export-diagnostics');
 const escape=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
 const CATALOG=Object.freeze({COMPANY:'Company',GROUP:'Group',LEDGER:'Ledger',VOUCHERTYPE:'Voucher Type',
@@ -14,11 +14,11 @@ function request(collection,company) {
 // child lists. It never coerces an amount/date, trims data or collapses repeats.
 // XML entity spelling/CDATA boundaries are not retained; their decoded text is.
 function parser(collection,onRecord) {
-  const xml=new SaxesParser(),stack=[];
+  const xml=new TallySourceParser(),stack=[];
   let recordDepth=-1,recordBytes=0,hasCollection=false;
   const diagnostics=()=>({xmlLine:xml.line,xmlColumn:xml.column,xmlPosition:xml.position,
     xmlPath:'/'+stack.map(n=>n.name).join('/'),
-    ...xmlReference(xml)});
+    ...xmlReference(xml),tallyControlCharacters:{...xml.tallyControls}});
   const reject=(message,code='SOURCE_XML_ERROR')=>{throw Object.assign(new Error(message),{code,xmlDiagnostic:diagnostics()});};
   xml.on('doctype',()=>reject('Source XML DTD is not supported'));
   xml.on('error',error=>reject('Source response is not complete valid XML',xmlCode(error)));

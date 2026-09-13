@@ -1,5 +1,15 @@
 FINANCE TALLY SENDER - PORTABLE WINDOWS X64 PACKAGE
 
+TALLY-008 SOURCE CHARACTER COMPATIBILITY
+Source import now accepts the U+0004 and U+0005 control characters confirmed
+in real Tally exports, including numeric XML references and literal characters.
+Their original values are retained in JSON as \u0004 and \u0005. No character
+is stripped and no business meaning is inferred. Other structural XML errors
+still fail. Detailed logs include tallyControlCharacters parser counters.
+Replace the complete program bundle and use the same --dry-run command.
+Preserve config.json, token.txt and state. This update requires no additional
+API/schema change beyond the source archive deployment required for tally-006.
+
 TALLY-007 EXPORT DIAGNOSTICS
 The same Run-Sync.cmd --dry-run command now logs request start, HTTP response,
 10-second progress, completion and detailed export failures to state\logs.

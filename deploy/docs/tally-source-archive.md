@@ -1,5 +1,11 @@
 # Tally source archive (profile company-business-v1)
 
+## Tally control characters (tally-008)
+
+Real exports confirmed `&#4; Not Applicable` in `ADDLALLOCTYPE` and other fields, plus literal U+0005 inside voucher class names. The strict XML 1.0 parser rejected these before completing those collections. Source capture now has a narrow compatibility adapter over pinned saxes 6.0.0 that accepts U+0004/U+0005 in source values and returns the original code points. JSON serialization escapes them as `\u0004`/`\u0005`; PostgreSQL JSONB preserves them. No markers are removed or assigned a business meaning. Literal text `&amp;#4;` and reference-looking text inside CDATA are not decoded twice. All other syntax/resource checks remain; this does not enable XML 1.1 newline normalization or broadly ignore parse errors. Adapter tests must accompany any future saxes upgrade.
+
+The source JSON schema and API protocol do not change. The full tally-008 program bundle is required on Windows, with existing configuration/token/state preserved. Run the same dry-run command; detailed export events include parser control-character counters. No new database migration is required beyond the previously added migration 004.
+
 ## Export diagnostics (tally-007)
 
 Run the usual `Run-Sync.cmd --dry-run`. No diagnostic command or config flag is needed. `state/logs` contains `tally_export_started`, `tally_export_response`, 10-second `tally_export_progress`, and `tally_export_finished`/`tally_export_failed`. A request ID joins these events. Failures include the company/collection, phase, stage, HTTP status, byte/record counters, elapsed time, nested network error codes, XML category/path/line/column and an action hint. Response events show content type/charset and declared content length. Discovery, startup probes and post-capture consistency checks also use this transport logging. The final `failedCollections` list summarizes collection failures.

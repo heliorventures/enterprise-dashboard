@@ -9,7 +9,9 @@ const tree={tag:'VOUCHER',attributes:{REMOTEID:'external'},content:[
   {tag:'AMOUNT',attributes:{TYPE:'Amount'},content:['USD 1,23,456.789 Cr']},
   {tag:'CLOSINGBALANCE',attributes:{},content:[]},
   {tag:'ALLOCATIONS.LIST',attributes:{},content:['  exact whitespace  ']},
-  {tag:'ALLOCATIONS.LIST',attributes:{},content:['  exact whitespace  ']}]};
+  {tag:'ALLOCATIONS.LIST',attributes:{},content:['  exact whitespace  ']},
+  {tag:'ADDLALLOCTYPE',attributes:{},content:['\u0004 Not Applicable']},
+  {tag:'CLASSNAME',attributes:{},content:['\u0005Class\u0005']}]};
 const input=(batchId='source-1')=>({batchId,capturedAt:'2026-09-10T00:00:00Z',company:{externalId:'source-guid',name:'Source Company'},
   schemaVersion:1,profile:'company-business-v1',recordCount:2,chunkCount:2,consistency:'unavailable',
   collections:api.COLLECTIONS.map(name=>({name,status:'success',count:['COMPANY','VOUCHER'].includes(name)?1:0}))});
@@ -90,7 +92,7 @@ test('source agent transfers raw values through authenticated HTTP into PostgreS
     assert.equal(url,'http://localhost:9000');
     if(options.body.includes('<ID>FinanceAgent</ID>')||options.body.includes('<TYPE>Company</TYPE>'))return new Response(envelope('<COMPANY NAME="Raw"><GUID>raw-guid</GUID></COMPANY>'));
     const c=Object.keys(CATALOG).find(k=>options.body.includes(`<TYPE>${CATALOG[k]}</TYPE>`));
-    return new Response(envelope(c==='LEDGER'?'<LEDGER NAME="L"><CLOSINGBALANCE/></LEDGER>':c==='VOUCHER'?'<VOUCHER><DATE>uninterpreted-date</DATE><AMOUNT>USD 1,23,456.789 Cr</AMOUNT><ISCANCELLED>Yes</ISCANCELLED></VOUCHER>':''));
+    return new Response(envelope(c==='LEDGER'?'<LEDGER NAME="L"><CLOSINGBALANCE/><GSTAPPLICABLE>&#4; Not Applicable</GSTAPPLICABLE></LEDGER>':c==='VOUCHER'?'<VOUCHER><DATE>uninterpreted-date</DATE><AMOUNT>USD 1,23,456.789 Cr</AMOUNT><CLASSNAME>\u0005Class\u0005</CLASSNAME><ISCANCELLED>Yes</ISCANCELLED></VOUCHER>':''));
   };
   try {
     const configFile=path.join(directory,'config.json');
@@ -103,6 +105,8 @@ test('source agent transfers raw values through authenticated HTTP into PostgreS
     assert.equal(result.rowCount,3);
     assert.equal(field(result.rows.find(r=>r.collection==='LEDGER').payload,'CLOSINGBALANCE'),'');
     assert.equal(field(result.rows.find(r=>r.collection==='VOUCHER').payload,'AMOUNT'),'USD 1,23,456.789 Cr');
+    assert.equal(field(result.rows.find(r=>r.collection==='LEDGER').payload,'GSTAPPLICABLE'),'\u0004 Not Applicable');
+    assert.equal(field(result.rows.find(r=>r.collection==='VOUCHER').payload,'CLASSNAME'),'\u0005Class\u0005');
     assert.equal((await db.query('SELECT 1 FROM "Vouchers"')).rowCount,0);
   } finally {
     global.fetch=originalFetch;console.log=originalLog;config.ingestToken=oldToken;
