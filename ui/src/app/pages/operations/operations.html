@@ -44,7 +44,8 @@
         <h2><app-icon name="sync" /> Current run</h2>
         <p>
           Validates the latest complete export for each company, then updates its reporting data.
-          Rejected source data remains archived; validation failures leave that company's reporting data unchanged.
+          Rejected source data remains archived; validation failures leave that company's reporting
+          data unchanged.
         </p>
       </div>
     </div>
@@ -93,4 +94,7 @@
       empty="No import history yet."
     />
   </article>
+  <app-source-investigation
+    [syncVersion]="(currentSync()?.id || 0) + ':' + (currentSync()?.status || '')"
+  />
 </section>

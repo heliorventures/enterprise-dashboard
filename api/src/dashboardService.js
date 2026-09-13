@@ -50,17 +50,18 @@ async function companyFinancials(companyId) {
         c."CompanyName",
         COUNT(l."LedgerID") AS "LedgerCount",
         (SELECT COUNT(*) FROM "Vouchers" v WHERE v."CompanyID" = c."CompanyID") AS "VoucherCount",
-        SUM(CASE WHEN l."GroupCategory" ILIKE '%Sales%'
-          OR l."GroupCategory" ILIKE 'Indirect Income%'
-          OR l."GroupCategory" ILIKE 'Direct Income%'
+        SUM(CASE WHEN COALESCE(f.root_group,l."GroupCategory") ILIKE '%Sales%'
+          OR COALESCE(f.root_group,l."GroupCategory") ILIKE 'Indirect Income%'
+          OR COALESCE(f.root_group,l."GroupCategory") ILIKE 'Direct Income%'
           THEN l."CurrentBalance" ELSE 0 END) AS "Revenue",
-        SUM(CASE WHEN l."GroupCategory" ILIKE '%Purchase%' OR l."GroupCategory" ILIKE '%Expense%' THEN l."CurrentBalance" ELSE 0 END) AS "Expenses",
-        SUM(CASE WHEN l."GroupCategory" ILIKE '%Debtor%' THEN l."CurrentBalance" ELSE 0 END) AS "Receivables",
-        SUM(CASE WHEN l."GroupCategory" ILIKE '%Creditor%' THEN l."CurrentBalance" ELSE 0 END) AS "Payables",
-        SUM(CASE WHEN l."GroupCategory" ILIKE '%Bank%' THEN l."CurrentBalance" ELSE 0 END) AS "Bank",
-        SUM(CASE WHEN l."GroupCategory" ILIKE '%Cash%' THEN l."CurrentBalance" ELSE 0 END) AS "Cash"
+        SUM(CASE WHEN lower(f.root_group) IN ('purchase accounts','direct expenses','indirect expenses') OR (f.root_group IS NULL AND (l."GroupCategory" ILIKE '%Purchase%' OR l."GroupCategory" ILIKE '%Expense%')) THEN l."CurrentBalance" ELSE 0 END) AS "Expenses",
+        SUM(CASE WHEN COALESCE(f.root_group,l."GroupCategory") ILIKE '%Debtor%' THEN l."CurrentBalance" ELSE 0 END) AS "Receivables",
+        SUM(CASE WHEN COALESCE(f.root_group,l."GroupCategory") ILIKE '%Creditor%' THEN l."CurrentBalance" ELSE 0 END) AS "Payables",
+        SUM(CASE WHEN COALESCE(f.root_group,l."GroupCategory") ILIKE '%Bank%' THEN l."CurrentBalance" ELSE 0 END) AS "Bank",
+        SUM(CASE WHEN COALESCE(f.root_group,l."GroupCategory") ILIKE '%Cash%' THEN l."CurrentBalance" ELSE 0 END) AS "Cash"
       FROM "Companies" c
       LEFT JOIN "Ledgers" l ON l."CompanyID" = c."CompanyID"
+      LEFT JOIN finance_ledger_facts f ON f.company_id=l."CompanyID" AND f.name=l."LedgerName"
       WHERE c."IsActive" = true
         AND ($1 = 0 OR c."CompanyID" = $1)
       GROUP BY c."CompanyID", c."CompanyName"
@@ -85,12 +86,13 @@ async function projectRows(companyId) {
         p."EndDate",
         p."SourceKey",
         COUNT(v."VoucherID")::int AS "VoucherCount",
-        COALESCE(SUM(CASE WHEN v."VoucherType" ~* '(payment|purchase|debit[[:space:]]*note)' THEN ABS(v."Amount") ELSE 0 END), 0) AS "Invested",
-        COALESCE(SUM(CASE WHEN v."VoucherType" ~* '(receipt|sales|credit[[:space:]]*note)' THEN ABS(v."Amount") ELSE 0 END), 0) AS "Earned",
-        COALESCE(SUM(CASE WHEN v."VoucherType" IN ('Payment', 'Purchase') THEN v."Amount" ELSE 0 END), 0) AS "ActualSpend"
+        COALESCE(SUM(CASE WHEN COALESCE(vt.resolved_root,v."VoucherType") ~* '(payment|purchase|debit[[:space:]]*note)' THEN ABS(v."Amount") ELSE 0 END), 0) AS "Invested",
+        COALESCE(SUM(CASE WHEN COALESCE(vt.resolved_root,v."VoucherType") ~* '(receipt|sales|credit[[:space:]]*note)' THEN ABS(v."Amount") ELSE 0 END), 0) AS "Earned",
+        COALESCE(SUM(CASE WHEN COALESCE(vt.resolved_root,v."VoucherType") IN ('Payment', 'Purchase') THEN v."Amount" ELSE 0 END), 0) AS "ActualSpend"
       FROM "Projects" p
       INNER JOIN "Companies" c ON c."CompanyID" = p."CompanyID"
       LEFT JOIN "Vouchers" v ON v."ProjectID" = p."ProjectID" AND v."CompanyID" = p."CompanyID"
+      LEFT JOIN voucher_types vt ON vt.company_id=v."CompanyID" AND vt.name=v."VoucherType"
       WHERE c."IsActive" = true
         AND ($1 = 0 OR p."CompanyID" = $1)
       GROUP BY p."ProjectID", p."CompanyID", c."CompanyName", p."ProjectName", p."BudgetedExpense",
@@ -174,12 +176,13 @@ async function monthlyActivity(companyId) {
       SELECT
         v."CompanyID"::text AS "companyId",
         to_char(date_trunc('month', v."VoucherDate"), 'YYYY-MM') AS key,
-        COALESCE(SUM(CASE WHEN v."VoucherType" ~* '(payment|purchase|debit[[:space:]]*note)' THEN ABS(v."Amount") ELSE 0 END), 0) AS expenses,
-        COALESCE(SUM(CASE WHEN v."VoucherType" ~* '(receipt|sales|credit[[:space:]]*note)' THEN ABS(v."Amount") ELSE 0 END), 0) AS inflow,
-        COUNT(*) FILTER (WHERE v."VoucherType" ~* '(payment|purchase|debit[[:space:]]*note)')::int AS "expenseCount",
+        COALESCE(SUM(CASE WHEN COALESCE(vt.resolved_root,v."VoucherType") ~* '(payment|purchase|debit[[:space:]]*note)' THEN ABS(v."Amount") ELSE 0 END), 0) AS expenses,
+        COALESCE(SUM(CASE WHEN COALESCE(vt.resolved_root,v."VoucherType") ~* '(receipt|sales|credit[[:space:]]*note)' THEN ABS(v."Amount") ELSE 0 END), 0) AS inflow,
+        COUNT(*) FILTER (WHERE COALESCE(vt.resolved_root,v."VoucherType") ~* '(payment|purchase|debit[[:space:]]*note)')::int AS "expenseCount",
         COUNT(*)::int AS "voucherCount"
       FROM "Vouchers" v
       INNER JOIN "Companies" c ON c."CompanyID" = v."CompanyID"
+      LEFT JOIN voucher_types vt ON vt.company_id=v."CompanyID" AND vt.name=v."VoucherType"
       WHERE c."IsActive" = true
         AND ($1 = 0 OR v."CompanyID" = $1)
         AND v."VoucherDate" >= (date_trunc('month', CURRENT_DATE) - INTERVAL '11 months')::date
@@ -202,12 +205,13 @@ async function monthlyActivity(companyId) {
 async function bankAccounts(companyId) {
   const result = await db.query(
     `
-      SELECT c."CompanyID", c."CompanyName", l."LedgerName", l."GroupCategory", l."CurrentBalance"
+      SELECT c."CompanyID", c."CompanyName", l."LedgerName", l."GroupCategory", l."CurrentBalance", COALESCE(f.root_group,l."GroupCategory") AS "RootGroup"
       FROM "Ledgers" l
       INNER JOIN "Companies" c ON c."CompanyID" = l."CompanyID"
+      LEFT JOIN finance_ledger_facts f ON f.company_id=l."CompanyID" AND f.name=l."LedgerName"
       WHERE c."IsActive" = true
         AND ($1 = 0 OR l."CompanyID" = $1)
-        AND (l."GroupCategory" ILIKE '%Bank%' OR l."GroupCategory" ILIKE '%Cash%')
+        AND (COALESCE(f.root_group,l."GroupCategory") ILIKE '%Bank%' OR COALESCE(f.root_group,l."GroupCategory") ILIKE '%Cash%')
       ORDER BY ABS(l."CurrentBalance") DESC, c."CompanyName", l."LedgerName"
     `,
     [Number(companyId) || 0]
@@ -221,7 +225,7 @@ async function bankAccounts(companyId) {
     // Preserve evidence for reconciliation; do not infer a universal debit/credit
     // convention from mixed signed-numeric and Dr/Cr-tagged source formats.
     rawBalance: toNumber(row.CurrentBalance),
-    kind: /bank/i.test(row.GroupCategory) ? 'bank' : 'cash',
+    kind: /bank/i.test(row.RootGroup || row.GroupCategory) ? 'bank' : 'cash',
   }));
 }
 
@@ -330,6 +334,6 @@ async function getDashboard(companyCode = 'all') {
 }
 
 module.exports = {
-  getDashboard,
+  getDashboard: company => { companyFilter(company); return db.readSnapshot(() => getDashboard(company)); },
   getCompanies,
 };

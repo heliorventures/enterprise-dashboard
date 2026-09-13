@@ -34,3 +34,14 @@ test('schema is repeatable, empty by default, and queries preserve API types', {
   assert.equal(snapshot.kpis.profit, 100);
   await db.query('TRUNCATE tally_ingestions, "Vouchers", "Projects", "Ledgers", "Companies", "SyncLog" RESTART IDENTITY CASCADE');
 });
+
+test('report reads stay on one database snapshot and prohibit accidental writes', {skip:!enabled}, async()=>{
+  await db.migrate();
+  await db.readSnapshot(async()=>{
+    const before=(await db.query('SELECT count(*)::int n FROM "Companies"')).rows[0].n;
+    await db.transaction(client=>client.query('INSERT INTO "Companies"("CompanyName") VALUES($1)',['Concurrent test']));
+    assert.equal((await db.query('SELECT count(*)::int n FROM "Companies"')).rows[0].n,before);
+  });
+  await assert.rejects(db.readSnapshot(()=>db.query('INSERT INTO "Companies"("CompanyName") VALUES($1)',['Blocked'])),error=>error.code==='25006');
+  await db.query('DELETE FROM "Companies" WHERE "CompanyName"=$1',['Concurrent test']);
+});

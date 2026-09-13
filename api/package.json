@@ -12,7 +12,9 @@
     "unpack:force": "node src/sourceUnpack.js --force",
     "promote": "node src/sourceUnpack.js",
     "promote:force": "node src/sourceUnpack.js --force",
-    "test": "node --test --test-concurrency=1 test/*.test.js"
+    "test": "node --test --test-concurrency=1 test/*.test.js",
+    "archive:audit": "node scripts/archive-storage-audit.js",
+    "benchmark:reporting": "node scripts/benchmark-reporting.js --synthetic"
   },
   "keywords": [],
   "author": "",

@@ -1,3 +1,4 @@
+import { SourceInsights } from '../../shared/source-insights';
 import { ProjectSummary, projectActivityColumns } from '../../shared/finance-summary';
 import { CompanySelect } from '../../shared/company-select';
 import { Component, computed, inject, signal } from '@angular/core';
@@ -38,6 +39,7 @@ interface ExpenseView {
 @Component({
   selector: 'app-reports',
   imports: [
+    SourceInsights,
     ProjectSummary,
     CompanySelect,
     RouterLink,

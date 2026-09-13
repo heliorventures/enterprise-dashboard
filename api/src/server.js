@@ -138,6 +138,20 @@ app.get('/api/reports/expenses', async (req, res) => {
   }
 });
 
+// These routes are behind the same authenticated API middleware as the books.
+const sourceReports = require('./sourceReports');
+for (const [path, handler] of [
+  ['/api/reports/source', sourceReports.overview],
+  ['/api/reports/source/masters', sourceReports.masterRows],
+  ['/api/reports/source/details', sourceReports.details],
+  ['/api/tally/archives', sourceReports.archives],
+  ['/api/tally/issues', sourceReports.issues],
+  ['/api/tally/source-record', sourceReports.record],
+]) app.get(path, async (req,res) => {
+  try { res.json(await handler(req.query)); }
+  catch (error) { res.status(error.status || 500).json({error:error.status ? error.message : 'Unable to load source reporting data'}); }
+});
+
 app.get('/api/reports/projects', async (req, res) => {
   try {
     res.json(await reports.projectReport({ company: req.query.company }));

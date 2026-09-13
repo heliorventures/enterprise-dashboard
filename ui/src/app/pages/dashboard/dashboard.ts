@@ -1,3 +1,4 @@
+import { SourceInsights } from '../../shared/source-insights';
 import {
   ProjectSummary,
   projectActivityColumns,
@@ -27,6 +28,7 @@ import { compactInr, fullInr } from '../../shared/money';
 @Component({
   selector: 'app-dashboard',
   imports: [
+    SourceInsights,
     ProjectSummary,
     CompanySelect,
     DatePipe,

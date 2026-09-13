@@ -1,5 +1,7 @@
 # Financial import validation and recovery
 
+The subsequent database, sync and UI reporting phase is documented in [Source reporting models](source-reporting-models.md). This file records the initial export/validation correction; the newer document describes the expanded collection coverage and release requirements.
+
 ## Implemented safeguards
 
 - The source agent retains broad voucher fetch coverage alongside explicit amount and ledger-entry methods. Ledger requests explicitly fetch opening and closing balances. Explicit method fetching follows [Tally's collection guidance](https://help.tallysolutions.com/how-to-write-remote-compliant-tdl-reports-in-tdl/).

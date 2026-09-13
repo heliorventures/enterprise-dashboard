@@ -78,12 +78,13 @@ async function complete(input) {
       // Database uniqueness avoids retaining all ledger names in Node memory.
       await client.query('CREATE TEMP TABLE upload_ledger_names(name text PRIMARY KEY) ON COMMIT DROP');
       let ledgerCount = 0, voucherCount = 0;
+      const usedVoucherKeys = new Map();
       for (const { chunk_index } of chunks) {
         const { payload } = (await client.query('SELECT payload FROM tally_upload_chunks WHERE batch_id=$1 AND chunk_index=$2', [input.batchId, chunk_index])).rows[0];
         const names = payload.ledgers.map(row => row.name.toLowerCase());
         const inserted = await client.query('INSERT INTO upload_ledger_names SELECT unnest($1::text[]) ON CONFLICT DO NOTHING', [names]);
         if (inserted.rowCount !== names.length) fail('Duplicate ledger names across chunks', 400);
-        await appendRows(client, companyId, payload.ledgers, payload.vouchers);
+        await appendRows(client, companyId, payload.ledgers, payload.vouchers, usedVoucherKeys);
         ledgerCount += payload.ledgers.length;
         voucherCount += payload.vouchers.length;
       }

@@ -47,6 +47,7 @@ function itemFromPromote(result) {
     message: result.error || [
       `${counts.ledger_insert} ledgers new, ${counts.ledger_update} updated, ${counts.ledger_unchanged} unchanged, ${counts.ledger_remove} removed`,
       `${counts.voucher_insert} vouchers new, ${counts.voucher_update} updated, ${counts.voucher_unchanged} unchanged, ${counts.voucher_remove} removed`,
+      ...(result.warnings ? [`${result.warnings} validation warnings; see source issues`] : []),
     ].join('; '),
     ...counts,
   };
@@ -183,7 +184,7 @@ async function execute(runId, { force = false } = {}) {
         [item.item_id]
       );
       try {
-        const result = await sourceUnpack.unpackBatch(item.batch_id, { force });
+        const result = await sourceUnpack.unpackBatch(item.batch_id, { force, itemId: item.item_id });
         const mapped = itemFromPromote(result);
         await db.query(
           `UPDATE source_sync_items

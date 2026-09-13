@@ -87,6 +87,9 @@ function treeInvalid() {
 }
 
 test('financial validation blocks rejected rows but preserves actual zero and cancelled exclusions', () => {
+  assert.equal(api.amount('9999999999999999.99'),'9999999999999999.99');
+  assert.equal(api.amount('123.4500'),'123.45');
+  assert.throws(()=>api.amount('123.456'),/precision/);
   assert.equal(api.interpretVoucher(voucher({ amount: '0.00' })).amount, '0.00');
   assert.throws(() => api.assertPromotable(api.projectRecords([
     { collection: 'VOUCHER', ordinal: 0, payload: voucher() },
@@ -101,6 +104,7 @@ test('invalid complete archive cannot mutate reporting data even when previously
   db.query = async (sql) => {
     calls.push(sql);
     if (sql.includes('FROM tally_source_snapshots')) return { rows: [{ batch_id: 'bad', coverage_status: 'complete' }] };
+    if (sql.includes('INSERT INTO source_validation_issues')) return { rows: [] };
     if (sql.includes('FROM tally_ingestions')) return { rows: [{ company_id: 1 }] };
     if (sql.includes('FROM tally_source_records')) return { rows: [{ collection: 'VOUCHER', ordinal: 0, payload: voucher() }] };
     throw new Error('Unexpected database operation');
@@ -108,7 +112,7 @@ test('invalid complete archive cannot mutate reporting data even when previously
   try {
     await assert.rejects(api.unpackBatch('bad'), /Financial validation failed/);
     await assert.rejects(api.unpackBatch('bad', { force: true }), /Financial validation failed/);
-    assert.ok(calls.every(sql => sql.trim().startsWith('SELECT')));
+    assert.ok(calls.every(sql => sql.trim().startsWith('SELECT') || sql.includes('INSERT INTO source_validation_issues')));
   } finally { db.query = original; }
 });
 

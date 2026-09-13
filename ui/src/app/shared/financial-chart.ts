@@ -8,7 +8,12 @@ export interface ChartRow {
   label: string;
   note?: string;
   link?: RecordLink;
-  values: { label: string; value: number; tone?: 'accent' | 'positive' | 'negative' | 'muted' }[];
+  values: {
+    label: string;
+    value: number;
+    displayValue?: string;
+    tone?: 'accent' | 'positive' | 'negative' | 'muted';
+  }[];
 }
 
 /** A common scale and a zero baseline preserve the direction of negative balances. */
@@ -31,13 +36,28 @@ export function chartDomain(rows: readonly ChartRow[]) {
 export class FinancialChart {
   readonly title = input.required<string>();
   readonly description = input('');
+  readonly unit = input('INR');
   readonly rows = input.required<readonly ChartRow[]>();
   readonly empty = input('No financial data is available for this selection.');
   readonly domain = computed(() => chartDomain(this.rows()));
   readonly expanded = signal(false);
   readonly visibleRows = computed(() => (this.expanded() ? this.rows() : this.rows().slice(0, 6)));
-  readonly compactInr = compactInr;
-  readonly fullInr = fullInr;
+  readonly compactInr = (value: number) => this.format(value, true);
+  readonly fullInr = (value: number) => this.format(value, false);
+  private format(value: number, compact: boolean) {
+    if (this.unit() === 'INR') return compact ? compactInr(value) : fullInr(value);
+    const options: Intl.NumberFormatOptions = {
+      maximumFractionDigits: 2,
+      notation: compact ? 'compact' : 'standard',
+    };
+    if (/^[A-Z]{3}$/.test(this.unit()))
+      return new Intl.NumberFormat('en-IN', {
+        ...options,
+        style: 'currency',
+        currency: this.unit(),
+      }).format(value);
+    return new Intl.NumberFormat('en-IN', options).format(value) + ' ' + this.unit();
+  }
   width(value: number) {
     return Number.isFinite(value) ? (Math.abs(value) / this.domain().span) * 100 : 0;
   }

@@ -16,7 +16,7 @@ function nestExpenses(rows) {
   const companies = [];
   const index = new Map();
   for (const row of rows) {
-    if (!isExpenseGroup(row.GroupCategory)) continue;
+    if (!isExpenseGroup(row.RootGroup || row.GroupCategory)) continue;
     const id = String(row.CompanyID);
     if (!index.has(id)) {
       const company = { id, name: row.CompanyName, total: 0, ledgerCount: 0, groups: [] };
@@ -109,15 +109,16 @@ async function expenseReport({ company = 'all' } = {}) {
   const [ledgers, payments] = await Promise.all([
     db.query(
       `
-        SELECT c."CompanyID", c."CompanyName", l."LedgerID", l."LedgerName", l."GroupCategory", l."CurrentBalance"
+        SELECT c."CompanyID", c."CompanyName", l."LedgerID", l."LedgerName", l."GroupCategory", l."CurrentBalance", COALESCE(f.root_group,l."GroupCategory") AS "RootGroup"
         FROM "Ledgers" l
         INNER JOIN "Companies" c ON c."CompanyID" = l."CompanyID"
+        LEFT JOIN finance_ledger_facts f ON f.company_id=l."CompanyID" AND f.name=l."LedgerName"
         WHERE c."IsActive" = true
           AND ($1 = 0 OR l."CompanyID" = $1)
-          AND (l."GroupCategory" ILIKE '%Expense%' OR l."GroupCategory" ILIKE '%Purchase Account%')
-          AND l."GroupCategory" NOT ILIKE '%Payable%'
-          AND l."GroupCategory" NOT ILIKE '%Provision%'
-          AND l."GroupCategory" NOT ILIKE '%Creditor%'
+          AND (COALESCE(f.root_group,l."GroupCategory") ILIKE '%Expense%' OR COALESCE(f.root_group,l."GroupCategory") ILIKE '%Purchase Account%')
+          AND COALESCE(f.root_group,l."GroupCategory") NOT ILIKE '%Payable%'
+          AND COALESCE(f.root_group,l."GroupCategory") NOT ILIKE '%Provision%'
+          AND COALESCE(f.root_group,l."GroupCategory") NOT ILIKE '%Creditor%'
         ORDER BY c."CompanyName", l."GroupCategory", l."LedgerName"
       `,
       [companyId]
@@ -130,9 +131,10 @@ async function expenseReport({ company = 'all' } = {}) {
           COALESCE(SUM(ABS(v."Amount")), 0) AS amount
         FROM "Vouchers" v
         INNER JOIN "Companies" c ON c."CompanyID" = v."CompanyID"
+        LEFT JOIN voucher_types vt ON vt.company_id=v."CompanyID" AND vt.name=v."VoucherType"
         WHERE c."IsActive" = true
           AND ($1 = 0 OR v."CompanyID" = $1)
-          AND v."VoucherType" ~* '(payment|purchase|debit[[:space:]]*note)'
+          AND COALESCE(vt.resolved_root,v."VoucherType") ~* '(payment|purchase|debit[[:space:]]*note)'
           AND v."VoucherDate" >= $2::date
           AND v."VoucherDate" < ($2::date + INTERVAL '1 month')
       `,
@@ -167,11 +169,12 @@ async function projectReport({ company = 'all' } = {}) {
         p."ProjectName",
         COUNT(v."VoucherID")::int AS "voucherCount",
         COUNT(v."VoucherID") FILTER (WHERE v."Amount" <> 0)::int AS "withAmount",
-        COALESCE(SUM(CASE WHEN v."VoucherType" ~* '(payment|purchase|debit[[:space:]]*note)' THEN ABS(v."Amount") ELSE 0 END), 0) AS invested,
-        COALESCE(SUM(CASE WHEN v."VoucherType" ~* '(receipt|sales|credit[[:space:]]*note)' THEN ABS(v."Amount") ELSE 0 END), 0) AS earned
+        COALESCE(SUM(CASE WHEN COALESCE(vt.resolved_root,v."VoucherType") ~* '(payment|purchase|debit[[:space:]]*note)' THEN ABS(v."Amount") ELSE 0 END), 0) AS invested,
+        COALESCE(SUM(CASE WHEN COALESCE(vt.resolved_root,v."VoucherType") ~* '(receipt|sales|credit[[:space:]]*note)' THEN ABS(v."Amount") ELSE 0 END), 0) AS earned
       FROM "Projects" p
       INNER JOIN "Companies" c ON c."CompanyID" = p."CompanyID"
       INNER JOIN "Vouchers" v ON v."ProjectID" = p."ProjectID" AND v."CompanyID" = p."CompanyID"
+      LEFT JOIN voucher_types vt ON vt.company_id=v."CompanyID" AND vt.name=v."VoucherType"
       WHERE c."IsActive" = true
         AND ($1 = 0 OR p."CompanyID" = $1)
       GROUP BY c."CompanyID", c."CompanyName", p."ProjectID", p."ProjectName"
@@ -196,6 +199,6 @@ module.exports = {
   isExpenseGroup,
   nestExpenses,
   nestProjects,
-  expenseReport,
-  projectReport,
+  expenseReport: (query = {}) => { companyFilter(query.company); return db.readSnapshot(() => expenseReport(query)); },
+  projectReport: (query = {}) => { companyFilter(query.company); return db.readSnapshot(() => projectReport(query)); },
 };

@@ -1,5 +1,6 @@
 const db = require('./db');
-const { attachProjects, ingestSnapshot } = require('./ingest');
+const { attachProjects, ingestSnapshot, uniqueVoucherKey } = require('./ingest');
+const { buildProjection, writeProjection } = require('./sourceModels');
 
 function invalid(message, status = 400) {
   return Object.assign(new Error(message), { status });
@@ -33,9 +34,12 @@ function amount(value) {
   raw = raw.replace(/\s*(Dr|Cr)\.?$/i, '').trim();
   if (!/^-?(?:\d{1,3}(?:,\d{2,3})+|\d+)(?:\.\d{1,4})?$/.test(raw)) throw invalid('Unsupported Tally amount format');
   const signed = (credit && !raw.startsWith('-') ? '-' : '') + raw.replace(/,/g, '');
-  const numeric = Number(signed);
-  if (!Number.isFinite(numeric)) throw invalid('Unsupported Tally amount format');
-  return numeric.toFixed(2);
+  const negative = signed.startsWith('-');
+  const [integer, fraction = ''] = signed.replace(/^-/, '').split('.');
+  const whole = integer.replace(/^0+(?=\d)/, '');
+  if (whole.length > 16) throw invalid('Amount exceeds supported reporting range');
+  if (/[1-9]/.test(fraction.slice(2))) throw invalid('Amount exceeds supported 2-decimal reporting precision');
+  return `${negative ? '-' : ''}${whole}.${fraction.slice(0, 2).padEnd(2, '0')}`;
 }
 
 function date(value) {
@@ -54,7 +58,8 @@ function yes(value) {
 function voucherAmount(node) {
   const direct = field(node, 'AMOUNT');
   if (typeof direct === 'string' && direct !== '') return amount(direct);
-  const entries = [...children(node, 'ALLLEDGERENTRIES.LIST'), ...children(node, 'LEDGERENTRIES.LIST')];
+  const all = children(node, 'ALLLEDGERENTRIES.LIST');
+  const entries = all.length ? all : children(node, 'LEDGERENTRIES.LIST');
   if (!entries.length) throw invalid('Missing voucher amount and accounting entries; fresh Tally export required');
   let credit = 0n;
   let debit = 0n;
@@ -133,6 +138,7 @@ function projectRecords(rows) {
   const seenProjects = new Set();
   const skipped = { ledgers: 0, vouchers: 0, cancelled: 0 };
   const errors = [];
+  const issues = [];
   for (const row of rows) {
     try {
       if (row.collection === 'LEDGER') {
@@ -164,10 +170,11 @@ function projectRecords(rows) {
     } catch (error) {
       if (row.collection === 'LEDGER') skipped.ledgers += 1;
       else skipped.vouchers += 1;
+      issues.push({collection:row.collection,ordinal:row.ordinal,field:/closing balance/i.test(error.message)?'CLOSINGBALANCE':/amount|entries/i.test(error.message)?'AMOUNT':/date/i.test(error.message)?'DATE':'record',code:'INVALID_RECORD',severity:'error',message:error.message});
       if (errors.length < 20) errors.push(`${row.collection}#${row.ordinal}: ${error.message}`);
     }
   }
-  return { ledgers, vouchers, projects, skipped, errors };
+  return { ledgers, vouchers, projects, skipped, errors, issues };
 }
 
 function assertPromotable({ skipped = {}, errors = [] }) {
@@ -180,7 +187,7 @@ function snapshotTimestamp(value) {
   return new Date(value).toISOString();
 }
 
-async function unpackBatch(batchId, { force = false } = {}) {
+async function unpackBatch(batchId, { force = false, itemId = null } = {}) {
   if (typeof batchId !== 'string' || !batchId.trim()) throw invalid('batchId required');
   const snapshot = (await db.query(
     'SELECT batch_id, company_external_id, company_name, captured_at, coverage_status, manifest FROM tally_source_snapshots WHERE batch_id = $1',
@@ -194,36 +201,37 @@ async function unpackBatch(batchId, { force = false } = {}) {
   const records = await db.query(
     `SELECT collection, ordinal, payload
      FROM tally_source_records
-     WHERE batch_id = $1 AND collection IN ('LEDGER', 'VOUCHER', 'COSTCENTRE')
+     WHERE batch_id = $1
      ORDER BY collection, ordinal`,
     [batchId]
   );
-  const { ledgers, vouchers, projects, skipped, errors } = projectRecords(records.rows);
+  const { ledgers, vouchers, projects, skipped, errors, issues } = projectRecords(records.rows);
+  const model = buildProjection(records.rows, { field, amount, date, interpretVoucher, voucherKey: uniqueVoucherKey });
+  model.issues.push(...issues);
+  if (skipped.ledgers && !issues.some(x => x.collection === 'LEDGER')) model.issues.push({collection:'LEDGER',ordinal:null,field:'NAME',code:'DUPLICATE_LEDGER',severity:'error',message:'Duplicate ledger names must be resolved before publishing'});
+  if (model.issues.length) await db.query(`INSERT INTO source_validation_issues(batch_id,item_id,collection,ordinal,field,severity,code,message)
+    SELECT $1,$2,collection,ordinal,field,severity,code,message FROM jsonb_to_recordset($3::jsonb) AS x(collection text,ordinal integer,field text,severity text,code text,message text)`, [batchId,itemId,JSON.stringify(model.issues)]);
   assertPromotable({ skipped, errors });
-  let result;
-  if (prior && !force) {
-    result = {
-      ok: true, duplicate: true, companyId: prior.company_id, batchId: snapshot.batch_id,
-      companyName: snapshot.company_name, skipped: { ledgers: 0, vouchers: 0, cancelled: 0 }, errors: [],
-    };
-  } else {
-    result = await ingestSnapshot({
-      batchId: snapshot.batch_id,
-      capturedAt: snapshotTimestamp(snapshot.captured_at),
-      fullSnapshot: true,
-      company: { externalId: snapshot.company_external_id, name: snapshot.company_name },
-      ledgers,
-      vouchers,
-    }, { force });
-  }
-  if (result.companyId) {
-    result.projects = await attachProjects(result.companyId, vouchers, projects);
-  }
+  if (model.issues.some(x => x.severity === 'error')) throw invalid('Financial validation failed; inspect the source-linked validation issues. No reporting data changed.',422);
+  const published = prior ? (await db.query('SELECT batch_id FROM finance_snapshots WHERE company_id=$1 AND batch_id=$2',[prior.company_id,batchId])).rows[0] : null;
+  const result = await ingestSnapshot({
+    batchId: snapshot.batch_id, capturedAt: snapshotTimestamp(snapshot.captured_at), fullSnapshot: true,
+    company: { externalId: snapshot.company_external_id, name: snapshot.company_name }, ledgers, vouchers,
+  }, {
+    archivedSource: true,
+    force: force || Boolean(prior && !published),
+    afterWrite: async (client, companyId) => {
+      const linked = await attachProjects(companyId, vouchers, projects, client);
+      await writeProjection(client, companyId, snapshot, model);
+      return linked;
+    },
+  });
   return {
     ...result,
     companyName: snapshot.company_name,
     skipped,
     errors,
+    warnings: model.issues.filter(x => x.severity === 'warning').length,
   };
 }
 
@@ -255,6 +263,8 @@ async function unpackLatest(options = {}) {
 
 module.exports = {
   field,
+  amount,
+  date,
   assertPromotable,
   interpretLedger,
   interpretCostCentre,

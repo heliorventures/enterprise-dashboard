@@ -1,0 +1,92 @@
+{
+  "synthetic": true,
+  "companies": 5,
+  "vouchersPerCompany": 10000,
+  "sync": [
+    {
+      "company": "Synthetic 1",
+      "initialMs": 8581.74,
+      "unchangedSyncMs": 4717.87
+    },
+    {
+      "company": "Synthetic 2",
+      "initialMs": 14668.68,
+      "unchangedSyncMs": 6219.21
+    },
+    {
+      "company": "Synthetic 3",
+      "initialMs": 10261.54,
+      "unchangedSyncMs": 5110.17
+    },
+    {
+      "company": "Synthetic 4",
+      "initialMs": 13913.66,
+      "unchangedSyncMs": 3854.55
+    },
+    {
+      "company": "Synthetic 5",
+      "initialMs": 10268.49,
+      "unchangedSyncMs": 4636.85
+    }
+  ],
+  "overview": {
+    "samples": 15,
+    "medianMs": 54.82,
+    "p95Ms": 73.92
+  },
+  "concurrentFiveCompanies": {
+    "samples": 5,
+    "medianMs": 50.7,
+    "p95Ms": 223.28
+  },
+  "drilldown": {
+    "samples": 15,
+    "medianMs": 24.65,
+    "p95Ms": 32.42
+  },
+  "summary": {
+    "samples": 15,
+    "medianMs": 6.01,
+    "p95Ms": 8.18
+  },
+  "detailAggregation": {
+    "samples": 15,
+    "medianMs": 11.61,
+    "p95Ms": 20
+  },
+  "evidence": {
+    "unchanged_postings": 100000
+  },
+  "storage": [
+    {
+      "relname": "finance_allocations",
+      "bytes": "15032320",
+      "estimated_rows": "50000"
+    },
+    {
+      "relname": "finance_inventory_movements",
+      "bytes": "13918208",
+      "estimated_rows": "50000"
+    },
+    {
+      "relname": "finance_ledger_facts",
+      "bytes": "49152",
+      "estimated_rows": "10"
+    },
+    {
+      "relname": "finance_monthly_summaries",
+      "bytes": "1064960",
+      "estimated_rows": "3720"
+    },
+    {
+      "relname": "finance_postings",
+      "bytes": "31186944",
+      "estimated_rows": "100000"
+    },
+    {
+      "relname": "finance_snapshots",
+      "bytes": "32768",
+      "estimated_rows": "5"
+    }
+  ]
+}

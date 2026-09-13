@@ -1,3 +1,4 @@
+import { SourceInvestigation } from '../../shared/source-investigation';
 import { DataColumn, DataTable } from '../../shared/data-table';
 import { PageHeader } from '../../shared/page-header';
 import { recordKey } from '../../shared/record-columns';
@@ -11,7 +12,7 @@ import { Icon } from '../../shared/icon';
 
 @Component({
   selector: 'app-operations',
-  imports: [DatePipe, Icon, DataTable, PageHeader],
+  imports: [SourceInvestigation, DatePipe, Icon, DataTable, PageHeader],
   templateUrl: './operations.html',
   styleUrl: './operations.css',
 })

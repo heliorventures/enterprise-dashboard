@@ -9,7 +9,14 @@ function fetchList(collection) {
   // AllLedgerEntries. Ask for those methods by name on ledgers and vouchers.
   if(collection==='LEDGER') return 'Name,Parent,OpeningBalance,ClosingBalance,*';
   if(collection==='VOUCHER') {
-    return 'Date,VoucherTypeName,VoucherNumber,Narration,PartyLedgerName,Amount,MasterID,GUID,IsCancelled,IsOptional,AllLedgerEntries.LedgerName,AllLedgerEntries.Amount,AllLedgerEntries.IsDeemedPositive,LedgerEntries.LedgerName,LedgerEntries.Amount,*';
+    const fields=['Date','VoucherTypeName','VoucherNumber','Narration','PartyLedgerName','Amount','MasterID','GUID','IsCancelled','IsOptional'];
+    for(const entries of ['AllLedgerEntries','LedgerEntries']) {
+      for(const method of ['LedgerName','Amount','IsDeemedPositive','CategoryAllocations.Category','CategoryAllocations.CostCentreAllocations.Name','CategoryAllocations.CostCentreAllocations.Amount','CostCentreAllocations.Name','CostCentreAllocations.Amount']) fields.push(`${entries}.${method}`);
+    }
+    for(const entries of ['AllInventoryEntries','InventoryEntries']) {
+      for(const method of ['StockItemName','ActualQty','Amount','GodownName','BatchAllocations.GodownName','BatchAllocations.ActualQty','BatchAllocations.Amount']) fields.push(`${entries}.${method}`);
+    }
+    return [...fields,'*'].join(',');
   }
   return '*';
 }

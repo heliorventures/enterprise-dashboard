@@ -15,6 +15,7 @@
       </button>
     </div>
   </app-page-header>
+  <app-source-insights [company]="selectedCompany()" />
   @if (error()) {
     <p class="banner" role="alert">{{ error() }}</p>
   }

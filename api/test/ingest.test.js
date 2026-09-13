@@ -29,6 +29,7 @@ const payload = () => ({
   vouchers: [{ date: '2026-09-10', type: 'Sales', amount: '123.45', number: 'S1' }],
 });
 test('reject incomplete snapshots, invalid dates and imprecise amounts', () => {
+  assert.notEqual(voucherKey({amount:'9999999999999999.99'}),voucherKey({amount:'9999999999999999.98'}));
   assert.throws(() => validateSnapshot({ ...payload(), vouchers: undefined }), /vouchers/);
   assert.throws(() => validateSnapshot({ ...payload(), fullSnapshot: false }), /fullSnapshot/);
   assert.throws(() => validateSnapshot({ ...payload(), capturedAt: '2026-02-30T10:00:00Z' }), /calendar date/);
@@ -43,6 +44,12 @@ test('reject incomplete snapshots, invalid dates and imprecise amounts', () => {
   const tagged = payload();
   tagged.vouchers[0].project = 'Hingoli';
   assert.equal(validateSnapshot(tagged).vouchers[0].project, 'Hingoli');
+});
+
+test('archived validation accepts a complete collection above the single-request limit', () => {
+  const data=payload(); data.vouchers=Array.from({length:50100},(_,i)=>({...data.vouchers[0],number:String(i)}));
+  assert.throws(()=>validateSnapshot(data),/at most 50000/);
+  assert.equal(validateSnapshot(data,5000000).vouchers.length,50100);
 });
 
 test('incremental plan inserts, updates, and removes only changed source keys', () => {
@@ -85,6 +92,11 @@ test('transactional snapshot, retry deduplication, stale rejection and rollback'
   finally { await db.query('DROP TRIGGER fail_test ON "Vouchers"'); await db.query('DROP FUNCTION fail_test_voucher()'); }
   assert.equal((await db.query('SELECT "Amount" FROM "Vouchers"')).rows[0].Amount, '123.45');
   assert.equal((await db.query('SELECT count(*) FROM tally_ingestions')).rows[0].count, '1');
+  const precise=payload(); precise.batchId='precise-1'; precise.capturedAt='2026-09-10T12:00:00Z'; precise.ledgers[0].balance='9999999999999999.98';
+  await ingestSnapshot(precise);
+  precise.batchId='precise-2'; precise.capturedAt='2026-09-11T12:00:00Z'; precise.ledgers[0].balance='9999999999999999.99';
+  assert.equal((await ingestSnapshot(precise)).ledgers.update,1);
+  assert.equal((await db.query('SELECT "CurrentBalance" FROM "Ledgers"')).rows[0].CurrentBalance,'9999999999999999.99');
   await db.query('TRUNCATE tally_ingestions, "Vouchers", "Projects", "Ledgers", "Companies", "SyncLog" RESTART IDENTITY CASCADE');
 });
 after(async () => { await db.close(); });

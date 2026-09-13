@@ -18,7 +18,7 @@ function money(value, label) {
   }
   return value;
 }
-function validateSnapshot(input) {
+function validateSnapshot(input, maxRows = 50000) {
   if (!input || input.fullSnapshot !== true) throw invalid('fullSnapshot must be true');
   const batchId = text(input.batchId, 'batchId', 200);
   const capturedAt = text(input.capturedAt, 'capturedAt', 40);
@@ -35,7 +35,7 @@ function validateSnapshot(input) {
     name: text(input.company?.name, 'company.name', 200),
   };
   for (const key of ['ledgers', 'vouchers']) {
-    if (!Array.isArray(input[key]) || input[key].length > 50000) throw invalid(`${key} must be an array of at most 50000 items`);
+    if (!Array.isArray(input[key]) || input[key].length > maxRows) throw invalid(`${key} must be an array of at most ${maxRows} items`);
   }
   const ledgers = input.ledgers.map((row) => ({
     name: text(row?.name, 'ledger.name', 200),
@@ -71,8 +71,17 @@ function projectKey(row) {
   return `project:${String(row?.name || '').trim().toLowerCase()}`;
 }
 
+function decimalKey(amount) {
+  const raw = String(amount);
+  const [integer, fraction = ''] = raw.replace(/^-/, '').split('.');
+  const whole = integer.replace(/^0+(?=\d)/, '');
+  const cents = fraction.padEnd(2, '0');
+  const value = `${raw.startsWith('-') && (whole !== '0' || cents !== '00') ? '-' : ''}${whole}.${cents}`;
+  return value;
+}
+
 function voucherKey(row) {
-  return ['voucher', row.date, row.type, row.number || '', Number(row.amount).toFixed(2), row.party || ''].join('|');
+  return ['voucher', row.date, row.type, row.number || '', decimalKey(row.amount), row.party || ''].join('|');
 }
 
 function uniqueVoucherKey(row, used) {
@@ -102,15 +111,27 @@ function planIncremental(existing, incoming, same) {
   };
 }
 
-async function ingestSnapshot(input, { force = false } = {}) {
-  const snapshot = validateSnapshot(input);
+async function ingestSnapshot(input, { force = false, afterWrite, archivedSource = false } = {}) {
+  const snapshot = validateSnapshot(input, archivedSource ? 5000000 : 50000);
   const { batchId, capturedAt, company, ledgers, vouchers } = snapshot;
   const checksum = createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');
-  return db.transaction(client => applySnapshot(client, snapshot, checksum,
-    id => replaceSnapshot(client, id, ledgers, vouchers), force));
+  return db.transaction(async client => {
+    const result = await applySnapshot(client, snapshot, checksum, id => replaceSnapshot(client, id, ledgers, vouchers), force, Boolean(afterWrite));
+    if (afterWrite) {
+      const latest = result.duplicate ? (await client.query('SELECT batch_id FROM tally_ingestions WHERE company_id=$1 ORDER BY captured_at DESC LIMIT 1',[result.companyId])).rows[0] : null;
+      if (!result.duplicate || latest?.batch_id === batchId) result.projects = await afterWrite(client, result.companyId);
+    }
+    return result;
+  });
 }
 
-async function applySnapshot(client, { batchId, capturedAt, company }, checksum, writeRows, force = false) {
+async function clearReportingProjection(client, companyId) {
+  for (const table of ['finance_allocations','finance_postings','finance_inventory_movements','finance_ledger_facts',...require('./reportingEntities').tables,'finance_monthly_summaries','finance_snapshots']) {
+    await client.query(`DELETE FROM ${table} WHERE company_id=$1`, [companyId]);
+  }
+}
+
+async function applySnapshot(client, { batchId, capturedAt, company }, checksum, writeRows, force = false, preserveProjection = false) {
     // Serialize imports before inspecting timestamps; never apply an older snapshot last.
     await client.query('SELECT pg_advisory_xact_lock(74312002)');
     const prior = await client.query('SELECT checksum, company_id FROM tally_ingestions WHERE batch_id = $1', [batchId]);
@@ -118,6 +139,7 @@ async function applySnapshot(client, { batchId, capturedAt, company }, checksum,
       const id = prior.rows[0].company_id;
       const newer = await client.query('SELECT 1 FROM tally_ingestions WHERE company_id = $1 AND captured_at > $2 LIMIT 1', [id, capturedAt]);
       if (newer.rows.length) throw invalid('Cannot reprocess an older snapshot over newer reporting data', 409);
+      if (!preserveProjection) await clearReportingProjection(client, id);
       const counts = await writeRows(id);
       await client.query('UPDATE tally_ingestions SET checksum = $2 WHERE batch_id = $1', [batchId, checksum]);
       await client.query(`INSERT INTO "SyncLog" ("Source", "Status", "Message") VALUES ('tally', 'ok', $1)`, [promoteMessage(company.name, counts)]);
@@ -135,6 +157,7 @@ async function applySnapshot(client, { batchId, capturedAt, company }, checksum,
     if (latest.rows.length && Date.parse(capturedAt) <= latest.rows[0].captured_at.getTime()) {
       throw invalid('Snapshot is older than or equal to the latest accepted snapshot', 409);
     }
+    if (!preserveProjection) await clearReportingProjection(client, id);
     const counts = await writeRows(id);
     await client.query('INSERT INTO tally_ingestions (batch_id, company_id, captured_at, checksum) VALUES ($1, $2, $3, $4)', [batchId, id, capturedAt, checksum]);
     await client.query(`INSERT INTO "SyncLog" ("Source", "Status", "Message") VALUES ('tally', 'ok', $1)`,
@@ -154,13 +177,13 @@ async function replaceSnapshot(client, companyId, ledgers, vouchers) {
 }
 
 function sameLedger(prior, row) {
-  return prior.name === row.name && prior.group === row.group && Number(prior.balance) === Number(row.balance);
+  return prior.name === row.name && prior.group === row.group && decimalKey(prior.balance) === decimalKey(row.balance);
 }
 
 function sameVoucher(prior, row) {
   return prior.date === row.date
     && prior.type === row.type
-    && Number(prior.amount) === Number(row.amount)
+    && decimalKey(prior.amount) === decimalKey(row.amount)
     && (prior.number || '') === (row.number || '')
     && (prior.party || '') === (row.party || '')
     && (prior.narration || '') === (row.narration || '');
@@ -229,7 +252,7 @@ async function applyIncremental(client, companyId, ledgers, vouchers) {
     vouchers: { insert: voucherPlan.insert.length, update: voucherPlan.update.length, unchanged: voucherPlan.unchanged, remove: voucherPlan.remove.length },
   };
 }
-async function attachProjects(companyId, vouchers = [], projects = []) {
+async function attachProjects(companyId, vouchers = [], projects = [], transactionClient = null) {
   const names = new Map();
   for (const row of projects) {
     const name = String(row?.name || '').trim();
@@ -247,14 +270,14 @@ async function attachProjects(companyId, vouchers = [], projects = []) {
   const rows = [...names.values()].map((name) => ({ name, sourceKey: projectKey({ name }) }));
   if (!rows.length && !links.length) return { count: 0, linked: 0 };
 
-  return db.transaction(async (client) => {
+  const write = async (client) => {
     if (rows.length) {
       await client.query(
         `INSERT INTO "Projects" ("CompanyID", "ProjectName", "SourceKey")
          SELECT $1, name, "sourceKey"
          FROM jsonb_to_recordset($2::jsonb) AS x(name text, "sourceKey" text)
          ON CONFLICT ("CompanyID", "SourceKey") WHERE "SourceKey" IS NOT NULL
-         DO UPDATE SET "ProjectName" = EXCLUDED."ProjectName"`,
+         DO UPDATE SET "ProjectName" = EXCLUDED."ProjectName" WHERE "Projects"."ProjectName" IS DISTINCT FROM EXCLUDED."ProjectName"`,
         [companyId, JSON.stringify(rows)]
       );
     }
@@ -271,18 +294,18 @@ async function attachProjects(companyId, vouchers = [], projects = []) {
          ) mapped
          WHERE v."CompanyID" = $1
            AND v."Source" = 'tally'
-           AND v."SourceKey" = mapped."sourceKey"`,
+           AND v."SourceKey" = mapped."sourceKey" AND v."ProjectID" IS DISTINCT FROM mapped.id`,
         [companyId, JSON.stringify(links)]
       );
     }
     return { count: rows.length, linked: links.filter((row) => row.projectKey).length };
-  });
+  };
+  return transactionClient ? write(transactionClient) : db.transaction(write);
 }
 
-async function appendRows(client, companyId, ledgers, vouchers) {
-  const usedVoucherKeys = new Map();
+async function appendRows(client, companyId, ledgers, vouchers, usedVoucherKeys = new Map()) {
   const keyedLedgers = ledgers.map((row) => ({ ...row, sourceKey: row.sourceKey || ledgerKey(row) }));
-  const keyedVouchers = vouchers.map((row) => ({ ...row, sourceKey: row.sourceKey || uniqueVoucherKey(row, usedVoucherKeys) }));
+  const keyedVouchers = vouchers.map((row) => ({ ...row, sourceKey: uniqueVoucherKey(row, usedVoucherKeys) }));
   await client.query(`INSERT INTO "Ledgers" ("CompanyID", "LedgerName", "GroupCategory", "CurrentBalance", "SourceKey")
     SELECT $1, name, "group", balance::numeric, "sourceKey" FROM jsonb_to_recordset($2::jsonb)
       AS x(name text, "group" text, balance text, "sourceKey" text)`, [companyId, JSON.stringify(keyedLedgers)]);
