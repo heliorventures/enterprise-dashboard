@@ -8,14 +8,14 @@
   gap: 12px 16px;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  padding: 16px 24px;
   border-top: 1px solid var(--line);
 }
 
 .range,
 .size {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .size {
@@ -26,11 +26,11 @@
 
 .size select,
 .pages button {
-  height: 32px;
-  border: 1px solid var(--line-strong);
+  height: 36px;
+  border: 1px solid var(--line);
   background: var(--surface);
-  border-radius: 8px;
-  padding: 0 10px;
+  border-radius: 12px;
+  padding: 0 12px;
   font: inherit;
   color: var(--text);
 }
@@ -38,14 +38,25 @@
 .pages {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 6px;
   align-items: center;
 }
 
+.pages button.nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pages app-icon {
+  width: 16px;
+  height: 16px;
+}
+
 .pages button.active {
-  background: var(--text);
-  color: #fff;
-  border-color: var(--text);
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: transparent;
 }
 
 .pages button:disabled {

@@ -25,14 +25,12 @@ try {
 const assert = require('node:assert/strict');
 (async () => {
   const origin = 'http://enterprise-dashboard-ui:8080';
-  const basic = 'Basic ' + Buffer.from('tester:local-test-password').toString('base64');
   assert.equal(await (await fetch(origin + '/healthz')).text(), 'enterprise-dashboard local-test');
-  assert.equal((await fetch(origin + '/')).status, 401);
+  assert.equal((await fetch(origin + '/')).status, 200);
   assert.equal((await fetch(origin + '/api/companies')).status, 401);
-  const page = await fetch(origin + '/dashboard', { headers: { Authorization: basic } });
+  const page = await fetch(origin + '/dashboard');
   assert.equal(page.status, 200);
   assert.match(await page.text(), /<app-root>/);
-  assert.equal((await fetch(origin + '/api/companies', { headers: { Authorization: basic } })).status, 200);
   const endpoint = origin + '/api/ingest/tally';
   assert.equal((await fetch(endpoint, { method: 'POST' })).status, 401);
   const payload = {

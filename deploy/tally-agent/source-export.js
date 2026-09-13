@@ -4,11 +4,25 @@ const escape=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;'
 const CATALOG=Object.freeze({COMPANY:'Company',GROUP:'Group',LEDGER:'Ledger',VOUCHERTYPE:'Voucher Type',
   CURRENCY:'Currency',COSTCATEGORY:'Cost Category',COSTCENTRE:'Cost Centre',STOCKGROUP:'Stock Group',
   STOCKCATEGORY:'Stock Category',STOCKITEM:'Stock Item',UNIT:'Unit',GODOWN:'Godown',VOUCHER:'Voucher'});
+function fetchList(collection) {
+  // Fetch * returns empty tax/date methods and skips calculated Amount plus
+  // AllLedgerEntries. Ask for those methods by name on ledgers and vouchers.
+  if(collection==='LEDGER') return 'Name,Parent,OpeningBalance,ClosingBalance,*';
+  if(collection==='VOUCHER') {
+    return 'Date,VoucherTypeName,VoucherNumber,Narration,PartyLedgerName,Amount,MasterID,GUID,IsCancelled,IsOptional,AllLedgerEntries.LedgerName,AllLedgerEntries.Amount,AllLedgerEntries.IsDeemedPositive,LedgerEntries.LedgerName,LedgerEntries.Amount';
+  }
+  return '*';
+}
+function nativeMethods(collection) {
+  if(collection==='LEDGER') return '<NATIVEMETHOD>OpeningBalance</NATIVEMETHOD><NATIVEMETHOD>ClosingBalance</NATIVEMETHOD>';
+  if(collection==='VOUCHER') return '<NATIVEMETHOD>Amount</NATIVEMETHOD>';
+  return '';
+}
 function request(collection,company) {
   if(!Object.hasOwn(CATALOG,collection)) throw new Error('Unknown source collection');
   // Fetch * asks for methods and subcollections, not just dashboard fields.
   // TDL can only return methods exposed by the installed version/customization.
-  return `<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>FinanceSourceArchive</ID></HEADER><BODY><DESC><STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT><SVCURRENTCOMPANY>${escape(company)}</SVCURRENTCOMPANY><SVFROMDATE TYPE="Date">19000101</SVFROMDATE><SVTODATE TYPE="Date">99991231</SVTODATE></STATICVARIABLES><TDL><TDLMESSAGE><COLLECTION NAME="FinanceSourceArchive" ISMODIFY="No"><TYPE>${CATALOG[collection]}</TYPE><FETCH>*</FETCH></COLLECTION></TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>`;
+  return `<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>FinanceSourceArchive</ID></HEADER><BODY><DESC><STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT><SVCURRENTCOMPANY>${escape(company)}</SVCURRENTCOMPANY><SVFROMDATE TYPE="Date">19000101</SVFROMDATE><SVTODATE TYPE="Date">99991231</SVTODATE></STATICVARIABLES><TDL><TDLMESSAGE><COLLECTION NAME="FinanceSourceArchive" ISMODIFY="No"><TYPE>${CATALOG[collection]}</TYPE><FETCH>${fetchList(collection)}</FETCH>${nativeMethods(collection)}</COLLECTION></TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>`;
 }
 // Version 1 JSON representation preserves names, attributes, text and ordered
 // child lists. It never coerces an amount/date, trims data or collapses repeats.
@@ -77,4 +91,4 @@ async function extract(config,collection,company,onRecord) {
   return exportXml(config,{collection,company,body:request(collection,company),phase:'source_capture',
     createParser:wrap=>parser(collection,wrap(onRecord))});
 }
-module.exports={CATALOG,request,parser,field,extract};
+module.exports={CATALOG,request,parser,field,extract,fetchList};

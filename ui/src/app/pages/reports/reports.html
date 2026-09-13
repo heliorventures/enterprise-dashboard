@@ -1,0 +1,243 @@
+<section class="page">
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">Spend report</p>
+      <h1>Expenses</h1>
+    </div>
+    <div class="controls">
+      <label class="field">
+        <span>Company</span>
+        <select [value]="company()" (change)="onCompany($event)">
+          <option value="all">All companies</option>
+          @for (item of companies(); track item.id) {
+            <option [value]="item.id">{{ item.name }}</option>
+          }
+        </select>
+      </label>
+    </div>
+  </header>
+
+  @if (error()) {
+    <p class="banner danger">{{ error() }}</p>
+  }
+
+  @if (loading() && !report()) {
+    <p class="empty-copy">Loading expense books…</p>
+  } @else if (report(); as snapshot) {
+    <div class="meta-row">
+      <span class="meta"><app-icon name="ledgers" /> {{ snapshot.ledgerCount }} expense ledgers</span>
+      <span class="meta"><app-icon name="spend" /> {{ compactInr(snapshot.total) }} on the books</span>
+      <span class="meta">
+        {{ snapshot.lastMonth.label }} · {{ snapshot.lastMonth.count }} payment/purchase vouchers
+        @if (!snapshot.lastMonth.withAmount) {
+          · amounts still missing
+        }
+      </span>
+    </div>
+
+    <nav class="crumbs" aria-label="Report drill-down">
+      <button type="button" class="crumb" [class.current]="level() === 'companies'" (click)="up()" [disabled]="level() === 'companies'">
+        All expenses
+      </button>
+      @if (selectedCompany(); as companyRow) {
+        <span>/</span>
+        <button type="button" class="crumb" [class.current]="level() === 'groups'" (click)="up()" [disabled]="level() === 'groups'">
+          {{ companyRow.name }}
+        </button>
+      }
+      @if (selectedGroup(); as groupRow) {
+        <span>/</span>
+        <span class="crumb current">{{ clean(groupRow.name) }}</span>
+      }
+    </nav>
+
+    <article class="panel">
+      <header>
+        <div>
+          <h2>
+            <app-icon name="spend" />
+            @if (level() === 'companies') {
+              Expenses by company
+            } @else if (level() === 'groups') {
+              Expense groups
+            } @else {
+              Ledgers in {{ clean(selectedGroup()?.name || '') }}
+            }
+          </h2>
+          <p>
+            Click a row to drill down. These are Tally expense and purchase ledgers.
+            Last-month voucher amounts stay ₹0 until the Tally sender returns Amount lines.
+          </p>
+        </div>
+      </header>
+
+      <div class="table-wrap board">
+        <table class="data-table">
+          <thead>
+            <tr>
+              @if (level() === 'companies') {
+                <th>Company</th>
+                <th class="num">Groups</th>
+                <th class="num">Ledgers</th>
+                <th class="num">On books</th>
+              } @else if (level() === 'groups') {
+                <th>Group</th>
+                <th class="num">Ledgers</th>
+                <th class="num">On books</th>
+              } @else {
+                <th>Ledger</th>
+                <th class="num">Closing</th>
+                <th></th>
+              }
+            </tr>
+          </thead>
+          <tbody>
+            @if (!rows().length) {
+              <tr><td class="empty" colspan="4">No expense ledgers in the current extract.</td></tr>
+            } @else if (level() === 'companies') {
+              @for (row of $any(rows()); track row.id) {
+                <tr class="drill-row" (click)="openCompany(row)">
+                  <td>
+                    <div class="entity">
+                      <span class="avatar">{{ row.name.slice(0, 2).toUpperCase() }}</span>
+                      <strong>{{ row.name }}</strong>
+                    </div>
+                  </td>
+                  <td class="num">{{ row.groups.length }}</td>
+                  <td class="num">{{ row.ledgerCount }}</td>
+                  <td class="num" [title]="fullInr(row.total)">{{ compactInr(row.total) }}</td>
+                </tr>
+              }
+            } @else if (level() === 'groups') {
+              @for (row of $any(rows()); track row.name) {
+                <tr class="drill-row" (click)="openGroup(row)">
+                  <td>{{ clean(row.name) }}</td>
+                  <td class="num">{{ row.ledgerCount }}</td>
+                  <td class="num" [title]="fullInr(row.total)">{{ compactInr(row.total) }}</td>
+                </tr>
+              }
+            } @else {
+              @for (row of $any(rows()); track row.id) {
+                <tr>
+                  <td>
+                    <button type="button" class="linkish" (click)="openLedger(row)">{{ clean(row.name) }}</button>
+                  </td>
+                  <td class="num" [title]="fullInr(row.balance)">{{ compactInr(row.balance) }}</td>
+                  <td>
+                    <button type="button" class="btn ghost compact" (click)="openPayments(row)">Payments</button>
+                  </td>
+                </tr>
+              }
+            }
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    @if (projects(); as projectReport) {
+      <article class="panel">
+        <header>
+          <div>
+            <h2><app-icon name="budget" /> Project results</h2>
+            <p>
+              @if (projectReport.projectCount) {
+                {{ projectReport.projectCount }} cost centres with a single Tally tag ·
+                invested {{ compactInr(projectReport.invested) }} ·
+                earned {{ compactInr(projectReport.earned) }} ·
+                net {{ compactInr(projectReport.net) }}
+              } @else {
+                Vouchers are linked only when Tally named exactly one cost centre. Other companies stay unlinked.
+              }
+            </p>
+          </div>
+        </header>
+        <div class="table-wrap board">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Project</th>
+                <th>Company</th>
+                <th class="num">Vouchers</th>
+                <th class="num">Invested</th>
+                <th class="num">Earned</th>
+                <th class="num">Net</th>
+              </tr>
+            </thead>
+            <tbody>
+              @if (!projectRows().length) {
+                <tr><td class="empty" colspan="6">No cost-centre tags were found on the current extract.</td></tr>
+              } @else {
+                @for (row of projectRows(); track row.id) {
+                  <tr class="drill-row" (click)="openProject(row)">
+                    <td><strong>{{ row.name }}</strong></td>
+                    <td>{{ row.companyName }}</td>
+                    <td class="num">{{ row.voucherCount }}</td>
+                    <td class="num" [title]="fullInr(row.invested)">{{ compactInr(row.invested) }}</td>
+                    <td class="num" [title]="fullInr(row.earned)">{{ compactInr(row.earned) }}</td>
+                    <td class="num" [class.up]="row.net >= 0" [class.down]="row.net < 0" [title]="fullInr(row.net)">{{ compactInr(row.net) }}</td>
+                  </tr>
+                }
+              }
+            </tbody>
+          </table>
+        </div>
+      </article>
+    }
+
+    <article class="panel">
+      <header>
+        <div>
+          <h2>{{ snapshot.lastMonth.label }} payment activity</h2>
+          <p>
+            {{ snapshot.lastMonth.count }} payment, purchase, and debit-note vouchers
+            @if (snapshot.lastMonth.withAmount) {
+              · {{ compactInr(snapshot.lastMonth.amount) }} with amounts
+            } @else {
+              · amounts not in the Tally extract yet
+            }
+          </p>
+        </div>
+        <button type="button" class="btn ghost" (click)="openPayments()">Open all</button>
+      </header>
+      <div class="table-wrap compact">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Type</th>
+              <th>Company</th>
+              <th>Party / narration</th>
+              <th class="num">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            @if (loadingVouchers()) {
+              <tr><td class="empty" colspan="5">Loading vouchers…</td></tr>
+            } @else if (!vouchers().length) {
+              <tr><td class="empty" colspan="5">No payment or purchase vouchers in {{ snapshot.lastMonth.label }}.</td></tr>
+            } @else {
+              @for (row of vouchers(); track row.id) {
+                <tr>
+                  <td>{{ row.date | date: 'dd MMM yyyy' }}</td>
+                  <td>{{ row.type }}</td>
+                  <td>{{ row.companyName }}</td>
+                  <td class="wrap">
+                    <strong>{{ clean(row.party || row.number || '—') }}</strong>
+                    <small>{{ clean(row.narration) }}</small>
+                  </td>
+                  <td class="num" [title]="fullInr(row.amount)">{{ compactInr(row.amount) }}</td>
+                </tr>
+              }
+            }
+          </tbody>
+        </table>
+      </div>
+      @if (voucherTotal() > vouchers().length) {
+        <p class="more">
+          Showing {{ vouchers().length }} of {{ voucherTotal() }}.
+          <a routerLink="/transactions" [queryParams]="{ company: company(), from: snapshot.lastMonth.from, to: lastMonthEnd(snapshot.lastMonth.from) }">See the full list</a>
+        </p>
+      }
+    </article>
+  }
+</section>

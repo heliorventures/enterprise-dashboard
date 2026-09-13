@@ -1,48 +1,10 @@
 <section class="grid-page">
   <header>
-    <p class="eyebrow">Day book</p>
-    <h1>Transactions</h1>
-  </header>
-
-  <form class="filter-card" (submit)="apply($event)">
-    <div class="filter-form">
-      <label class="field search">
-        <span>Search</span>
-        <input type="search" [value]="query()" (input)="onQuery($event)" placeholder="Voucher no, party, narration" />
-      </label>
-      <label class="field compact">
-        <span>Company</span>
-        <select [value]="company()" (change)="onCompany($event)">
-          <option value="all">All companies</option>
-          @for (item of companies(); track item.id) {
-            <option [value]="item.id">{{ item.name }}</option>
-          }
-        </select>
-      </label>
-      <label class="field compact">
-        <span>Voucher type</span>
-        <select [value]="type()" (change)="onType($event)">
-          <option value="">All types</option>
-          @for (name of types(); track name) {
-            <option [value]="name">{{ name }}</option>
-          }
-        </select>
-      </label>
-      <label class="field compact">
-        <span>From</span>
-        <input type="date" [value]="from()" (change)="onFrom($event)" />
-      </label>
-      <label class="field compact">
-        <span>To</span>
-        <input type="date" [value]="to()" (change)="onTo($event)" />
-      </label>
-      <div class="filter-actions">
-        <button type="button" class="btn ghost" (click)="exportCsv()" [disabled]="exporting()">
-          {{ exporting() ? 'Exporting…' : 'Export' }}
-        </button>
-      </div>
+    <div>
+      <p class="eyebrow">Day book</p>
+      <h1>Transactions</h1>
     </div>
-  </form>
+  </header>
 
   @if (error()) {
     <p class="banner">{{ error() }}</p>
@@ -51,16 +13,64 @@
   <article class="grid-card">
     <div class="grid-toolbar">
       <div>
-        <h2>All vouchers</h2>
-        <p>Every booked transaction. Filter by company, type, and date, then page through the day book.</p>
+        <h2><app-icon name="transactions" /> Voucher register</h2>
+        <p>{{ total() }} vouchers. Amounts are ₹0.00 when Tally did not export a total.</p>
       </div>
     </div>
+
+    <form class="filter-bar filters-6" (submit)="apply($event)">
+      <label class="field search">
+        <span>Search</span>
+        <span class="search-box">
+          <app-icon name="search" />
+          <input type="search" [value]="query()" (input)="onQuery($event)" placeholder="Voucher no, party or narration" />
+        </span>
+      </label>
+      <label class="field">
+        <span>Company</span>
+        <select [value]="company()" (change)="onCompany($event)">
+          <option value="all">All companies</option>
+          @for (item of companies(); track item.id) {
+            <option [value]="item.id">{{ item.name }}</option>
+          }
+        </select>
+      </label>
+      <label class="field">
+        <span>Type</span>
+        <select [value]="type()" (change)="onType($event)">
+          <option value="">All types</option>
+          @for (name of types(); track name) {
+            <option [value]="name">{{ name }}</option>
+          }
+        </select>
+      </label>
+      <label class="field">
+        <span>From</span>
+        <input type="date" [value]="from()" (change)="onFrom($event)" />
+      </label>
+      <label class="field">
+        <span>To</span>
+        <input type="date" [value]="to()" (change)="onTo($event)" />
+      </label>
+      <div class="filter-actions">
+        <button type="button" class="btn ghost" (click)="clear()">
+          <app-icon name="close" />
+          Clear
+        </button>
+        <button type="button" class="btn primary" (click)="exportCsv()" [disabled]="exporting()">
+          <app-icon name="download" />
+          {{ exporting() ? 'Exporting…' : 'Export' }}
+        </button>
+      </div>
+    </form>
+
     <div class="table-wrap">
       <table class="data-table">
         <thead>
           <tr>
             <th>Date</th>
-            <th>Voucher</th>
+            <th>Type</th>
+            <th>Voucher no</th>
             <th>Company</th>
             <th>Party / ledger</th>
             <th>Project</th>
@@ -70,22 +80,20 @@
         </thead>
         <tbody>
           @if (loading()) {
-            <tr><td class="empty" colspan="7">Loading transactions…</td></tr>
+            <tr><td class="empty" colspan="8">Loading transactions…</td></tr>
           } @else if (!items().length) {
-            <tr><td class="empty" colspan="7">No transactions match the current filters.</td></tr>
+            <tr><td class="empty" colspan="8">No transactions match the current filters.</td></tr>
           } @else {
             @for (row of items(); track row.id) {
               <tr>
                 <td>{{ row.date | date: 'dd MMM yyyy' }}</td>
-                <td>
-                  <strong>{{ row.type }}</strong>
-                  <small>{{ row.number || '—' }}</small>
-                </td>
-                <td>{{ row.companyName }}</td>
-                <td>{{ row.party || '—' }}</td>
-                <td>{{ row.project || '—' }}</td>
-                <td class="narration">{{ row.narration || '—' }}</td>
-                <td class="num" [title]="fullInr(row.amount)">{{ compactInr(row.amount) }}</td>
+                <td class="wrap"><strong>{{ clean(row.type) }}</strong></td>
+                <td>{{ row.number || '—' }}</td>
+                <td class="wrap">{{ row.companyName }}</td>
+                <td class="wrap">{{ clean(row.party || '') || '—' }}</td>
+                <td class="wrap">{{ row.project || '—' }}</td>
+                <td class="narration">{{ clean(row.narration || '') || '—' }}</td>
+                <td class="num" [title]="fullInr(row.amount)">{{ fullInr(row.amount) }}</td>
               </tr>
             }
           }

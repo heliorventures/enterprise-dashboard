@@ -1,24 +1,27 @@
 import { Component, computed, inject, signal } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
 import { DashboardService } from '../../services/dashboard';
 import { CompanyOption, LedgerRow } from '../../models/books';
 import { compactInr, drCr, fullInr } from '../../shared/money';
 import { downloadCsv } from '../../shared/csv';
+import { Icon } from '../../shared/icon';
 import { Pager } from '../../shared/pager';
 
 @Component({
   selector: 'app-ledgers',
-  imports: [Pager],
+  imports: [Pager, Icon],
   templateUrl: './ledgers.html',
   styleUrl: './ledgers.css',
 })
 export class Ledgers {
   private readonly api = inject(DashboardService);
+  private readonly route = inject(ActivatedRoute);
 
   readonly company = signal('all');
   readonly query = signal('');
   readonly group = signal('');
   readonly page = signal(1);
-  readonly pageSize = signal(25);
+  readonly pageSize = signal(100);
   readonly loading = signal(true);
   readonly exporting = signal(false);
   readonly error = signal('');
@@ -43,7 +46,13 @@ export class Ledgers {
       next: (dashboard) => this.companies.set(dashboard.companies),
       error: () => undefined,
     });
-    this.load();
+    this.route.queryParamMap.subscribe((params) => {
+      this.company.set(params.get('company') || 'all');
+      this.group.set(params.get('group') || '');
+      this.query.set(params.get('q') || '');
+      this.page.set(1);
+      this.load();
+    });
   }
 
   load() {
@@ -120,7 +129,7 @@ export class Ledgers {
         q: this.query(),
         group: this.group(),
         page: 1,
-        pageSize: 5000,
+        pageSize: 20000,
       })
       .subscribe({
         next: (result) => {
@@ -146,5 +155,9 @@ export class Ledgers {
 
   abs(value: number) {
     return Math.abs(value);
+  }
+
+  clean(value: string) {
+    return (value || '').replace(/\u0004/g, '').trim();
   }
 }

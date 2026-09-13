@@ -38,9 +38,13 @@ test('source requests fetch broad nested data with explicit company context for 
   assert.equal(Object.keys(source.CATALOG).length,13);
   for(const c of Object.keys(source.CATALOG)) {
     const request=source.request(c,'A & B');
-    assert.ok(request.includes('<FETCH>*</FETCH>'));
+    assert.ok(request.includes(`<FETCH>${source.fetchList(c)}</FETCH>`));
     assert.ok(request.includes('<SVCURRENTCOMPANY>A &amp; B</SVCURRENTCOMPANY>'));
   }
+  const voucherRequest=source.request('VOUCHER','A & B');
+  assert.ok(voucherRequest.includes('<NATIVEMETHOD>Amount</NATIVEMETHOD>'));
+  assert.ok(source.fetchList('VOUCHER').includes('Amount'));
+  assert.ok(!source.fetchList('VOUCHER').startsWith('*'));
 });
 test('default source import captures empty/unrecognized values without dashboard conversions and records failed coverage',async()=>{
   const directory=fs.mkdtempSync(path.join(os.tmpdir(),'finance-source-test-'));

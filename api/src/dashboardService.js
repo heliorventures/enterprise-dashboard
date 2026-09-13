@@ -1,7 +1,6 @@
 const db = require('./db');
-const tally = require('./tally');
-const config = require('./config');
 const { companyFilter } = require('./filters');
+const { fundsOnHand, groupHistory, money, monthLabel, summarizeFunds } = require('./funds');
 
 function toNumber(value) {
   return Number(value) || 0;
@@ -49,11 +48,17 @@ async function companyFinancials(companyId) {
       SELECT
         c."CompanyID",
         c."CompanyName",
-        SUM(CASE WHEN l."GroupCategory" ILIKE '%Sales%' THEN l."CurrentBalance" ELSE 0 END) AS "Revenue",
+        COUNT(l."LedgerID") AS "LedgerCount",
+        (SELECT COUNT(*) FROM "Vouchers" v WHERE v."CompanyID" = c."CompanyID") AS "VoucherCount",
+        SUM(CASE WHEN l."GroupCategory" ILIKE '%Sales%'
+          OR l."GroupCategory" ILIKE 'Indirect Income%'
+          OR l."GroupCategory" ILIKE 'Direct Income%'
+          THEN l."CurrentBalance" ELSE 0 END) AS "Revenue",
         SUM(CASE WHEN l."GroupCategory" ILIKE '%Purchase%' OR l."GroupCategory" ILIKE '%Expense%' THEN l."CurrentBalance" ELSE 0 END) AS "Expenses",
         SUM(CASE WHEN l."GroupCategory" ILIKE '%Debtor%' THEN l."CurrentBalance" ELSE 0 END) AS "Receivables",
         SUM(CASE WHEN l."GroupCategory" ILIKE '%Creditor%' THEN l."CurrentBalance" ELSE 0 END) AS "Payables",
-        SUM(CASE WHEN l."GroupCategory" ILIKE '%Bank%' OR l."GroupCategory" ILIKE '%Cash%' THEN l."CurrentBalance" ELSE 0 END) AS "Cash"
+        SUM(CASE WHEN l."GroupCategory" ILIKE '%Bank%' THEN l."CurrentBalance" ELSE 0 END) AS "Bank",
+        SUM(CASE WHEN l."GroupCategory" ILIKE '%Cash%' THEN l."CurrentBalance" ELSE 0 END) AS "Cash"
       FROM "Companies" c
       LEFT JOIN "Ledgers" l ON l."CompanyID" = c."CompanyID"
       WHERE c."IsActive" = true
@@ -78,17 +83,19 @@ async function projectRows(companyId) {
         p."TargetRevenue",
         p."StartDate",
         p."EndDate",
-        COALESCE((
-          SELECT SUM(v."Amount")
-          FROM "Vouchers" v
-          WHERE v."ProjectID" = p."ProjectID"
-            AND v."VoucherType" IN ('Payment', 'Purchase')
-        ), 0) AS "ActualSpend"
+        p."SourceKey",
+        COUNT(v."VoucherID")::int AS "VoucherCount",
+        COALESCE(SUM(CASE WHEN v."VoucherType" ~* '(payment|purchase|debit[[:space:]]*note)' THEN ABS(v."Amount") ELSE 0 END), 0) AS "Invested",
+        COALESCE(SUM(CASE WHEN v."VoucherType" ~* '(receipt|sales|credit[[:space:]]*note)' THEN ABS(v."Amount") ELSE 0 END), 0) AS "Earned",
+        COALESCE(SUM(CASE WHEN v."VoucherType" IN ('Payment', 'Purchase') THEN v."Amount" ELSE 0 END), 0) AS "ActualSpend"
       FROM "Projects" p
       INNER JOIN "Companies" c ON c."CompanyID" = p."CompanyID"
+      LEFT JOIN "Vouchers" v ON v."ProjectID" = p."ProjectID" AND v."CompanyID" = p."CompanyID"
       WHERE c."IsActive" = true
         AND ($1 = 0 OR p."CompanyID" = $1)
-      ORDER BY p."EndDate"
+      GROUP BY p."ProjectID", p."CompanyID", c."CompanyName", p."ProjectName", p."BudgetedExpense",
+               p."TargetRevenue", p."StartDate", p."EndDate", p."SourceKey"
+      ORDER BY c."CompanyName", p."ProjectName"
     `,
     [Number(companyId) || 0]
   );
@@ -104,34 +111,139 @@ async function lastSync() {
   return result.rows[0] || null;
 }
 
+async function bookCounts(companyId) {
+  const [ledgers, vouchers, groups] = await Promise.all([
+    db.query(
+      `SELECT COUNT(*)::int AS count FROM "Ledgers" l
+       INNER JOIN "Companies" c ON c."CompanyID" = l."CompanyID"
+       WHERE c."IsActive" = true AND ($1 = 0 OR l."CompanyID" = $1)`,
+      [Number(companyId) || 0]
+    ),
+    db.query(
+      `SELECT COUNT(*)::int AS count FROM "Vouchers" v
+       INNER JOIN "Companies" c ON c."CompanyID" = v."CompanyID"
+       WHERE c."IsActive" = true AND ($1 = 0 OR v."CompanyID" = $1)`,
+      [Number(companyId) || 0]
+    ),
+    db.query(
+      `SELECT l."GroupCategory" AS name, COUNT(*)::int AS count, COALESCE(SUM(l."CurrentBalance"), 0) AS balance
+       FROM "Ledgers" l
+       INNER JOIN "Companies" c ON c."CompanyID" = l."CompanyID"
+       WHERE c."IsActive" = true AND ($1 = 0 OR l."CompanyID" = $1)
+       GROUP BY l."GroupCategory"
+       ORDER BY ABS(COALESCE(SUM(l."CurrentBalance"), 0)) DESC, l."GroupCategory"`,
+      [Number(companyId) || 0]
+    ),
+  ]);
+  return {
+    ledgerCount: ledgers.rows[0].count,
+    voucherCount: vouchers.rows[0].count,
+    groups: groups.rows.map((row) => ({
+      name: row.name,
+      count: row.count,
+      balance: toNumber(row.balance),
+    })),
+  };
+}
+
 function mapFinance(row) {
-  const revenue = toNumber(row.Revenue);
-  const expenses = toNumber(row.Expenses);
+  const revenue = fundsOnHand(row.Revenue);
+  const expenses = fundsOnHand(row.Expenses);
+  const bank = fundsOnHand(row.Bank);
+  const cash = fundsOnHand(row.Cash);
   return {
     id: String(row.CompanyID),
     name: row.CompanyName,
     revenue,
     expenses,
     profit: revenue - expenses,
-    receivables: toNumber(row.Receivables),
-    payables: toNumber(row.Payables),
-    cash: toNumber(row.Cash),
+    receivables: money(-toNumber(row.Receivables)),
+    payables: money(toNumber(row.Payables)),
+    bank,
+    cash,
+    cashAndBank: bank + cash,
+    ledgerCount: toNumber(row.LedgerCount),
+    voucherCount: toNumber(row.VoucherCount),
     source: 'sql',
   };
 }
 
+async function monthlyActivity(companyId) {
+  const result = await db.query(
+    `
+      SELECT
+        v."CompanyID"::text AS "companyId",
+        to_char(date_trunc('month', v."VoucherDate"), 'YYYY-MM') AS key,
+        COALESCE(SUM(CASE WHEN v."VoucherType" ~* '(payment|purchase|debit[[:space:]]*note)' THEN ABS(v."Amount") ELSE 0 END), 0) AS expenses,
+        COALESCE(SUM(CASE WHEN v."VoucherType" ~* '(receipt|sales|credit[[:space:]]*note)' THEN ABS(v."Amount") ELSE 0 END), 0) AS inflow,
+        COUNT(*) FILTER (WHERE v."VoucherType" ~* '(payment|purchase|debit[[:space:]]*note)')::int AS "expenseCount",
+        COUNT(*)::int AS "voucherCount"
+      FROM "Vouchers" v
+      INNER JOIN "Companies" c ON c."CompanyID" = v."CompanyID"
+      WHERE c."IsActive" = true
+        AND ($1 = 0 OR v."CompanyID" = $1)
+        AND v."VoucherDate" >= (date_trunc('month', CURRENT_DATE) - INTERVAL '11 months')::date
+      GROUP BY v."CompanyID", 2
+      ORDER BY 2, v."CompanyID"
+    `,
+    [Number(companyId) || 0]
+  );
+  return result.rows.map((row) => ({
+    companyId: String(row.companyId),
+    key: row.key,
+    label: monthLabel(row.key),
+    expenses: toNumber(row.expenses),
+    inflow: toNumber(row.inflow),
+    expenseCount: toNumber(row.expenseCount),
+    voucherCount: toNumber(row.voucherCount),
+  }));
+}
+
+async function bankAccounts(companyId) {
+  const result = await db.query(
+    `
+      SELECT c."CompanyID", c."CompanyName", l."LedgerName", l."GroupCategory", l."CurrentBalance"
+      FROM "Ledgers" l
+      INNER JOIN "Companies" c ON c."CompanyID" = l."CompanyID"
+      WHERE c."IsActive" = true
+        AND ($1 = 0 OR l."CompanyID" = $1)
+        AND (l."GroupCategory" ILIKE '%Bank%' OR l."GroupCategory" ILIKE '%Cash%')
+      ORDER BY ABS(l."CurrentBalance") DESC, c."CompanyName", l."LedgerName"
+    `,
+    [Number(companyId) || 0]
+  );
+  return result.rows.map((row) => ({
+    companyId: String(row.CompanyID),
+    companyName: row.CompanyName,
+    name: row.LedgerName,
+    group: row.GroupCategory,
+    available: fundsOnHand(row.CurrentBalance),
+    kind: /bank/i.test(row.GroupCategory) ? 'bank' : 'cash',
+  }));
+}
+
 async function getDashboard(companyCode = 'all') {
   const companyId = companyFilter(companyCode);
-  const [tallyStatus, companies, financialRows, projects, sync] = await Promise.all([
-    config.tallyMode === 'pull' ? tally.ping() : Promise.resolve({ connected: true, mode: 'push', url: '', companies: [], message: 'Receiving snapshots from the Tally sender service' }),
+  const [companies, financialRows, projects, sync, books, activity, accounts] = await Promise.all([
     getCompanies(),
     companyFinancials(companyId),
     projectRows(companyId),
     lastSync(),
+    bookCounts(companyId),
+    monthlyActivity(companyId),
+    bankAccounts(companyId),
   ]);
+  const tallyStatus = {
+    connected: Boolean(sync),
+    mode: 'archive',
+    url: '',
+    companies: [],
+    message: 'Books are updated from dumped Tally source records, not a live Tally connection',
+  };
 
   const companyCards = financialRows.map(mapFinance);
-  const workItems = projects.map((project) => {
+  const groupedActivity = groupHistory(activity);
+  const workItems = projects.filter((project) => toNumber(project.VoucherCount) > 0 || !project.SourceKey).map((project) => {
     const status = projectStatus(project);
     return {
       id: project.ProjectID,
@@ -142,10 +254,14 @@ async function getDashboard(companyCode = 'all') {
       progress: projectProgress(project),
       owner: '',
       dueDate: project.EndDate,
-      source: 'sql',
+      source: project.SourceKey ? 'tally' : 'sql',
       budget: toNumber(project.BudgetedExpense),
       actual: toNumber(project.ActualSpend),
       target: toNumber(project.TargetRevenue),
+      voucherCount: toNumber(project.VoucherCount),
+      invested: toNumber(project.Invested),
+      earned: toNumber(project.Earned),
+      net: money(toNumber(project.Earned) - toNumber(project.Invested)),
     };
   });
 
@@ -165,9 +281,34 @@ async function getDashboard(companyCode = 'all') {
       profit: companyCards.reduce((sum, row) => sum + row.profit, 0),
       receivables: companyCards.reduce((sum, row) => sum + row.receivables, 0),
       payables: companyCards.reduce((sum, row) => sum + row.payables, 0),
-      cash: companyCards.reduce((sum, row) => sum + row.cash, 0),
+      cash: companyCards.reduce((sum, row) => sum + row.cashAndBank, 0),
+      bank: companyCards.reduce((sum, row) => sum + row.bank, 0),
     },
+    funds: summarizeFunds({
+      bank: companyCards.reduce((sum, row) => sum + row.bank, 0),
+      cash: companyCards.reduce((sum, row) => sum + row.cash, 0),
+      receivables: companyCards.reduce((sum, row) => sum + row.receivables, 0),
+      payables: companyCards.reduce((sum, row) => sum + row.payables, 0),
+      ledgerExpense: companyCards.reduce((sum, row) => sum + row.expenses, 0),
+      ledgerIncome: companyCards.reduce((sum, row) => sum + row.revenue, 0),
+      history: groupedActivity.months,
+      histories: groupedActivity.byCompany,
+      accounts,
+      companies: companyCards.map((row) => ({
+        id: row.id,
+        name: row.name,
+        bank: row.bank,
+        cash: row.cash,
+        cashAndBank: row.cashAndBank,
+        receivables: row.receivables,
+        payables: row.payables,
+        expenses: row.expenses,
+        revenue: row.revenue,
+        uncommitted: row.cashAndBank - row.payables,
+      })),
+    }),
     companyFinancials: companyCards,
+    books,
     work: {
       totals: {
         total: workItems.length,
@@ -175,6 +316,10 @@ async function getDashboard(companyCode = 'all') {
         delayed: workItems.filter((item) => item.status === 'delayed').length,
         atRisk: workItems.filter((item) => item.status === 'at-risk').length,
         completed: workItems.filter((item) => item.status === 'completed').length,
+        voucherCount: workItems.reduce((sum, item) => sum + item.voucherCount, 0),
+        invested: money(workItems.reduce((sum, item) => sum + item.invested, 0)),
+        earned: money(workItems.reduce((sum, item) => sum + item.earned, 0)),
+        net: money(workItems.reduce((sum, item) => sum + item.net, 0)),
       },
       items: workItems,
     },

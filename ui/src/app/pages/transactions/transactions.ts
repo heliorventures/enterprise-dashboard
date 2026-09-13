@@ -1,19 +1,22 @@
 import { DatePipe } from '@angular/common';
 import { Component, computed, inject, signal } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
 import { DashboardService } from '../../services/dashboard';
 import { CompanyOption, VoucherRow } from '../../models/books';
 import { compactInr, fullInr } from '../../shared/money';
 import { downloadCsv } from '../../shared/csv';
+import { Icon } from '../../shared/icon';
 import { Pager } from '../../shared/pager';
 
 @Component({
   selector: 'app-transactions',
-  imports: [DatePipe, Pager],
+  imports: [DatePipe, Pager, Icon],
   templateUrl: './transactions.html',
   styleUrl: './transactions.css',
 })
 export class Transactions {
   private readonly api = inject(DashboardService);
+  private readonly route = inject(ActivatedRoute);
 
   readonly company = signal('all');
   readonly query = signal('');
@@ -21,7 +24,7 @@ export class Transactions {
   readonly from = signal('');
   readonly to = signal('');
   readonly page = signal(1);
-  readonly pageSize = signal(25);
+  readonly pageSize = signal(100);
   readonly loading = signal(true);
   readonly exporting = signal(false);
   readonly error = signal('');
@@ -45,7 +48,15 @@ export class Transactions {
       next: (dashboard) => this.companies.set(dashboard.companies),
       error: () => undefined,
     });
-    this.load();
+    this.route.queryParamMap.subscribe((params) => {
+      this.company.set(params.get('company') || 'all');
+      this.query.set(params.get('q') || '');
+      this.type.set(params.get('type') || '');
+      this.from.set(params.get('from') || '');
+      this.to.set(params.get('to') || '');
+      this.page.set(1);
+      this.load();
+    });
   }
 
   load() {
@@ -128,6 +139,10 @@ export class Transactions {
     this.load();
   }
 
+  clean(value: string) {
+    return (value || '').replace(/\u0004/g, '').trim();
+  }
+
   exportCsv() {
     this.exporting.set(true);
     this.api
@@ -138,7 +153,7 @@ export class Transactions {
         from: this.from(),
         to: this.to(),
         page: 1,
-        pageSize: 5000,
+        pageSize: 20000,
       })
       .subscribe({
         next: (result) => {

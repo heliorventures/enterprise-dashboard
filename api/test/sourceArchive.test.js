@@ -112,6 +112,6 @@ test('source agent transfers raw values through authenticated HTTP into PostgreS
     global.fetch=originalFetch;console.log=originalLog;config.ingestToken=oldToken;
     await new Promise(resolve=>server.close(resolve));
     fs.rmSync(directory,{recursive:true});
-    await db.query('TRUNCATE tally_source_uploads,tally_source_snapshots CASCADE');
+    await db.query('TRUNCATE tally_source_uploads,tally_source_snapshots,tally_ingestions,"Vouchers","Projects","Ledgers","Companies","SyncLog" RESTART IDENTITY CASCADE');
   }
 });

@@ -1,0 +1,91 @@
+:host {
+  display: block;
+  min-height: 100vh;
+}
+
+.login {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 32px 16px;
+  background:
+    radial-gradient(800px 420px at 18% 0%, rgba(90, 155, 255, 0.32), transparent 55%),
+    radial-gradient(720px 380px at 92% 100%, rgba(20, 136, 107, 0.22), transparent 50%),
+    linear-gradient(160deg, #0e2342 0%, #16375f 55%, #1c4a6e 100%);
+}
+
+.login-card {
+  width: min(440px, 100%);
+  padding: 36px 32px 28px;
+  background: var(--surface);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: var(--radius);
+  box-shadow: 0 24px 60px rgba(8, 18, 36, 0.28);
+}
+
+.brand {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 28px;
+}
+
+.mark {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: linear-gradient(145deg, #5a9bff 0%, #2d62d4 70%);
+  color: #fff;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.brand strong,
+.brand span {
+  display: block;
+}
+
+.brand strong {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 560;
+}
+
+.brand span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+header p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+form {
+  display: grid;
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.field > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.field > span app-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.hint {
+  margin: 20px 0 0;
+  color: var(--subtle);
+  font-size: 12px;
+  line-height: 1.5;
+}

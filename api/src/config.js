@@ -5,6 +5,9 @@ module.exports = {
   production: process.env.NODE_ENV === 'production',
   ingestToken: process.env.TALLY_INGEST_TOKEN || '',
   tallyMode: process.env.TALLY_MODE || 'push',
+  dashboardUser: process.env.DASHBOARD_USER || 'admin',
+  dashboardPassword: process.env.DASHBOARD_PASSWORD || (process.env.NODE_ENV === 'production' ? '' : 'admin'),
+  sessionSecret: process.env.DASHBOARD_SESSION_SECRET || '',
   db: {
     user: process.env.DB_USER || 'enterprise_dashboard',
     password: process.env.DB_PASSWORD,

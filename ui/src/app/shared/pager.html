@@ -13,7 +13,10 @@
   </label>
 
   <div class="pages">
-    <button type="button" class="nav" [disabled]="page() <= 1" (click)="goTo(page() - 1)">Previous</button>
+    <button type="button" class="nav" [disabled]="page() <= 1" (click)="goTo(page() - 1)">
+      <app-icon name="chevronLeft" />
+      Previous
+    </button>
     @for (item of pages(); track $index) {
       @if (item === 'ellipsis') {
         <span class="ellipsis">…</span>
@@ -21,6 +24,9 @@
         <button type="button" [class.active]="item === page()" (click)="goTo(item)">{{ item }}</button>
       }
     }
-    <button type="button" class="nav" [disabled]="page() >= lastPage()" (click)="goTo(page() + 1)">Next</button>
+    <button type="button" class="nav" [disabled]="page() >= lastPage()" (click)="goTo(page() + 1)">
+      Next
+      <app-icon name="chevronRight" />
+    </button>
   </div>
 </div>

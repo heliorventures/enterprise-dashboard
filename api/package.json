@@ -8,6 +8,10 @@
     "dev": "nodemon src/server.js",
     "tally:check": "node src/tally-check.js",
     "migrate": "node src/migrate.js",
+    "unpack": "node src/sourceUnpack.js",
+    "unpack:force": "node src/sourceUnpack.js --force",
+    "promote": "node src/sourceUnpack.js",
+    "promote:force": "node src/sourceUnpack.js --force",
     "test": "node --test --test-concurrency=1 test/*.test.js"
   },
   "keywords": [],

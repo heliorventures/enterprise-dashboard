@@ -9,8 +9,8 @@ function companyFilter(value) {
 function paging(page = 1, pageSize = 25) {
   const current = Number(page);
   const size = Number(pageSize);
-  if (!Number.isSafeInteger(current) || current < 1 || !Number.isSafeInteger(size) || size < 1 || size > 5000 || !Number.isSafeInteger((current - 1) * size)) {
-    throw bad('page must be a positive integer and pageSize must be between 1 and 5000');
+  if (!Number.isSafeInteger(current) || current < 1 || !Number.isSafeInteger(size) || size < 1 || size > 20000 || !Number.isSafeInteger((current - 1) * size)) {
+    throw bad('page must be a positive integer and pageSize must be between 1 and 20000');
   }
   return { size, current, offset: (current - 1) * size };
 }

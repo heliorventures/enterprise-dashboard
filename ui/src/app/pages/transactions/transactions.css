@@ -3,6 +3,5 @@
 }
 
 .narration {
-  max-width: 260px;
-  white-space: normal;
+  max-width: none;
 }

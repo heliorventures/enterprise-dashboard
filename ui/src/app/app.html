@@ -1,34 +1,53 @@
-<div class="shell">
-  <aside class="sidebar">
-    <div class="brand">
-      <span class="mark" aria-hidden="true"></span>
-      <div>
-        <strong>Executive</strong>
-        <span>Group dashboard</span>
+@if (!auth.ready()) {
+  <div class="boot">Loading console…</div>
+} @else if (auth.user(); as user) {
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="mark" aria-hidden="true">H</span>
+        <div>
+          <strong>Helior Finance</strong>
+          <span>Executive console</span>
+        </div>
       </div>
-    </div>
 
-    <nav>
-      <a class="nav-link" routerLink="/dashboard" routerLinkActive="active">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7v9H4V4zm9 0h7v5h-7V4zM4 15h7v5H4v-5zm9-4h7v9h-7v-9z"/></svg>
-        Overview
-      </a>
-      <a class="nav-link" routerLink="/ledgers" routerLinkActive="active">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3h16v4H4V3zm0 7h16v4H4v-4zm0 7h16v4H4v-4z"/></svg>
-        Ledgers
-      </a>
-      <a class="nav-link" routerLink="/transactions" routerLinkActive="active">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v2H5V4zm0 4h14l-2 12H7L5 8zm4 3h6v2H9v-2z"/></svg>
-        Transactions
-      </a>
-    </nav>
+      <nav>
+        <a class="nav-link" routerLink="/dashboard" routerLinkActive="active">
+          <app-icon name="overview" />
+          Overview
+        </a>
+        <a class="nav-link" routerLink="/reports" routerLinkActive="active">
+          <app-icon name="reports" />
+          Reports
+        </a>
+        <a class="nav-link" routerLink="/ledgers" routerLinkActive="active">
+          <app-icon name="ledgers" />
+          Ledgers
+        </a>
+        <a class="nav-link" routerLink="/transactions" routerLinkActive="active">
+          <app-icon name="transactions" />
+          Transactions
+        </a>
+        <a class="nav-link" routerLink="/operations" routerLinkActive="active">
+          <app-icon name="operations" />
+          Operations
+        </a>
+        <button type="button" class="nav-link sign-out" (click)="auth.logout()">
+          <app-icon name="logout" />
+          Sign out
+        </button>
+      </nav>
 
-    <div class="sidebar-foot">
-      <p>Tally remains the system of record. Overview, ledgers, and the day book are synced into SQL Server.</p>
-    </div>
-  </aside>
+      <div class="sidebar-foot">
+        <p class="signed-in">Signed in as {{ user.name }}</p>
+        <p class="hint">Books come from dumped Tally source records. Each dump is applied incrementally.</p>
+      </div>
+    </aside>
 
-  <main class="main">
-    <router-outlet />
-  </main>
-</div>
+    <main class="main">
+      <router-outlet />
+    </main>
+  </div>
+} @else {
+  <router-outlet />
+}
