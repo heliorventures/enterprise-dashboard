@@ -1,6 +1,8 @@
 import { Component, computed, input } from '@angular/core';
 
 const PATHS: Record<string, string> = {
+  'chevron-left': 'M15.4 5.4 14 4l-8 8 8 8 1.4-1.4L8.8 12z',
+  'chevron-right': 'M8.6 4 7.2 5.4l6.6 6.6-6.6 6.6L8.6 20l8-8z',
   filter: 'M3 5h18v2H3zm3 6h12v2H6zm4 6h4v2h-4z',
   menu: 'M3 5h18v2H3zm0 6h18v2H3zm0 6h18v2H3z',
   overview: 'M4 4h7v9H4V4zm9 0h7v5h-7V4zM4 15h7v5H4v-5zm9-4h7v9h-7v-9z',

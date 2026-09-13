@@ -44,6 +44,27 @@ describe('App navigation', () => {
       '#main-content',
     );
   });
+  it('starts with an icon rail, toggles desktop labels and retains the choice during navigation', async () => {
+    const { fixture } = await render();
+    const el = fixture.nativeElement as HTMLElement;
+    const toggle = el.querySelector<HTMLButtonElement>('.sidebar-toggle');
+    expect(toggle).not.toBeNull();
+    expect(toggle!.getAttribute('aria-expanded')).toBe('false');
+    expect(el.querySelector('.shell')?.classList.contains('sidebar-collapsed')).toBe(true);
+    toggle!.click();
+    fixture.detectChanges();
+    expect(toggle!.getAttribute('aria-expanded')).toBe('true');
+    await TestBed.inject(Router).navigateByUrl('/reports');
+    fixture.detectChanges();
+    expect(toggle!.getAttribute('aria-expanded')).toBe('true');
+    toggle!.click();
+    fixture.detectChanges();
+    expect(toggle!.getAttribute('aria-expanded')).toBe('false');
+    expect(el.querySelector('.desktop-sidebar a.nav-link')?.getAttribute('aria-label')).toBe(
+      'Overview',
+    );
+    expect(el.querySelector('.mobile-menu .nav-label')?.textContent).toBe('Overview');
+  });
   it('opens a modal and closes it after navigation', async () => {
     const { fixture, dialog } = await render();
     fixture.componentInstance.openMenu();
@@ -52,6 +73,22 @@ describe('App navigation', () => {
     await TestBed.inject(Router).navigateByUrl('/reports');
     expect(fixture.componentInstance.menuOpen()).toBe(false);
     expect(dialog.close).toHaveBeenCalled();
+  });
+  it('positions collapsed menu names on hover and focus and dismisses them with Escape', async () => {
+    const { fixture } = await render();
+    const link = fixture.nativeElement.querySelector(
+      '.desktop-sidebar a.nav-link',
+    ) as HTMLAnchorElement;
+    link.dispatchEvent(new MouseEvent('mouseenter'));
+    fixture.detectChanges();
+    expect(link.style.getPropertyValue('--nav-hint-top')).toBe('0px');
+    expect(fixture.componentInstance.hintsDismissed()).toBe(false);
+    link.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    fixture.detectChanges();
+    expect(fixture.componentInstance.hintsDismissed()).toBe(true);
+    link.dispatchEvent(new FocusEvent('focus'));
+    fixture.detectChanges();
+    expect(fixture.componentInstance.hintsDismissed()).toBe(false);
   });
   it('updates the expanded state when Escape cancels the native dialog', async () => {
     const { fixture, dialog } = await render();

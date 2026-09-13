@@ -70,6 +70,86 @@ nav {
 .nav-link app-icon {
   width: 18px;
   height: 18px;
+  flex-shrink: 0;
+}
+
+.sidebar-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--sidebar-line);
+  border-radius: 10px;
+  color: var(--sidebar-text);
+  background: transparent;
+  font-size: 12px;
+}
+.sidebar-toggle:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.sidebar-toggle app-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+@media (min-width: 901px) {
+  .desktop-sidebar {
+    z-index: 6;
+    height: 100dvh;
+  }
+  .shell.sidebar-collapsed {
+    grid-template-columns: 80px minmax(0, 1fr);
+  }
+  .sidebar-collapsed .desktop-sidebar {
+    padding: 24px 12px;
+  }
+  .sidebar-collapsed .brand {
+    justify-content: center;
+    padding: 0 0 20px;
+  }
+  .sidebar-collapsed .brand > div,
+  .sidebar-collapsed .sidebar-foot,
+  .sidebar-collapsed .sidebar-toggle > span {
+    display: none;
+  }
+  .sidebar-collapsed .sidebar-toggle,
+  .sidebar-collapsed .desktop-sidebar .nav-link {
+    justify-content: center;
+    padding: 12px;
+    min-height: 44px;
+  }
+  .sidebar-collapsed .desktop-sidebar .nav-label {
+    display: none;
+  }
+  .sidebar-collapsed .desktop-sidebar .nav-link:hover .nav-label,
+  .sidebar-collapsed .desktop-sidebar .nav-link:focus-visible .nav-label {
+    display: block;
+    position: fixed;
+    left: 88px;
+    top: var(--nav-hint-top);
+    width: max-content;
+    max-width: calc(100vw - 104px);
+    min-height: 44px;
+    padding: 12px 14px;
+    border: 1px solid var(--sidebar-line);
+    border-radius: 10px;
+    color: var(--sidebar-text);
+    background: var(--sidebar);
+    box-shadow: var(--shadow);
+    text-align: left;
+  }
+  .sidebar-collapsed .desktop-sidebar .nav-label::before {
+    content: '';
+    position: absolute;
+    inset: 0 100% 0 auto;
+    width: 24px;
+  }
+  .shell.sidebar-collapsed.hide-nav-hints .desktop-sidebar .nav-label {
+    display: none;
+  }
 }
 
 .nav-link:hover {

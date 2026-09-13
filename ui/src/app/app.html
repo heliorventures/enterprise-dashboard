@@ -2,7 +2,7 @@
   <div class="boot" role="status">Loading console…</div>
 } @else if (auth.user(); as user) {
   <a class="skip-link" href="#main-content">Skip to content</a>
-  <ng-template #navigation>
+  <ng-template #navigation let-desktop="desktop">
     <nav aria-label="Main navigation">
       @for (link of links; track link.path) {
         <a
@@ -10,12 +10,22 @@
           [routerLink]="link.path"
           routerLinkActive="active"
           ariaCurrentWhenActive="page"
+          [attr.aria-label]="link.label"
+          (mouseenter)="positionNavHint($event, desktop)"
+          (focus)="positionNavHint($event, desktop)"
           (click)="closeMenu()"
-          ><app-icon [name]="link.icon" />{{ link.label }}</a
+          ><app-icon [name]="link.icon" /><span class="nav-label">{{ link.label }}</span></a
         >
       }
-      <button type="button" class="nav-link sign-out" (click)="logout()">
-        <app-icon name="logout" />Sign out
+      <button
+        type="button"
+        class="nav-link sign-out"
+        aria-label="Sign out"
+        (click)="logout()"
+        (mouseenter)="positionNavHint($event, desktop)"
+        (focus)="positionNavHint($event, desktop)"
+      >
+        <app-icon name="logout" /><span class="nav-label">Sign out</span>
       </button>
     </nav>
     <div class="sidebar-foot">
@@ -23,13 +33,35 @@
       <p>Tally is the system of record.</p>
     </div>
   </ng-template>
-  <div class="shell">
-    <aside class="sidebar desktop-sidebar">
+  <div
+    class="shell"
+    [class.sidebar-collapsed]="sidebarCollapsed()"
+    [class.hide-nav-hints]="hintsDismissed()"
+    (keydown.escape)="hintsDismissed.set(true)"
+  >
+    <aside
+      id="desktop-sidebar"
+      class="sidebar desktop-sidebar"
+      aria-label="Desktop sidebar"
+      (scroll)="hintsDismissed.set(true)"
+    >
       <div class="brand">
         <app-brand-mark />
         <div><strong>Helior Finance</strong><span>Executive console</span></div>
       </div>
-      <ng-container [ngTemplateOutlet]="navigation" />
+      <button
+        class="sidebar-toggle"
+        type="button"
+        aria-controls="desktop-sidebar"
+        [attr.aria-expanded]="!sidebarCollapsed()"
+        [attr.aria-label]="sidebarCollapsed() ? 'Expand sidebar' : 'Collapse sidebar'"
+        [title]="sidebarCollapsed() ? 'Expand sidebar' : 'Collapse sidebar'"
+        (click)="toggleSidebar()"
+      >
+        <app-icon [name]="sidebarCollapsed() ? 'chevron-right' : 'chevron-left'" />
+        <span>Collapse sidebar</span>
+      </button>
+      <ng-container [ngTemplateOutlet]="navigation" [ngTemplateOutletContext]="{ desktop: true }" />
     </aside>
     <header class="mobile-header">
       <a routerLink="/dashboard" class="mobile-brand"><app-brand-mark />Helior Finance</a>
@@ -63,7 +95,10 @@
           <app-icon name="close" />
         </button>
       </div>
-      <ng-container [ngTemplateOutlet]="navigation" />
+      <ng-container
+        [ngTemplateOutlet]="navigation"
+        [ngTemplateOutletContext]="{ desktop: false }"
+      />
     </dialog>
     <main id="main-content" class="main" tabindex="-1"><router-outlet /></main>
   </div>

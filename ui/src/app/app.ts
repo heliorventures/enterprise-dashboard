@@ -18,6 +18,8 @@ export class App {
   private readonly destroyRef = inject(DestroyRef);
   readonly menu = viewChild<ElementRef<HTMLDialogElement>>('menu');
   readonly menuOpen = signal(false);
+  readonly sidebarCollapsed = signal(true);
+  readonly hintsDismissed = signal(false);
   readonly links = [
     { path: '/dashboard', label: 'Overview', icon: 'overview' },
     { path: '/reports', label: 'Expenses & projects', icon: 'reports' },
@@ -46,6 +48,18 @@ export class App {
   closeMenu() {
     this.menu()?.nativeElement.close();
     this.menuOpen.set(false);
+  }
+
+  toggleSidebar() {
+    this.sidebarCollapsed.update((collapsed) => !collapsed);
+    this.hintsDismissed.set(true);
+  }
+
+  positionNavHint(event: Event, desktop: boolean) {
+    if (!desktop || !this.sidebarCollapsed()) return;
+    const link = event.currentTarget as HTMLElement;
+    link.style.setProperty('--nav-hint-top', `${link.getBoundingClientRect().top}px`);
+    this.hintsDismissed.set(false);
   }
 
   dismissBackdrop(event: MouseEvent) {
