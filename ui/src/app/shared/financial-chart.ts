@@ -29,11 +29,13 @@ export function chartDomain(rows: readonly ChartRow[]) {
 
 @Component({
   selector: 'app-financial-chart',
+  host: { '[class.compact]': 'compact()' },
   imports: [RouterLink],
   templateUrl: './financial-chart.html',
   styleUrl: './financial-chart.css',
 })
 export class FinancialChart {
+  readonly compact = input(false);
   readonly title = input.required<string>();
   readonly description = input('');
   readonly unit = input('INR');

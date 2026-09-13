@@ -4,7 +4,12 @@
     eyebrow="Source reliability"
     description="Validate saved Tally exports before updating reporting data. Saved exports trigger sync automatically."
   >
-    <button type="button" class="btn ghost" (click)="loadSync()" [disabled]="loading()">
+    <button
+      type="button"
+      class="btn ghost"
+      (click)="refreshKey.update(nextRefresh); loadSync()"
+      [disabled]="loading()"
+    >
       Refresh status
     </button>
     <button
@@ -94,7 +99,14 @@
       empty="No import history yet."
     />
   </article>
+  <app-source-coverage
+    [refreshKey]="
+      refreshKey() + ':' + (currentSync()?.id || 0) + ':' + (currentSync()?.status || '')
+    "
+  />
   <app-source-investigation
-    [syncVersion]="(currentSync()?.id || 0) + ':' + (currentSync()?.status || '')"
+    [syncVersion]="
+      refreshKey() + ':' + (currentSync()?.id || 0) + ':' + (currentSync()?.status || '')
+    "
   />
 </section>

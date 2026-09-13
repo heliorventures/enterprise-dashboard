@@ -1,4 +1,4 @@
-﻿:host {
+ï»¿:host {
   display: block;
   min-width: 0;
 }
@@ -58,5 +58,50 @@
     align-items: flex-start;
     flex-direction: column;
     gap: 4px;
+  }
+}
+
+.executive-overview {
+  gap: 16px;
+}
+.executive-overview > .kpi-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.priorities {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 24px;
+}
+.priorities li {
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 0;
+}
+.priorities p {
+  font-size: 12px;
+  margin-top: 4px;
+  line-height: 1.5;
+}
+.priorities a {
+  white-space: nowrap;
+  font-size: 12px;
+}
+@media (min-width: 1280px) {
+  .executive-overview > .kpi-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1050px) {
+  .executive-overview > .chart-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 760px) {
+  .executive-overview > .kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .priorities {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

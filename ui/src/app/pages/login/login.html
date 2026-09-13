@@ -18,41 +18,48 @@
       <p class="banner danger" role="alert">{{ error() }}</p>
     }
 
-    <form (submit)="$event.preventDefault(); submit()">
-      <label class="field">
-        <span><app-icon name="user" /> Username</span>
-        <input
-          name="username"
-          autocapitalize="none"
-          spellcheck="false"
-          autocomplete="username"
-          [ngModel]="username"
-          (ngModelChange)="username = $event"
-          [disabled]="submitting()"
-          required
-        />
-      </label>
-      <label class="field">
-        <span><app-icon name="lock" /> Password</span>
-        <input
-          name="password"
-          type="password"
-          autocomplete="current-password"
-          [ngModel]="password"
-          (ngModelChange)="password = $event"
-          [disabled]="submitting()"
-          required
-        />
-      </label>
-      <button
-        type="submit"
-        class="btn primary"
-        [disabled]="submitting() || !username.trim() || !password"
-      >
-        <app-icon name="signin" />
-        {{ submitting() ? 'Signing in…' : 'Sign in' }}
+    @if (auth.failure()) {
+      <p class="banner" role="alert">{{ auth.failure() }}</p>
+      <button type="button" class="btn primary" (click)="retrySession()" [disabled]="submitting()">
+        Retry connection
       </button>
-    </form>
+    } @else {
+      <form (submit)="$event.preventDefault(); submit()">
+        <label class="field">
+          <span><app-icon name="user" /> Username</span>
+          <input
+            name="username"
+            autocapitalize="none"
+            spellcheck="false"
+            autocomplete="username"
+            [ngModel]="username"
+            (ngModelChange)="username = $event"
+            [disabled]="submitting()"
+            required
+          />
+        </label>
+        <label class="field">
+          <span><app-icon name="lock" /> Password</span>
+          <input
+            name="password"
+            type="password"
+            autocomplete="current-password"
+            [ngModel]="password"
+            (ngModelChange)="password = $event"
+            [disabled]="submitting()"
+            required
+          />
+        </label>
+        <button
+          type="submit"
+          class="btn primary"
+          [disabled]="submitting() || !username.trim() || !password"
+        >
+          <app-icon name="signin" />
+          {{ submitting() ? 'Signing in…' : 'Sign in' }}
+        </button>
+      </form>
+    }
 
     <p class="hint">Sessions last 12 hours. Tally remains the system of record.</p>
   </div>

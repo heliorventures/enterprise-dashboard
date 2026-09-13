@@ -1,6 +1,7 @@
 import { Component, computed, input } from '@angular/core';
 
 const PATHS: Record<string, string> = {
+  filter: 'M3 5h18v2H3zm3 6h12v2H6zm4 6h4v2h-4z',
   menu: 'M3 5h18v2H3zm0 6h18v2H3zm0 6h18v2H3z',
   overview: 'M4 4h7v9H4V4zm9 0h7v5h-7V4zM4 15h7v5H4v-5zm9-4h7v9h-7v-9z',
   reports: 'M5 3h14v4H5V3zm0 6h8v4H5V9zm0 6h14v4H5v-4zm10-6h4v4h-4V9z',

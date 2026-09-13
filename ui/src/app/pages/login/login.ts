@@ -12,7 +12,7 @@ import { Icon } from '../../shared/icon';
   styleUrl: './login.css',
 })
 export class Login {
-  private readonly auth = inject(Auth);
+  readonly auth = inject(Auth);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
 
@@ -20,6 +20,19 @@ export class Login {
   password = '';
   readonly submitting = signal(false);
   readonly error = signal('');
+
+  async retrySession() {
+    this.submitting.set(true);
+    try {
+      await this.auth.ensure();
+      if (this.auth.user()) {
+        const url = this.route.snapshot.queryParamMap.get('returnUrl') || '/dashboard';
+        await this.router.navigateByUrl(url.startsWith('/') ? url : '/dashboard');
+      }
+    } finally {
+      this.submitting.set(false);
+    }
+  }
 
   async submit() {
     this.error.set('');

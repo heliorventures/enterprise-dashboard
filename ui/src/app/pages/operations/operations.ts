@@ -1,3 +1,4 @@
+import { SourceCoverage } from '../../shared/source-coverage';
 import { SourceInvestigation } from '../../shared/source-investigation';
 import { DataColumn, DataTable } from '../../shared/data-table';
 import { PageHeader } from '../../shared/page-header';
@@ -12,7 +13,7 @@ import { Icon } from '../../shared/icon';
 
 @Component({
   selector: 'app-operations',
-  imports: [SourceInvestigation, DatePipe, Icon, DataTable, PageHeader],
+  imports: [SourceCoverage, SourceInvestigation, DatePipe, Icon, DataTable, PageHeader],
   templateUrl: './operations.html',
   styleUrl: './operations.css',
 })
@@ -22,6 +23,8 @@ export class Operations {
   private pollId: ReturnType<typeof setInterval> | null = null;
   private reading = false;
 
+  readonly nextRefresh = (value: number) => value + 1;
+  readonly refreshKey = signal(0);
   readonly recordKey = recordKey;
   readonly companyColumns: DataColumn<SourceSyncCompany>[] = [
     {
@@ -185,7 +188,7 @@ export class Operations {
   }
 
   private countLine(label: string, counts: SourceSyncCounts) {
-    return `${label} · ${counts.insert} new, ${counts.update} updated, ${counts.unchanged} unchanged`;
+    return `${label} Â· ${counts.insert} new, ${counts.update} updated, ${counts.unchanged} unchanged`;
   }
 
   private startPoll() {

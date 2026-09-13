@@ -22,7 +22,7 @@ const text = (row: Row, field: string) => (row[field] == null ? 'Unavailable' : 
       </p>
     }
     @if (mode() === 'masters') {
-      <label
+      <label class="field"
         >Collection
         <select [value]="collection()" (change)="chooseCollection($event)">
           <option value="">All master collections</option>
@@ -98,10 +98,9 @@ const text = (row: Row, field: string) => (row[field] == null ? 'Unavailable' : 
       flex-wrap: wrap;
     }
     label {
-      display: flex;
-      gap: 12px;
-      align-items: center;
-      flex-wrap: wrap;
+      display: grid;
+      gap: 6px;
+      max-width: 340px;
     }
     select {
       max-width: 100%;

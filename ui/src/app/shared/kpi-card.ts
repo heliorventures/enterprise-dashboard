@@ -3,6 +3,7 @@ import { Icon } from './icon';
 
 @Component({
   selector: 'app-kpi-card',
+  host: { '[class.compact]': 'compact()' },
   imports: [Icon],
   template: `<article [attr.data-tone]="tone()">
     <p><app-icon [name]="icon()" />{{ label() }}</p>
@@ -13,6 +14,20 @@ import { Icon } from './icon';
     <small>{{ hint() }}</small>
   </article>`,
   styles: `
+    :host(.compact) article {
+      padding: 14px;
+    }
+    :host(.compact) p {
+      font-size: 12px;
+      margin-bottom: 8px;
+    }
+    :host(.compact) strong {
+      font-size: clamp(20px, 1.8vw, 26px);
+    }
+    :host(.compact) small {
+      margin-top: 6px;
+      font-size: 11px;
+    }
     :host {
       display: block;
       min-width: 0;
@@ -72,6 +87,7 @@ import { Icon } from './icon';
   `,
 })
 export class KpiCard {
+  readonly compact = input(false);
   readonly label = input.required<string>();
   readonly value = input.required<string>();
   readonly hint = input('');

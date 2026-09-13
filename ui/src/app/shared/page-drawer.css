@@ -1,0 +1,59 @@
+:host {
+  display: inline-block;
+  min-width: 0;
+}
+.page-drawer {
+  position: fixed;
+  inset: 0 0 0 auto;
+  margin: 0;
+  width: min(440px, 100%);
+  max-width: 100%;
+  height: 100dvh;
+  max-height: 100dvh;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: -16px 0 48px #10284a26;
+}
+.page-drawer[open] {
+  display: flex;
+  flex-direction: column;
+}
+.page-drawer::backdrop {
+  background: #10203370;
+}
+.drawer-heading,
+.drawer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: none;
+  gap: 16px;
+  padding: 16px 20px;
+  background: var(--surface);
+}
+.drawer-heading {
+  border-bottom: 1px solid var(--line);
+}
+.drawer-heading h2 {
+  margin: 0;
+  font: 600 16px var(--font);
+}
+.drawer-heading .btn {
+  width: 44px;
+  padding: 0;
+}
+.drawer-content {
+  padding: 20px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.drawer-footer {
+  border-top: 1px solid var(--line);
+  justify-content: flex-end;
+  margin-top: auto;
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+}

@@ -5,16 +5,43 @@
     description="See expense concentration and project activity, then open the records that explain them."
   >
     <div class="controls">
-      <app-company-select
-        [companies]="companies()"
-        [value]="company()"
-        (companyChange)="onCompany($event)"
-      /><button class="btn ghost" type="button" (click)="load()" [disabled]="loading()">
+      <app-page-drawer>
+        <app-company-select
+          [companies]="companies()"
+          [value]="company()"
+          (companyChange)="onCompany($event)"
+        />
+        <section class="drawer-section">
+          <ng-container [ngTemplateOutlet]="source.filters() || null" />
+        </section>
+        <section class="drawer-section">
+          <h3>Reporting basis</h3>
+          <p>
+            Expense balances and project activity use the imported books. They do not establish
+            audited profit or approved budgets.
+          </p>
+          <a routerLink="/operations">View reporting coverage &amp; validation</a>
+        </section>
+      </app-page-drawer>
+      <button
+        class="btn ghost"
+        type="button"
+        (click)="load()"
+        [disabled]="loading() || source.loading()"
+      >
         Refresh
       </button>
     </div>
   </app-page-header>
-  <app-source-insights [company]="company()" />
+  <div class="scope-line">
+    <span>{{
+      selectedCompany()?.name || (company() === 'all' ? 'All companies' : 'Selected company')
+    }}</span>
+    <span>Expense balances: source period</span>
+    @if (source.data()?.period; as period) {
+      <span>Analysis: {{ period.fromMonth }} to {{ period.toMonth }}</span>
+    }
+  </div>
   @if (error()) {
     <p class="banner" role="alert">{{ error() }}</p>
   }
@@ -149,4 +176,5 @@
       }
     </article>
   }
+  <app-source-insights #source [company]="company()" [refreshKey]="refreshKey()" />
 </section>

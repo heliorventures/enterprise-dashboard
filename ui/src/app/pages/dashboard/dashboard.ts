@@ -1,4 +1,4 @@
-import { SourceInsights } from '../../shared/source-insights';
+import { PageDrawer } from '../../shared/page-drawer';
 import {
   ProjectSummary,
   projectActivityColumns,
@@ -28,7 +28,7 @@ import { compactInr, fullInr } from '../../shared/money';
 @Component({
   selector: 'app-dashboard',
   imports: [
-    SourceInsights,
+    PageDrawer,
     ProjectSummary,
     CompanySelect,
     DatePipe,
@@ -217,6 +217,12 @@ export class Dashboard {
           { label: 'Revenue less expenses', value: r.profit, tone: 'positive' },
         ],
       })),
+  );
+  readonly companyResultRows = computed(() =>
+    this.companyRows().map((row) => ({
+      ...row,
+      values: row.values.filter((value) => value.label === 'Revenue less expenses'),
+    })),
   );
   readonly liquidityRows = computed<ChartRow[]>(() => {
     const f = this.funds();

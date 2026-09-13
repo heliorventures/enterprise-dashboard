@@ -1,3 +1,5 @@
+import { NgTemplateOutlet } from '@angular/common';
+import { PageDrawer } from '../../shared/page-drawer';
 import { CompanyDirectory } from '../../services/company-directory';
 import { SourceInsights } from '../../shared/source-insights';
 import { ProjectSummary, projectActivityColumns } from '../../shared/finance-summary';
@@ -36,6 +38,8 @@ interface ExpenseView {
   selector: 'app-reports',
   imports: [
     SourceInsights,
+    NgTemplateOutlet,
+    PageDrawer,
     ProjectSummary,
     CompanySelect,
     RouterLink,
@@ -54,6 +58,7 @@ export class Reports {
   private readonly reportRequest = new LatestRequest();
   private readonly projectRequest = new LatestRequest();
   private readonly voucherRequest = new LatestRequest();
+  readonly refreshKey = signal(0);
   readonly company = signal('all');
   readonly group = signal('');
   readonly loading = signal(true);
@@ -208,6 +213,7 @@ export class Reports {
     });
   }
   load() {
+    this.refreshKey.update((value) => value + 1);
     this.loading.set(true);
     this.error.set('');
     this.report.set(null);

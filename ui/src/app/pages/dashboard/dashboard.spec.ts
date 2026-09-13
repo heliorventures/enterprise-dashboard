@@ -58,6 +58,25 @@ describe('Dashboard', () => {
     expect(component.loading()).toBe(false);
     http.verify();
   });
+  it('puts financial indicators and charts before detailed records and keeps diagnostics off Overview', async () => {
+    const fixture = TestBed.createComponent(Dashboard),
+      http = TestBed.inject(HttpTestingController);
+    http.expectOne('/api/dashboard?company=all').flush(snapshot());
+    await fixture.whenStable();
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector('app-source-insights')).toBeNull();
+    expect(el.querySelector('app-source-coverage')).toBeNull();
+    expect(el.querySelectorAll('dialog app-company-select').length).toBe(1);
+    const indicators = el.querySelector('[aria-label="Financial indicators"]')!;
+    const charts = el.querySelector('.chart-grid')!;
+    const details = el.querySelector<HTMLDetailsElement>('.disclosure')!;
+    expect(
+      indicators.compareDocumentPosition(charts) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(charts.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(details.open).toBe(false);
+    http.verify();
+  });
   it('keeps empty books and absent funds unavailable instead of presenting zero liquidity', () => {
     const fixture = TestBed.createComponent(Dashboard);
     const d = snapshot();

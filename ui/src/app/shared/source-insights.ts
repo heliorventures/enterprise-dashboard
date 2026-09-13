@@ -1,58 +1,65 @@
 import { SourceBrowser } from './source-browser';
-import { Component, computed, effect, inject, input, signal } from '@angular/core';
+import {
+  Component,
+  computed,
+  effect,
+  inject,
+  input,
+  signal,
+  TemplateRef,
+  viewChild,
+} from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { DatePipe } from '@angular/common';
 import { RouterLink, ActivatedRoute, Router } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
-import { SourceAmount, SourceCompany, SourceOverview } from '../models/source';
+import { SourceAmount, SourceOverview } from '../models/source';
 import { ChartRow, FinancialChart } from './financial-chart';
-import { DataColumn, DataTable } from './data-table';
 
 @Component({
   selector: 'app-source-insights',
-  imports: [SourceBrowser, DatePipe, RouterLink, FinancialChart, DataTable],
+  imports: [SourceBrowser, DatePipe, RouterLink, FinancialChart],
   template: ` <section aria-label="Source-backed financial analysis" class="source-section">
     <header>
-      <h2>Financial detail &amp; data coverage</h2>
-      <button
-        class="btn ghost"
-        type="button"
-        [disabled]="loading()"
-        (click)="revision.update(nextRevision)"
-      >
-        Refresh analysis
-      </button>
-      <p>
-        Figures below use the last validated source model. Signed balances retain their source
-        direction.
-      </p>
+      <h2>Financial analysis</h2>
+      <p>Balances, cash postings, cost allocations and inventory from validated imports.</p>
     </header>
-    <form class="period-filter" (submit)="applyPeriod($event)">
-      <label
-        >From month
-        <input
-          type="month"
-          autocomplete="off"
-          name="fromMonth"
-          required
-          [value]="draftFrom() ?? (params().get('fromMonth') || data()?.period?.fromMonth || '')"
-          (input)="draftFrom.set($any($event.target).value)"
-      /></label>
-      <label
-        >To month
-        <input
-          type="month"
-          autocomplete="off"
-          name="toMonth"
-          required
-          [value]="draftTo() ?? (params().get('toMonth') || data()?.period?.toMonth || '')"
-          (input)="draftTo.set($any($event.target).value)"
-      /></label>
-      <button class="btn ghost" type="submit" [disabled]="loading()">Apply period</button>
-      <button class="btn ghost" type="button" (click)="resetPeriod()" [disabled]="loading()">
-        Latest 12 months
-      </button>
-    </form>
+    <ng-template #filters>
+      <h3>Analysis period</h3>
+      <p>
+        Applies to cash postings, cost allocations and inventory below. Ledger balances and expense
+        summaries retain their source period.
+      </p>
+      <form class="period-filter" (submit)="applyPeriod($event)">
+        <label class="field"
+          >From month
+          <input
+            type="month"
+            autocomplete="off"
+            name="fromMonth"
+            required
+            [value]="draftFrom() ?? (params().get('fromMonth') || data()?.period?.fromMonth || '')"
+            (input)="draftFrom.set($any($event.target).value)"
+        /></label>
+        <label class="field"
+          >To month
+          <input
+            type="month"
+            autocomplete="off"
+            name="toMonth"
+            required
+            [value]="draftTo() ?? (params().get('toMonth') || data()?.period?.toMonth || '')"
+            (input)="draftTo.set($any($event.target).value)"
+        /></label>
+        <button class="btn ghost" type="submit" [disabled]="loading()">Apply period</button>
+        <button class="btn ghost" type="button" (click)="resetPeriod()" [disabled]="loading()">
+          Latest 12 months
+        </button>
+      </form>
+      @if (error()) {
+        <p class="banner" role="alert">{{ error() }}</p>
+      }
+    </ng-template>
     @if (data()?.period; as period) {
       <p class="meta">
         Movements: {{ period.fromMonth }} to {{ period.toMonth }}. Ledger balances remain as at the
@@ -66,12 +73,6 @@ import { DataColumn, DataTable } from './data-table';
       <p class="banner" role="alert">{{ error() }}</p>
     }
     @if (data(); as report) {
-      <app-data-table
-        label="Company reporting coverage"
-        [rows]="report.companies"
-        [columns]="columns"
-        [rowKey]="companyKey"
-      />
       @if (unpublished()) {
         <p class="banner">
           Some companies have no validated source model. Existing summaries may contain older,
@@ -217,7 +218,7 @@ import { DataColumn, DataTable } from './data-table';
     .source-section {
       display: grid;
       gap: 16px;
-      margin-block: 24px;
+      margin-block: 0;
       min-width: 0;
     }
     .period-filter {
@@ -233,6 +234,11 @@ import { DataColumn, DataTable } from './data-table';
     .period-filter input {
       min-height: 44px;
       max-width: 100%;
+    }
+    header p,
+    .meta {
+      font-size: 12px;
+      line-height: 1.6;
     }
     header p {
       color: var(--muted);
@@ -268,44 +274,14 @@ export class SourceInsights {
   );
   readonly draftFrom = signal<string | null>(null);
   readonly draftTo = signal<string | null>(null);
+  readonly filters = viewChild<TemplateRef<unknown>>('filters');
+  readonly refreshKey = input(0);
   readonly company = input('all');
-  readonly revision = signal(0);
   readonly detailsOpen = signal(false);
-  readonly nextRevision = (n: number) => n + 1;
   readonly data = signal<SourceOverview | null>(null);
   readonly loading = signal(false);
   readonly error = signal('');
   readonly selected = computed(() => this.data()?.companies.find((c) => c.id === this.company()));
-  readonly companyKey = (r: SourceCompany) => r.id;
-  readonly columns: DataColumn<SourceCompany>[] = [
-    { key: 'name', label: 'Company', value: (r) => r.name },
-    {
-      key: 'source',
-      label: 'Reporting model',
-      value: (r) => (r.batch_id ? 'Validated snapshot' : 'Unavailable'),
-      primary: true,
-    },
-    {
-      key: 'currency',
-      label: 'Currency',
-      value: (r) => r.currency || 'Unavailable',
-      primary: true,
-    },
-    {
-      key: 'postings',
-      label: 'Vouchers with postings',
-      value: (r) =>
-        r.coverage
-          ? `${r.coverage.vouchersWithPostings ?? 0} / ${r.coverage.vouchers ?? 0}`
-          : 'Unavailable',
-    },
-    {
-      key: 'issues',
-      label: 'Validation issues',
-      value: (r) => (r.batch_id ? String(r.issue_count || 0) : 'Not evaluated'),
-      link: (r) => ({ path: '/operations', query: r.batch_id ? { batch: r.batch_id } : undefined }),
-    },
-  ];
   readonly incompleteCategories = computed(
     () =>
       [...(this.data()?.allocations || []), ...(this.data()?.inventory || [])].filter(
@@ -344,7 +320,7 @@ export class SourceInsights {
       this.draftTo.set(null);
     });
     effect((onCleanup) => {
-      this.revision();
+      this.refreshKey();
       const company = this.company();
       const params: Record<string, string> = { company };
       for (const [name, value] of Object.entries(JSON.parse(this.periodQuery()))) {
@@ -359,7 +335,7 @@ export class SourceInsights {
           this.loading.set(false);
         },
         error: () => {
-          this.error.set('Unable to load source analysis. Use Refresh analysis to retry.');
+          this.error.set('Unable to load source analysis. Use the page Refresh button to retry.');
           this.loading.set(false);
         },
       });

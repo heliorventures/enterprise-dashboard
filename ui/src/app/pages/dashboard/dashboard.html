@@ -1,41 +1,64 @@
-<section class="page">
+<section class="page executive-overview">
   <app-page-header
     title="Financial overview"
     [eyebrow]="selectedLabel()"
     description="Liquidity, business performance and the decisions that need attention."
   >
     <div class="controls">
-      <app-company-select
-        [companies]="companies()"
-        [value]="selectedCompany()"
-        (companyChange)="onCompanyChange($event)"
-      />
+      <app-page-drawer>
+        <app-company-select
+          [companies]="companies()"
+          [value]="selectedCompany()"
+          (companyChange)="onCompanyChange($event)"
+        />
+        <section class="drawer-section">
+          <h3>Reading this overview</h3>
+          <p>
+            These are imported book balances. Bank availability, invoice due dates and the source
+            reporting period are not verified here.
+          </p>
+          <p>
+            All companies shows combined balances before intercompany eliminations. Use individual
+            companies for decisions about their obligations.
+          </p>
+          <a routerLink="/operations">Open data validation and export history</a>
+        </section>
+        @if (data(); as snapshot) {
+          <section class="drawer-section">
+            <h3>Import information</h3>
+            <p>
+              {{ snapshot.companies.length }} companies / {{ snapshot.books.ledgerCount }} ledgers /
+              {{ snapshot.books.voucherCount }} vouchers.
+            </p>
+            @if (snapshot.lastSync; as sync) {
+              <p>
+                Latest import: {{ sync.SyncedAt | date: 'dd MMM yyyy, HH:mm' }} / {{ sync.Status }}
+              </p>
+            }
+            <p>
+              Retrieved {{ snapshot.generatedAt | date: 'dd MMM yyyy, HH:mm' }}. This is not the
+              source accounting date.
+            </p>
+          </section>
+        }
+      </app-page-drawer>
       <button type="button" class="btn primary" (click)="load()" [disabled]="loading()">
         {{ loading() ? 'Refreshing…' : 'Refresh' }}
       </button>
     </div>
   </app-page-header>
-  <app-source-insights [company]="selectedCompany()" />
   @if (error()) {
     <p class="banner" role="alert">{{ error() }}</p>
   }
   @if (loading()) {
     <p class="empty" role="status">Loading financial overview…</p>
   } @else if (data(); as dashboard) {
-    <div class="freshness">
-      <span>Source: imported Tally books</span>
-      <span
-        >{{ dashboard.companies.length }} companies / {{ dashboard.books.ledgerCount }} ledgers /
-        {{ dashboard.books.voucherCount }} vouchers</span
-      >
+    <div class="scope-line">
+      <span>Imported book balances; reporting period and bank availability unverified</span>
       @if (dashboard.lastSync; as sync) {
-        <span
-          >Latest import: {{ sync.SyncedAt | date: 'dd MMM yyyy, HH:mm' }} · {{ sync.Status }}</span
-        >
-      } @else {
-        <span>Latest import: not confirmed</span>
+        <span>Imported {{ sync.SyncedAt | date: 'dd MMM yyyy' }}</span>
       }
-      <a routerLink="/operations">Check data freshness</a>
+      <a routerLink="/operations">Data checks</a>
     </div>
     @if (!dashboard.books.ledgerCount) {
       <p class="banner warning">
@@ -46,6 +69,7 @@
     <section class="kpi-grid" aria-label="Financial indicators">
       @for (kpi of kpis(); track kpi.key) {
         <app-kpi-card
+          [compact]="true"
           [label]="kpi.label"
           [value]="kpi.value === null ? 'Not available' : compactInr(kpi.value)"
           [detail]="kpi.value === null ? '' : fullInr(kpi.value)"
@@ -55,6 +79,20 @@
         />
       }
     </section>
+    <div class="chart-grid">
+      <app-financial-chart
+        [compact]="true"
+        title="Cash cover for payables"
+        description="A balance comparison. Payables are obligations, not part of an asset mix; their due dates are not available."
+        [rows]="liquidityRows()"
+      />
+      <app-financial-chart
+        [compact]="true"
+        title="Company results on books"
+        description="Revenue less expenses; source period, before eliminations. Select a company for details."
+        [rows]="companyResultRows()"
+      />
+    </div>
     @if (priorities().length) {
       <article class="panel">
         <header>
@@ -76,199 +114,201 @@
         </ul>
       </article>
     }
-    <div class="chart-grid">
-      <app-financial-chart
-        title="Can recorded cash cover payables?"
-        description="A balance comparison. Payables are obligations, not part of an asset mix; their due dates are not available."
-        [rows]="liquidityRows()"
-      />
-      <app-financial-chart
-        title="Company performance on books"
-        description="Source-period revenue and expenses. Negative results extend left of zero. Select a company to investigate its expenses."
-        [rows]="companyRows()"
-      />
-    </div>
-    @if (dashboard.books.ledgerCount && funds(); as fund) {
-      <section class="kpi-grid" aria-label="Funding and budget indicators">
-        <app-kpi-card
-          label="Bank balance"
-          [value]="compactInr(fund.bank)"
-          [detail]="fullInr(fund.bank)"
-          hint="Bank ledgers only; cash ledgers excluded."
-        />
-        <app-kpi-card
-          [label]="fund.lastMonth.label + ' recorded spending activity'"
-          [value]="compactInr(fund.lastMonth.expenses)"
-          hint="Reported payments, purchases and debit notes. Zero can also mean missing activity."
-        />
-        <app-kpi-card
-          label="Next 3-month spending budget"
-          [value]="compactInr(fund.threeMonthBudget)"
-          [detail]="fullInr(fund.threeMonthBudget)"
-          hint="Run-rate estimate, not an approved budget."
-        />
-        <app-kpi-card
-          label="Model runway"
-          [value]="runway()"
-          hint="Cash and bank divided by net monthly model burn. Depends on source coverage and activity classifications."
-        />
-        <app-kpi-card
-          label="Headroom after 3-month budget"
-          [value]="compactInr(fund.uncommitted - fund.threeMonthBudget)"
-          [detail]="fullInr(fund.uncommitted - fund.threeMonthBudget)"
-          hint="Cash less recorded payables and estimated spending; excludes future inflow and may overlap existing payables."
-        />
-        <app-kpi-card
-          label="Payables on books"
-          [value]="compactInr(fund.payables)"
-          [detail]="fullInr(fund.payables)"
-          hint="Outstanding ledger balances; due dates are not provided."
-        />
-      </section>
-      <div class="chart-grid">
+    <details class="disclosure">
+      <summary>Funding model, company records &amp; projects</summary>
+      <div class="detail-content">
         <app-financial-chart
-          title="Monthly voucher activity"
-          description="Latest six recorded months. Sales and receipts, or purchases and payments, may include an invoice and its settlement; these are not verified cash flows."
-          [rows]="activityRows()"
+          title="Company performance on books"
+          description="Revenue, expenses and the resulting balance for each company; source period, before eliminations."
+          [rows]="companyRows()"
         />
-        <app-financial-chart
-          title="3-month funding model"
-          description="Estimated balances based on the existing run-rate model. Validate timing, source coverage and double counting before using this for funding decisions."
-          [rows]="forecastRows()"
-        />
-      </div>
-      <article class="panel">
-        <details>
-          <summary>Model assumptions and data limits</summary>
-          <div class="section-copy">
-            <p>
-              Model basis:
-              {{
-                fund.runRate.method === 'ledgers'
-                  ? 'ledger balances spread over the financial year'
-                  : 'averages of complete months with recorded activity'
-              }}
-              · {{ fund.runRate.monthsUsed }} months used.
-            </p>
-            <p>
-              Monthly model inflow {{ fullInr(fund.runRate.monthlyInflow) }}; monthly model spending
-              {{ fullInr(fund.runRate.monthlyExpense) }}. Three-month spending estimate
-              {{ fullInr(fund.threeMonthBudget) }}.
-            </p>
-            <p>
-              The model starts with reported cash and bank balances, then adds typical inflow and
-              subtracts typical spending. It does not separately schedule existing payables or
-              receivables. It is not an approved budget.
-            </p>
-            <p>
-              Company results use current ledger group balances, without a verified reporting period
-              or consolidation eliminations. Bank balances are source-reported, not reconciled
-              availability. Invoice ageing, restricted cash and audited net profit are unavailable.
-            </p>
+        @if (dashboard.books.ledgerCount && funds(); as fund) {
+          <section class="kpi-grid" aria-label="Funding and budget indicators">
+            <app-kpi-card
+              label="Bank balance"
+              [value]="compactInr(fund.bank)"
+              [detail]="fullInr(fund.bank)"
+              hint="Bank ledgers only; cash ledgers excluded."
+            />
+            <app-kpi-card
+              [label]="fund.lastMonth.label + ' recorded spending activity'"
+              [value]="compactInr(fund.lastMonth.expenses)"
+              hint="Reported payments, purchases and debit notes. Zero can also mean missing activity."
+            />
+            <app-kpi-card
+              label="Next 3-month spending budget"
+              [value]="compactInr(fund.threeMonthBudget)"
+              [detail]="fullInr(fund.threeMonthBudget)"
+              hint="Run-rate estimate, not an approved budget."
+            />
+            <app-kpi-card
+              label="Model runway"
+              [value]="runway()"
+              hint="Cash and bank divided by net monthly model burn. Depends on source coverage and activity classifications."
+            />
+            <app-kpi-card
+              label="Headroom after 3-month budget"
+              [value]="compactInr(fund.uncommitted - fund.threeMonthBudget)"
+              [detail]="fullInr(fund.uncommitted - fund.threeMonthBudget)"
+              hint="Cash less recorded payables and estimated spending; excludes future inflow and may overlap existing payables."
+            />
+            <app-kpi-card
+              label="Payables on books"
+              [value]="compactInr(fund.payables)"
+              [detail]="fullInr(fund.payables)"
+              hint="Outstanding ledger balances; due dates are not provided."
+            />
+          </section>
+          <div class="chart-grid">
+            <app-financial-chart
+              title="Monthly voucher activity"
+              description="Latest six recorded months. Sales and receipts, or purchases and payments, may include an invoice and its settlement; these are not verified cash flows."
+              [rows]="activityRows()"
+            />
+            <app-financial-chart
+              title="3-month funding model"
+              description="Estimated balances based on the existing run-rate model. Validate timing, source coverage and double counting before using this for funding decisions."
+              [rows]="forecastRows()"
+            />
           </div>
-        </details>
-      </article>
-      <article class="panel">
-        <header>
-          <div>
-            <h2>Company funding position</h2>
-            <p>
-              Keep individual company obligations visible even when the combined balance is
-              positive.
-            </p>
-          </div>
-        </header>
-        <app-data-table
-          label="Company funding position"
-          [rows]="fund.byCompany"
-          [columns]="fundColumns"
-          [rowKey]="recordKey"
-        />
-      </article>
-      <article class="panel">
-        <header>
-          <div>
-            <h2>Company totals</h2>
-            <p>
-              Sum of the company funding rows above. Spending includes estimates where the source
-              lacks usable activity; no consolidation eliminations.
-            </p>
-          </div>
-        </header>
-        <app-data-table
-          label="Company funding totals"
-          [rows]="fundTotalRows()"
-          [columns]="totalColumns"
-          [rowKey]="recordKey"
-        />
-      </article>
-      <article class="panel">
-        <details>
-          <summary>Bank and cash account details ({{ fund.accounts.length }})</summary>
+          <article class="panel">
+            <details>
+              <summary>Model assumptions and data limits</summary>
+              <div class="section-copy">
+                <p>
+                  Model basis:
+                  {{
+                    fund.runRate.method === 'ledgers'
+                      ? 'ledger balances spread over the financial year'
+                      : 'averages of complete months with recorded activity'
+                  }}
+                  · {{ fund.runRate.monthsUsed }} months used.
+                </p>
+                <p>
+                  Monthly model inflow {{ fullInr(fund.runRate.monthlyInflow) }}; monthly model
+                  spending {{ fullInr(fund.runRate.monthlyExpense) }}. Three-month spending estimate
+                  {{ fullInr(fund.threeMonthBudget) }}.
+                </p>
+                <p>
+                  The model starts with reported cash and bank balances, then adds typical inflow
+                  and subtracts typical spending. It does not separately schedule existing payables
+                  or receivables. It is not an approved budget.
+                </p>
+                <p>
+                  Company results use current ledger group balances, without a verified reporting
+                  period or consolidation eliminations. Bank balances are source-reported, not
+                  reconciled availability. Invoice ageing, restricted cash and audited net profit
+                  are unavailable.
+                </p>
+              </div>
+            </details>
+          </article>
+          <article class="panel">
+            <header>
+              <div>
+                <h2>Company funding position</h2>
+                <p>
+                  Keep individual company obligations visible even when the combined balance is
+                  positive.
+                </p>
+              </div>
+            </header>
+            <app-data-table
+              label="Company funding position"
+              [rows]="fund.byCompany"
+              [columns]="fundColumns"
+              [rowKey]="recordKey"
+            />
+          </article>
+          <article class="panel">
+            <header>
+              <div>
+                <h2>Company totals</h2>
+                <p>
+                  Sum of the company funding rows above. Spending includes estimates where the
+                  source lacks usable activity; no consolidation eliminations.
+                </p>
+              </div>
+            </header>
+            <app-data-table
+              label="Company funding totals"
+              [rows]="fundTotalRows()"
+              [columns]="totalColumns"
+              [rowKey]="recordKey"
+            />
+          </article>
+          <article class="panel">
+            <details>
+              <summary>Bank and cash account details ({{ fund.accounts.length }})</summary>
+              <app-data-table
+                label="Bank and cash accounts"
+                [rows]="fund.accounts"
+                [columns]="accountColumns"
+                [rowKey]="accountKey"
+              />
+            </details>
+          </article>
+        }
+        <article class="panel">
+          <details>
+            <summary>Company financial records ({{ dashboard.companyFinancials.length }})</summary>
+            <app-data-table
+              label="Company financial records"
+              [rows]="dashboard.companyFinancials"
+              [columns]="companyColumns"
+              [rowKey]="recordKey"
+            />
+          </details>
+        </article>
+        <article class="panel">
+          <header>
+            <div>
+              <h2>Ledger groups</h2>
+              <p>
+                {{ dashboard.books.groups.length }} groups; signed balances from the source. Open a
+                group to inspect its ledgers.
+              </p>
+            </div>
+          </header>
           <app-data-table
-            label="Bank and cash accounts"
-            [rows]="fund.accounts"
-            [columns]="accountColumns"
-            [rowKey]="accountKey"
+            label="Ledger group balances"
+            [rows]="dashboard.books.groups"
+            [columns]="groupColumns"
+            [rowKey]="groupKey"
           />
-        </details>
-      </article>
-    }
-    <article class="panel">
-      <details>
-        <summary>Company financial records ({{ dashboard.companyFinancials.length }})</summary>
-        <app-data-table
-          label="Company financial records"
-          [rows]="dashboard.companyFinancials"
-          [columns]="companyColumns"
-          [rowKey]="recordKey"
-        />
-      </details>
-    </article>
-    <article class="panel">
-      <header>
-        <div>
-          <h2>Ledger groups</h2>
-          <p>
-            {{ dashboard.books.groups.length }} groups; signed balances from the source. Open a
-            group to inspect its ledgers.
-          </p>
-        </div>
-      </header>
-      <app-data-table
-        label="Ledger group balances"
-        [rows]="dashboard.books.groups"
-        [columns]="groupColumns"
-        [rowKey]="groupKey"
-      />
-    </article>
-    <article class="panel">
-      <header>
-        <div>
-          <h2>Projects</h2>
-          <p>
-            Cost-centre-linked voucher activity for this selection. Amount completeness is not
-            reported by this dashboard endpoint.
-          </p>
-        </div>
-        <a class="btn ghost" routerLink="/reports" [queryParams]="{ company: selectedCompany() }"
-          >Project report</a
-        >
-      </header>
-      <div class="section-copy">
-        <app-project-summary
-          [count]="dashboard.work.totals.total"
-          [vouchers]="dashboard.work.totals.voucherCount"
-          [totals]="dashboard.work.totals"
-        />
+        </article>
+        <article class="panel">
+          <header>
+            <div>
+              <h2>Projects</h2>
+              <p>
+                Cost-centre-linked voucher activity for this selection. Amount completeness is not
+                reported by this dashboard endpoint.
+              </p>
+            </div>
+            <a
+              class="btn ghost"
+              routerLink="/reports"
+              [queryParams]="{ company: selectedCompany() }"
+              >Project report</a
+            >
+          </header>
+          <div class="section-copy">
+            <app-project-summary
+              [count]="dashboard.work.totals.total"
+              [vouchers]="dashboard.work.totals.voucherCount"
+              [totals]="dashboard.work.totals"
+            />
+          </div>
+          <app-data-table
+            label="Dashboard projects"
+            [rows]="dashboard.work.items"
+            [columns]="projectColumns"
+            [rowKey]="recordKey"
+          />
+        </article>
       </div>
-      <app-data-table
-        label="Dashboard projects"
-        [rows]="dashboard.work.items"
-        [columns]="projectColumns"
-        [rowKey]="recordKey"
-      />
-    </article>
+    </details>
     <p class="section-copy">
       Figures are in INR. Snapshot retrieved
       {{ dashboard.generatedAt | date: 'dd MMM yyyy, HH:mm' }}; this is not the source accounting

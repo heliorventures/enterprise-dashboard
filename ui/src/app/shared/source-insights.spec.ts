@@ -108,7 +108,7 @@ describe('Source reporting evidence boundaries', () => {
     const detail = http.expectOne((r) => r.url === '/api/reports/source/details');
     expect(detail.request.params.get('detailType')).toBe('allocation');
     detail.flush({ items: [], total: null, nextCursor: null });
-    fixture.componentInstance.revision.update((n) => n + 1);
+    fixture.componentRef.setInput('refreshKey', 1);
     fixture.detectChanges();
     http.expectOne('/api/reports/source?company=1').flush(result());
     fixture.detectChanges();
