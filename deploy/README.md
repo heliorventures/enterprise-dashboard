@@ -72,7 +72,7 @@ From this repository in PowerShell, after setup (the scripts default to the conf
 This builds both images locally, saves tarballs, computes SHA-256 hashes, uploads to a unique staging directory, verifies checksums on the VPS, loads images, validates UI configuration, applies database migrations, starts the containers, runs API checks and verifies public health/access protection. It archives the previous release only after validation succeeds. Repeat with a new immutable tag:
 
 ```powershell
-.\deploy\scripts\build-save-upload-images.ps1 -Tag finance-002 -PublicBaseUrl https://finance.heliorsoft.com -DeployAfterUpload
+.\deploy\scripts\build-save-upload-images.ps1 -Tag finance-0015 -PublicBaseUrl https://finance.heliorsoft.com -DeployAfterUpload
 ```
 
 Useful variations:

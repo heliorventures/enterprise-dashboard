@@ -219,7 +219,7 @@ async function unpackBatch(batchId, { force = false, itemId = null } = {}) {
   }, {
     archivedSource: true,
     replacementRanges:snapshot.manifest?.periodMode==='replace'&&snapshot.manifest.historyCoverage?.kind==='periods'?snapshot.manifest.historyCoverage.periods:null,
-    expectedSourceBatchId:snapshot.manifest?.periodMode==='replace'?snapshot.manifest.baselineBatchId:undefined,
+    expectedSourceBatchId:snapshot.manifest?.kind==='cumulative'?snapshot.manifest.baselineBatchId:undefined,
     force,
     afterWrite: async (client, companyId) => {
       const linked = await attachProjects(companyId, vouchers, projects, client);

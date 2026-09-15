@@ -1,6 +1,6 @@
 # Helior Finance Sync
 
-Windows 10/11 Intel/AMD x64 desktop app and unsigned EXE installer. It reuses `deploy/tally-agent`. All data uses `/api/ingest/tally/source/{begin,chunk,complete}`; period updates use `/api/ingest/tally/source-period/{preflight,begin,chunk,complete}`. Deploy the updated API, migration `013_period_source_identity.sql`, and UI/Caddy sender routes before using period updates. The installer alone does not deploy the backend.
+Windows 10/11 Intel/AMD x64 desktop app and unsigned EXE installer. It reuses `deploy/tally-agent`. All data uses `/api/ingest/tally/source/{begin,chunk,complete}`; period replacement uses `/api/ingest/tally/source-period-replace/{preflight,begin,chunk,complete}`. Deploy the updated API, migration `013_period_source_identity.sql`, and Finance UI/Caddy before period replacement. The installer alone does not deploy the backend.
 
 ## Accountant workflow
 
@@ -10,9 +10,13 @@ Windows 10/11 Intel/AMD x64 desktop app and unsigned EXE installer. It reuses `d
 4. Opening the app only loads local history. It does not connect, discover companies, upload or retry. Choose **All data**, **Today**, **Current month**, or **Last month**, then **Sync now**. This discovers loaded companies and processes them sequentially. To skip companies, first use **Check connection**, then uncheck them before Sync.
 5. Review the per-company results. **Stop sync** aborts our network work; **Force stop** immediately terminates our worker. There is also a two-second termination fallback. A failure stops the desktop run; it does not automatically retry or proceed to the next company.
 
-Shorter periods update Finance and require a successful All data sync for that company first. Period dates use the computer's local calendar and are frozen on click. Current month means the first of this month through today; Last month means the entire previous calendar month. Only vouchers are date-limited; masters are exported in full-date context to preserve ledger balance semantics. The API merges returned voucher GUIDs and preserves unreturned vouchers. Deletions and vouchers moved outside the selected period are reconciled by a later All data sync. A missing or duplicate voucher GUID, out-of-range date, stale capture, or unfinished previous Finance processing blocks the period update.
+No initial full sync is required. All data reconciles the complete imported Tally dataset; Today, Current month and Last month replace vouchers only in their selected dates. A successful empty period removes previously imported vouchers from that period. Other dates and manually created Finance entries are preserved. Current month and Last month cover the entire calendar month, including future-dated vouchers in the current month. Dates use the computer's local calendar and are frozen on click. Masters are refreshed separately in full-date context to preserve ledger balance semantics.
 
-Raw period captures remain marked partial and cannot replace reporting directly. A separate cumulative archive links to the baseline and period batch; existing financial validation must succeed before Finance changes. Cumulative archives consume additional server storage. An older API rejects the new endpoint rather than interpreting a period as a full snapshot.
+All chunks and collections must pass extraction and financial validation before the selected company is changed. Raw period captures stay partial; a cumulative archive records the published baseline (if any), period replacement and imported date coverage. Finance displays a limited-history notice until All data has been imported. Failed archives do not become the next replacement baseline. Publication checks the baseline under the import lock and rejects a racing change without modifying reporting. Cumulative archives consume additional server storage.
+
+The new replacement endpoint prevents older APIs from silently interpreting the request differently. The legacy 1.1.0 period endpoint retains its preserve-missing-vouchers semantics. Saved 1.1.0 period captures are retained but are not automatically resent as replacement captures; administrators can reconcile those older archives separately. Saved full captures remain compatible.
+
+Each collection is requested separately, with a 500 ms interruptible pause between Tally requests. Voucher details are exported in windows of at most seven days. All data first streams only voucher dates, requests populated date buckets in order, and checks each detailed record count against that scan. It does not assume today is the last voucher date and skips empty gaps. A period export requests every window, including empty ones, to establish replacement coverage. These safeguards reduce request size but cannot guarantee Tally responsiveness; a single busy day or large master collection may still be expensive.
 
 If Finance explicitly rejects a saved period as stale, its directory is retained with `held.json` for investigation. It is excluded from future retries, allowing the next manual sync to take a fresh capture. No accounting files are deleted by this recovery action.
 
@@ -42,14 +46,14 @@ Then build:
 npm run build
 ```
 
-This creates `release/Helior-Finance-Sync-1.1.0-Setup.exe` for the current version. It builds only; it does not upload or deploy anything. The build fails before packaging if configuration is missing or invalid. No production credential is read from another project or an API environment file. The installer includes your configuration automatically.
+This creates `release/Helior-Finance-Sync-1.2.0-Setup.exe` for the current version. It builds only; it does not upload or deploy anything. The build fails before packaging if configuration is missing or invalid. No production credential is read from another project or an API environment file. The installer includes your configuration automatically.
 
 ### Release versions and upgrades
 
 `package.json` is the version source for the installer filename and window caption, Windows installed-app entry, in-app version badge/title, and exported diagnostics. Rebuilding alone does not increment it. Before the next release, from `desktop/finance-sync`, set the next version explicitly:
 
 ```powershell
-npm version 1.1.1 --no-git-tag-version
+npm version 1.2.1 --no-git-tag-version
 npm run build
 ```
 
@@ -109,7 +113,7 @@ npm run build:test
 npm run smoke -- --packaged
 ```
 
-`build:test` creates `release/Helior-Finance-Sync-1.1.0-test-Setup.exe` for the current version, with dummy credentials. The test installer permits connection checks but disables captures/uploads, and uses a separate `test-state` directory. It is not a customer release. The smoke harness uses synthetic companies and the actual renderer/preload/worker in a hidden window; it never contacts production. Screenshots are saved under `test-artifacts`. Test fixtures and developer scripts are excluded from the installed application.
+`build:test` creates `release/Helior-Finance-Sync-1.2.0-test-Setup.exe` for the current version, with dummy credentials. The test installer permits connection checks but disables captures/uploads, and uses a separate `test-state` directory. It is not a customer release. The smoke harness uses synthetic companies and the actual renderer/preload/worker in a hidden window; it never contacts production. Screenshots are saved under `test-artifacts`. Test fixtures and developer scripts are excluded from the installed application.
 
 For the complete agent and desktop suite, from repository root:
 
@@ -118,3 +122,11 @@ node --test deploy/tally-agent/test/*.test.js desktop/finance-sync/test/*.test.j
 ```
 
 Before distribution, validate the configured installer on actual target Windows/Tally machines: initial installation/shortcuts, Tally closed, no company loaded, login/permission restrictions, company disappearing, large capture, interrupted upload, restart, repeat sync, reporting rejection, and upgrade with a pending batch. Synthetic tests do not establish real Tally compatibility or production reconciliation.
+
+For the repeatable release gate, run from the repository root:
+
+```powershell
+powershell -NoProfile -File .\desktop\finance-sync\scripts\release-test.ps1
+```
+
+This developer-only suite creates isolated PostgreSQL and HTTPS test services, verifies the installer payload, runs regression tests and 19 packaged-app scenarios, and writes versioned evidence under `test-artifacts/release-*`. It does not install the app or contact production. Required tools, report interpretation and the Windows/Tally acceptance checklist are in [release testing](../../deploy/docs/finance-sync-release-testing.md). End users still need only the installer.

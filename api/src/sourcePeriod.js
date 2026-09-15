@@ -50,6 +50,7 @@ async function baseline(client,externalId,capturedAt,allowFirst=false) {
     WHERE s.company_external_id=$1`,[externalId])).rows[0];
   if(!row&&allowFirst)return null;
   if(!row||row.published!==row.batch_id)fail(allowFirst?'Resolve the pending Finance processing before replacing another period.':'A successful full sync is required first. Resolve any pending Finance processing before a period sync.');
+  if(row.manifest.historyCoverage?.kind==='periods')fail('A successful full sync is required for this older period client. Upgrade Finance Sync to replace individual periods.');
   if(capturedAt&&Date.parse(capturedAt)<=new Date(row.captured_at).getTime())fail('Period capture is stale. Run a fresh sync after the latest Finance update.',409,'PERIOD_CAPTURE_STALE');
   return row;
 }

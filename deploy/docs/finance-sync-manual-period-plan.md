@@ -1,5 +1,19 @@
 # Manual Finance Sync and period updates
 
+## Approved revision: 1.2.0
+
+This revision supersedes the 1.1.0 period semantics recorded below. Full sync replaces Tally-imported data; Today / Current month / Last month replace vouchers within the selected dates, including removal of omitted vouchers. No initial full sync is required. Manual Finance entries and vouchers outside the selected period are preserved. Current month includes the entire calendar month. Masters are refreshed independently of the voucher period.
+
+Implementation is complete. New authenticated `source-period-replace` routes separate replacement from older clients' preserve-missing protocol. Validation precedes reporting publication; a baseline comparison prevents concurrent cumulative imports from overwriting newer published data. Older clients cannot use a period-only baseline. Finance displays limited history coverage when no full history has been imported.
+
+Desktop startup remains passive. Companies and collections run sequentially, with 500 ms pauses between requests. Detailed voucher requests cover at most seven days each; full exports first scan voucher dates and skip empty date buckets. Stop aborts the worker, with a termination fallback and Force stop. Tally may continue processing a request it has already accepted after our worker disconnects; client-side responsiveness still needs real Tally testing.
+
+Verification on 2026-09-15: 66 agent/desktop tests passed; 10 dashboard tests passed; the UI production build passed. API regression: 43 passed, 14 database-gated skips. All six focused legacy/replacement tests passed separately against isolated PostgreSQL, including first-period replacement, empty replacement, manual/outside-period preservation, validation failure and mixed-version concurrency. The test database was stopped. The configured 1.2.0 installer built successfully; package verification and packaged Electron smoke passed, including visible version and zero startup requests.
+
+Release: `desktop/finance-sync/release/Helior-Finance-Sync-1.2.0-Setup.exe`. Remaining rollout work: deploy the updated API, UI and Caddy routes; apply migration `013_period_source_identity.sql` if not already applied; then test installation/upgrade, Today sync, Stop and Tally responsiveness on the client machine. No production deployment or client Tally verification was performed. Client logs remain unavailable, so the original freeze cause is unconfirmed.
+
+## Historical implementation: 1.1.0
+
 Approved scope: opening the app performs no network work; Sync discovers companies and processes them sequentially; Stop aborts our worker with a two-second termination fallback and an immediate Force stop option. All uploads are explicitly user initiated. Period updates require one successful full sync per company.
 
 Implementation and verification:

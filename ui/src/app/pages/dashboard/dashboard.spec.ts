@@ -44,6 +44,16 @@ describe('Dashboard', () => {
       providers: [provideRouter([]), provideHttpClient(), provideHttpClientTesting()],
     }).compileComponents();
   });
+  it('shows the exact imported periods when voucher history is incomplete', async () => {
+    const fixture=TestBed.createComponent(Dashboard),http=TestBed.inject(HttpTestingController);
+    const data=snapshot();
+    data.companyFinancials=[{id:'1',name:'Period company',historyCoverage:{kind:'periods',periods:[{from:'2026-09-01',to:'2026-09-15'}]}} as DashboardData['companyFinancials'][number]];
+    http.expectOne('/api/dashboard?company=all').flush(data);await fixture.whenStable();
+    const text=fixture.nativeElement.textContent;
+    expect(text).toContain('Period company: voucher history is loaded only for');
+    expect(text).toContain('2026-09-01 to 2026-09-15');
+    expect(text).toContain('Other dates have not been fully imported');http.verify();
+  });
   it('clears the prior company snapshot and cancels its request when the selection changes', () => {
     const fixture = TestBed.createComponent(Dashboard);
     const component = fixture.componentInstance;

@@ -18,6 +18,7 @@ test('first period import, scoped deletion, out-of-period preservation, empty re
   const unpack=require('../src/sourceUnpack');
   const upload=async(m,rows)=>{await archive.begin(m,'period-replace');await archive.chunk({batchId:m.batchId,index:0,records:rows},'period-replace');const r=await archive.complete({batchId:m.batchId},'period-replace');await unpack.unpackBatch(r.reportingBatchId);return r;};
   const first=await upload(make('replace-first','10',[company,v('remove','20260902')]),[company,v('remove','20260902')]);
+  await assert.rejects(()=>require('../src/sourcePeriod').baseline(db,'replace-co'),/full sync/);
   const coverage=async()=>(await db.query('SELECT coverage FROM finance_snapshots')).rows[0].coverage.history;
   assert.deepEqual(await coverage(),{kind:'periods',periods:[{from:'2026-09-01',to:'2026-09-30'}]});
   const id=(await db.query('SELECT "CompanyID" FROM "Companies" WHERE "ExternalID"=\'replace-co\'')).rows[0].CompanyID;
@@ -43,6 +44,12 @@ test('first period import, scoped deletion, out-of-period preservation, empty re
   const full={...make('replacement-full','14',[company]),capturedAt:'2026-09-14T04:00:00Z'};delete full.scope;delete full.periodMode;
   await archive.begin(full);await archive.chunk({batchId:full.batchId,index:0,records:[company]});await archive.complete({batchId:full.batchId});await unpack.unpackBatch(full.batchId);
   assert.deepEqual(await rows(),['manual']);assert.deepEqual(await coverage(),{kind:'full'});
+  const legacyRows=[company,v('legacy-race','20260909')];
+  const legacy={...make('legacy-race','14',legacyRows),capturedAt:'2026-09-14T06:00:00Z'};delete legacy.periodMode;
+  await archive.begin(legacy,'period');await archive.chunk({batchId:legacy.batchId,index:0,records:legacyRows},'period');const lr=await archive.complete({batchId:legacy.batchId},'period');
+  const currentRows=[company,v('current-race','20260910')];await upload({...make('current-race','14',currentRows),capturedAt:'2026-09-14T05:00:00Z'},currentRows);
+  await assert.rejects(()=>unpack.unpackBatch(lr.reportingBatchId),/Finance changed/);
+  assert.deepEqual(await rows(),['current-race','manual']);
   assert.ok(first.reportingBatchId);
 });
 
