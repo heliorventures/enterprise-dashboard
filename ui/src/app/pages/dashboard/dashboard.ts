@@ -119,7 +119,7 @@ export class Dashboard {
         value: f && hasBooks && f.runRate.monthsUsed > 0 ? f.afterThreeMonths : null,
         icon: 'forecast',
         hint: 'Indicative run-rate estimate; not a cash-flow statement.',
-        tone: f ? balanceTone(f.afterThreeMonths) : 'neutral',
+        tone: f?.afterThreeMonths != null ? balanceTone(f.afterThreeMonths) : 'neutral',
       },
     ];
   });
@@ -156,7 +156,7 @@ export class Dashboard {
         action: 'Review payables',
         tone: 'negative',
       });
-    if (f && f.afterThreeMonths < 0)
+    if (f?.afterThreeMonths != null && f.afterThreeMonths < 0)
       rows.push({
         title: 'Model projects a funding gap',
         detail: `${fullInr(-f.afterThreeMonths)} below zero after three model months. Validate collections and spending assumptions.`,
@@ -175,10 +175,12 @@ export class Dashboard {
         action: 'Review receivables',
         tone: 'neutral',
       });
-    if (!f || f.runRate.method === 'ledgers')
+    if (!f || f.runRate.method !== 'vouchers')
       rows.push({
         title: 'Forecast needs source validation',
-        detail: 'Monthly estimates use ledger balances because usable voucher activity is limited.',
+        detail: f?.runRate.method === 'unavailable'
+          ? 'Spending and forecasts are unavailable until the company exports pass financial validation.'
+          : 'Monthly estimates use ledger balances because usable voucher activity is limited.',
         path: '/operations',
         query: {},
         action: 'Check data',
@@ -297,7 +299,8 @@ export class Dashboard {
     row.cashAndBank != null && row.payables != null ? row.cashAndBank - row.payables : undefined;
   readonly runway = computed(() => {
     const f = this.funds();
-    if (!f || !this.data()?.books.ledgerCount || !f.runRate.monthsUsed) return 'Not available';
+    if (!f || !this.data()?.books.ledgerCount || !f.runRate.monthsUsed ||
+      f.runRate.monthlyExpense == null || f.runRate.monthlyInflow == null) return 'Not available';
     if (f.cashAndBank <= 0) return '0 months';
     if (f.runRate.monthlyExpense <= f.runRate.monthlyInflow) return 'No net burn in model';
     return f.runwayMonths == null ? 'Not available' : `${f.runwayMonths.toFixed(1)} months`;

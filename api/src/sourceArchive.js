@@ -1,6 +1,7 @@
 const {createHash}=require('node:crypto');
 const db=require('./db');
 const {validateSnapshot}=require('./ingest');
+const period=require('./sourcePeriod');
 const COLLECTIONS=['COMPANY','GROUP','LEDGER','VOUCHERTYPE','CURRENCY','COSTCATEGORY','COSTCENTRE','STOCKGROUP','STOCKCATEGORY','STOCKITEM','UNIT','GODOWN','VOUCHER'];
 const fail=(message,status=400)=>{throw Object.assign(new Error(message),{status});};
 // JSONB changes object key order, so hashes must be independent of key order.
@@ -10,7 +11,11 @@ function canonical(value) {
   return JSON.stringify(value);
 }
 const digest=value=>createHash('sha256').update(canonical(value)).digest('hex');
-function manifest(input) {
+function manifest(input,mode='full') {
+  if(mode==='full'&&input?.scope!==undefined)fail('Use the period endpoint for a scoped capture');
+  if(input?.periodMode!==undefined&&mode!=='period-replace')fail('Use the replacement endpoint for replacement mode');
+  if(mode==='period-replace'&&input?.periodMode!=='replace')fail('Period replacement mode is required');
+  const scope=['period','period-replace'].includes(mode)?period.scope(input?.scope):undefined;
   const {batchId,capturedAt,company}=validateSnapshot({...input,fullSnapshot:true,ledgers:[],vouchers:[]});
   if(input.schemaVersion!==1 || input.profile!=='company-business-v1') fail('Unsupported source archive version');
   if(!Number.isSafeInteger(input.chunkCount)||input.chunkCount<1||input.chunkCount>10000) fail('Invalid source chunkCount');
@@ -25,10 +30,12 @@ function manifest(input) {
   });
   if(!['stable','unavailable','changed'].includes(input.consistency)) fail('Source consistency required');
   if(!Number.isSafeInteger(input.recordCount)||input.recordCount!==collections.reduce((n,c)=>n+c.count,0)) fail('Source count mismatch');
-  const coverageStatus=collections.every(c=>c.status==='success')&&input.consistency!=='changed' ? 'complete' : 'partial';
+  const complete=collections.every(c=>c.status==='success')&&input.consistency!=='changed';
+  if(scope&&!complete)fail('A period update requires complete collection coverage and unchanged source');
+  const coverageStatus=complete&&!scope ? 'complete' : 'partial';
   if(collections.find(c=>c.name==='COMPANY').status==='success'&&collections.find(c=>c.name==='COMPANY').count!==1) fail('Exactly one company record required');
   return {batchId,capturedAt,company,schemaVersion:1,profile:input.profile,chunkCount:input.chunkCount,
-    recordCount:input.recordCount,collections,consistency:input.consistency,coverageStatus};
+    recordCount:input.recordCount,collections,consistency:input.consistency,coverageStatus,...(scope?{scope}:{}),...(mode==='period-replace'?{periodMode:'replace'}:{})};
 }
 function validateTree(node,depth=0,budget={nodes:0}) {
   if(++budget.nodes>100000||depth>64) fail('Source XML tree exceeds limits');
@@ -45,8 +52,8 @@ async function locked(work) {
     return work(client);
   });
 }
-async function begin(input) {
-  const m=manifest(input);
+async function begin(input,mode='full') {
+  const m=manifest(input,mode);
   return locked(async client=>{
     await client.query("DELETE FROM tally_source_uploads WHERE result IS NULL AND updated_at < now()-interval '7 days'");
     const prior=(await client.query('SELECT manifest,result FROM tally_source_uploads WHERE batch_id=$1',[m.batchId])).rows[0];
@@ -57,11 +64,12 @@ async function begin(input) {
     }
     const {count}=(await client.query('SELECT count(*)::int AS count FROM tally_source_uploads WHERE result IS NULL')).rows[0];
     if(count>=100) fail('Too many source uploads',429);
+    if(m.scope)await period.baseline(client,m.company.externalId,m.capturedAt,m.periodMode==='replace');
     await client.query('INSERT INTO tally_source_uploads(batch_id,manifest) VALUES($1,$2)',[m.batchId,JSON.stringify(m)]);
     return {ok:true,batchId:m.batchId,completed:false};
   });
 }
-async function chunk(input) {
+async function chunk(input,mode='full') {
   if(typeof input?.batchId!=='string'||!Number.isSafeInteger(input.index)||input.index<0||!Array.isArray(input.records)||input.records.length>500) fail('Invalid source chunk');
   const bytes=Buffer.byteLength(JSON.stringify(input.records));
   if(bytes>4*1024**2) fail('Source chunk exceeds 4 MiB',413);
@@ -76,6 +84,7 @@ async function chunk(input) {
   return locked(async client=>{
     const upload=(await client.query('SELECT * FROM tally_source_uploads WHERE batch_id=$1 FOR UPDATE',[input.batchId])).rows[0];
     if(!upload) fail('Begin source upload first',409);
+    if((upload.manifest.periodMode==='replace'?'period-replace':upload.manifest.scope?'period':'full')!==mode)fail('Source upload endpoint mismatch',409);
     if(input.index>=upload.manifest.chunkCount) fail('Source index outside manifest');
     // Completed receipts retain per-chunk hashes, rejecting changed retries.
     const prior=(await client.query('SELECT checksum FROM tally_source_chunks WHERE batch_id=$1 AND chunk_index=$2',[input.batchId,input.index])).rows[0];
@@ -86,6 +95,7 @@ async function chunk(input) {
     }
     if(upload.result) fail('Source receipt missing chunk',409);
     for(const row of records) {
+      if(upload.manifest.scope&&row.collection==='VOUCHER')period.voucher(row,upload.manifest.scope);
       const coverage=upload.manifest.collections.find(c=>c.name===row.collection);
       if(coverage.status!=='success'||row.ordinal>=coverage.count) fail('Record outside declared source coverage');
     }
@@ -97,14 +107,16 @@ async function chunk(input) {
     return {ok:true,batchId:input.batchId,index:input.index};
   });
 }
-async function complete(input) {
+async function complete(input,mode='full') {
   if(typeof input?.batchId!=='string') fail('Source batchId required');
   return locked(async client=>{
     const upload=(await client.query('SELECT * FROM tally_source_uploads WHERE batch_id=$1 FOR UPDATE',[input.batchId])).rows[0];
     if(!upload) fail('Source upload not found',409);
+    if((upload.manifest.periodMode==='replace'?'period-replace':upload.manifest.scope?'period':'full')!==mode)fail('Source upload endpoint mismatch',409);
     if(upload.result) {const {chunkChecksums,...receipt}=upload.result;return {...receipt,duplicate:true};}
     const chunks=(await client.query('SELECT chunk_index,checksum FROM tally_source_chunks WHERE batch_id=$1 ORDER BY chunk_index',[input.batchId])).rows;
     const m=upload.manifest;
+    if(m.scope)await client.query('SELECT pg_advisory_xact_lock(74312002)');
     if(chunks.length!==m.chunkCount||chunks.some((c,i)=>c.chunk_index!==i)) fail('Source upload incomplete',409);
     await client.query('INSERT INTO tally_source_snapshots(batch_id,company_external_id,company_name,captured_at,schema_version,coverage_status,manifest) VALUES($1,$2,$3,$4,1,$5,$6)',
       [m.batchId,m.company.externalId,m.company.name,m.capturedAt,m.coverageStatus,JSON.stringify(m)]);
@@ -127,6 +139,8 @@ async function complete(input) {
     }
     if(m.collections.some(c=>counts[c.name]!==c.count)) fail('Source record counts do not match manifest',409);
     const result={ok:true,batchId:m.batchId,recordCount:m.recordCount,coverageStatus:m.coverageStatus,duplicate:false};
+    if(m.scope)result.reportingBatchId=await period.merge(client,m);
+    if(m.periodMode)result.periodMode=m.periodMode;
     await client.query('UPDATE tally_source_uploads SET result=$2,bytes=0,updated_at=now() WHERE batch_id=$1',[m.batchId,JSON.stringify({...result,chunkChecksums:chunks.map(c=>c.checksum)})]);
     await client.query('DELETE FROM tally_source_chunks WHERE batch_id=$1',[m.batchId]);
     return result;

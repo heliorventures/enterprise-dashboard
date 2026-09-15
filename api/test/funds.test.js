@@ -2,6 +2,28 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const funds = require('../src/funds');
 
+test('unvalidated archived balances cannot produce spending estimates or combined forecasts', () => {
+  const legacy = { id: '4', name: 'Buildcon', bank: 100, cashAndBank: 100,
+    payables: 0, expenses: 80947, revenue: 0, financialDataAvailable: false };
+  const snapshot = funds.summarizeFunds({ today: new Date('2026-09-15T08:00:00Z'),
+    companies: [legacy, { ...legacy, id: '1', financialDataAvailable: true, expenses: 45000 }],
+    ledgerExpense: 125947, history: [{ key: '2026-08', expenses: 10, inflow: 0 }] });
+  const company = snapshot.byCompany[0];
+  for (const field of ['lastMonthExpenses', 'lastMonthInflow', 'nextMonthNeed', 'nextMonthFund']) {
+    assert.equal(company[field], null, field);
+  }
+  assert.equal(company.tone, 'watch');
+  assert.match(company.note, /validat/i);
+  assert.equal(snapshot.threeMonthBudget, null);
+  assert.equal(snapshot.afterThreeMonths, null);
+  assert.equal(snapshot.lastMonth.expenses, null);
+  assert.equal(snapshot.runRate.method, 'unavailable');
+  assert.equal(snapshot.runRate.monthsUsed, 0);
+  assert.deepEqual(snapshot.forecast, []);
+  assert.deepEqual(snapshot.history, []);
+  assert.notEqual(snapshot.byCompany[1].nextMonthNeed, null);
+});
+
 test('funding assessments never assume receivables or zero balances make cash sufficient', () => {
   const base = { bank: 100, cashAndBank: 100, payables: 20, nextMonthFund: 100, nextMonthNeed: 30, receivables: 0, lastMonthEstimated: false };
   assert.equal(funds.companyInsight({ ...base, payables: 120 }).tone, 'risk');

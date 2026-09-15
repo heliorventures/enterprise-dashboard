@@ -1,6 +1,7 @@
 const db = require('./db');
 const { companyFilter } = require('./filters');
 const { fundsOnHand, groupHistory, money, monthLabel, summarizeFunds } = require('./funds');
+const { EXPENSE_ROOTS } = require('./accountClassification');
 
 function toNumber(value) {
   return Number(value) || 0;
@@ -48,13 +49,15 @@ async function companyFinancials(companyId) {
       SELECT
         c."CompanyID",
         c."CompanyName",
+        EXISTS (SELECT 1 FROM finance_snapshots s WHERE s.company_id=c."CompanyID") AS "FinancialDataAvailable",
+        (SELECT s.coverage->'history' FROM finance_snapshots s WHERE s.company_id=c."CompanyID") AS "HistoryCoverage",
         COUNT(l."LedgerID") AS "LedgerCount",
         (SELECT COUNT(*) FROM "Vouchers" v WHERE v."CompanyID" = c."CompanyID") AS "VoucherCount",
         SUM(CASE WHEN COALESCE(f.root_group,l."GroupCategory") ILIKE '%Sales%'
           OR COALESCE(f.root_group,l."GroupCategory") ILIKE 'Indirect Income%'
           OR COALESCE(f.root_group,l."GroupCategory") ILIKE 'Direct Income%'
           THEN l."CurrentBalance" ELSE 0 END) AS "Revenue",
-        SUM(CASE WHEN lower(f.root_group) IN ('purchase accounts','direct expenses','indirect expenses') OR (f.root_group IS NULL AND (l."GroupCategory" ILIKE '%Purchase%' OR l."GroupCategory" ILIKE '%Expense%')) THEN l."CurrentBalance" ELSE 0 END) AS "Expenses",
+        SUM(CASE WHEN lower(trim(COALESCE(f.root_group,l."GroupCategory"))) = ANY($2::text[]) THEN l."CurrentBalance" ELSE 0 END) AS "Expenses",
         SUM(CASE WHEN COALESCE(f.root_group,l."GroupCategory") ILIKE '%Debtor%' THEN l."CurrentBalance" ELSE 0 END) AS "Receivables",
         SUM(CASE WHEN COALESCE(f.root_group,l."GroupCategory") ILIKE '%Creditor%' THEN l."CurrentBalance" ELSE 0 END) AS "Payables",
         SUM(CASE WHEN COALESCE(f.root_group,l."GroupCategory") ILIKE '%Bank%' THEN l."CurrentBalance" ELSE 0 END) AS "Bank",
@@ -67,7 +70,7 @@ async function companyFinancials(companyId) {
       GROUP BY c."CompanyID", c."CompanyName"
       ORDER BY c."CompanyName"
     `,
-    [Number(companyId) || 0]
+    [Number(companyId) || 0, EXPENSE_ROOTS]
   );
   return result.rows;
 }
@@ -156,6 +159,8 @@ function mapFinance(row) {
   return {
     id: String(row.CompanyID),
     name: row.CompanyName,
+    financialDataAvailable: row.FinancialDataAvailable === true,
+    historyCoverage:row.HistoryCoverage||null,
     revenue,
     expenses,
     profit: revenue - expenses,
@@ -311,6 +316,7 @@ async function getDashboard(companyCode = 'all') {
         payables: row.payables,
         expenses: row.expenses,
         revenue: row.revenue,
+        financialDataAvailable: row.financialDataAvailable,
         uncommitted: row.cashAndBank - row.payables,
       })),
     }),
@@ -334,6 +340,7 @@ async function getDashboard(companyCode = 'all') {
 }
 
 module.exports = {
+  companyFinancials,
   getDashboard: company => { companyFilter(company); return db.readSnapshot(() => getDashboard(company)); },
   getCompanies,
 };

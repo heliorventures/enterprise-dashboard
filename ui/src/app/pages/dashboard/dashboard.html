@@ -52,6 +52,17 @@
   @if (loading()) {
     <p class="empty" role="status">Loading financial overview…</p>
   } @else if (data(); as dashboard) {
+    @for (company of dashboard.companyFinancials; track company.id) {
+      @if (company.historyCoverage?.kind === 'periods') {
+        <p class="banner" role="status">
+          {{ company.name }}: voucher history is loaded only for
+          @for (period of company.historyCoverage?.periods; track period.from; let last = $last) {
+            {{ period.from }} to {{ period.to }}{{ last ? '.' : '; ' }}
+          }
+          Other dates have not been fully imported. Ledger balances are refreshed separately.
+        </p>
+      }
+    }
     <div class="scope-line">
       <span>Imported book balances; reporting period and bank availability unverified</span>
       @if (dashboard.lastSync; as sync) {
@@ -168,8 +179,8 @@
             />
             <app-kpi-card
               label="Headroom after 3-month budget"
-              [value]="compactInr(fund.uncommitted - fund.threeMonthBudget)"
-              [detail]="fullInr(fund.uncommitted - fund.threeMonthBudget)"
+              [value]="compactInr(fund.threeMonthBudget == null ? null : fund.uncommitted - fund.threeMonthBudget)"
+              [detail]="fullInr(fund.threeMonthBudget == null ? null : fund.uncommitted - fund.threeMonthBudget)"
               hint="Cash less recorded payables and estimated spending; excludes future inflow and may overlap existing payables."
             />
             <app-kpi-card
@@ -198,7 +209,9 @@
                 <p>
                   Model basis:
                   {{
-                    fund.runRate.method === 'ledgers'
+                    fund.runRate.method === 'unavailable'
+                      ? 'not available until financial validation succeeds'
+                      : fund.runRate.method === 'ledgers'
                       ? 'ledger balances spread over the financial year'
                       : 'averages of complete months with recorded activity'
                   }}

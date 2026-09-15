@@ -1,6 +1,7 @@
 const db = require('./db');
 const { attachProjects, ingestSnapshot, uniqueVoucherKey } = require('./ingest');
 const { buildProjection, writeProjection } = require('./sourceModels');
+const { isEmptyList } = require('./sourceTree');
 
 function invalid(message, status = 400) {
   return Object.assign(new Error(message), { status });
@@ -8,7 +9,7 @@ function invalid(message, status = 400) {
 
 function children(node, name) {
   if (!node || !Array.isArray(node.content)) return [];
-  return node.content.filter((child) => typeof child === 'object' && child.tag.toUpperCase() === name);
+  return node.content.filter((child) => child && typeof child === 'object' && child.tag.toUpperCase() === name && !isEmptyList(child));
 }
 
 function field(node, name) {
@@ -197,7 +198,6 @@ async function unpackBatch(batchId, { force = false, itemId = null } = {}) {
   if (snapshot.coverage_status !== 'complete') {
     throw invalid('Partial source snapshot cannot replace reporting data; complete export required', 409);
   }
-  const prior = (await db.query('SELECT company_id FROM tally_ingestions WHERE batch_id = $1', [batchId])).rows[0];
   const records = await db.query(
     `SELECT collection, ordinal, payload
      FROM tally_source_records
@@ -213,13 +213,14 @@ async function unpackBatch(batchId, { force = false, itemId = null } = {}) {
     SELECT $1,$2,collection,ordinal,field,severity,code,message FROM jsonb_to_recordset($3::jsonb) AS x(collection text,ordinal integer,field text,severity text,code text,message text)`, [batchId,itemId,JSON.stringify(model.issues)]);
   assertPromotable({ skipped, errors });
   if (model.issues.some(x => x.severity === 'error')) throw invalid('Financial validation failed; inspect the source-linked validation issues. No reporting data changed.',422);
-  const published = prior ? (await db.query('SELECT batch_id FROM finance_snapshots WHERE company_id=$1 AND batch_id=$2',[prior.company_id,batchId])).rows[0] : null;
   const result = await ingestSnapshot({
     batchId: snapshot.batch_id, capturedAt: snapshotTimestamp(snapshot.captured_at), fullSnapshot: true,
     company: { externalId: snapshot.company_external_id, name: snapshot.company_name }, ledgers, vouchers,
   }, {
     archivedSource: true,
-    force: force || Boolean(prior && !published),
+    replacementRanges:snapshot.manifest?.periodMode==='replace'&&snapshot.manifest.historyCoverage?.kind==='periods'?snapshot.manifest.historyCoverage.periods:null,
+    expectedSourceBatchId:snapshot.manifest?.periodMode==='replace'?snapshot.manifest.baselineBatchId:undefined,
+    force,
     afterWrite: async (client, companyId) => {
       const linked = await attachProjects(companyId, vouchers, projects, client);
       await writeProjection(client, companyId, snapshot, model);

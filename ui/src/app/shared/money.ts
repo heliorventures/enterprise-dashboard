@@ -1,4 +1,5 @@
-export function compactInr(value: number) {
+export function compactInr(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return 'Not available';
   const sign = value < 0 ? '-' : '';
   const abs = Math.abs(value || 0);
   if (abs >= 10_000_000) {
@@ -10,7 +11,8 @@ export function compactInr(value: number) {
   return fullInr(value);
 }
 
-export function fullInr(value: number) {
+export function fullInr(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return 'Not available';
   return (value || 0).toLocaleString('en-IN', {
     style: 'currency',
     currency: 'INR',

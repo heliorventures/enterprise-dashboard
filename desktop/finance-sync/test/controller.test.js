@@ -14,6 +14,28 @@ function setup() {
   return {controller,workers,close:()=>fs.rmSync(directory,{recursive:true})};
 }
 function ready(c,workers) {c.check();const w=workers.at(-1);w.emit('message',{type:'ready',companies:[{externalId:'a',name:'Alpha'},{externalId:'b',name:'Beta'}]});w.emit('exit',0);}
+
+test('Force stop kills only the active worker and period dates are passed through IPC',()=>{
+  const {controller:c,workers,close}=setup();
+  try {ready(c,workers);c.sync(['a'],'today');assert.equal(workers.at(-1).sent.config.scope.kind,'period');c.cancel();assert.equal(c.phase,'stopping');c.cancel();assert.equal(c.phase,'stopped');assert.equal(c.worker,null);}
+  finally {close();}
+});
+test('manual start discovers companies then starts exactly one sequential sync worker',()=>{
+  const {controller:c,workers,close}=setup();
+  try {
+    assert.equal(workers.length,0);
+    c.start();assert.equal(workers.length,1);
+    workers[0].emit('message',{type:'ready',companies:[{externalId:'a',name:'Alpha'}]});
+    assert.equal(workers.length,1);
+    workers[0].emit('exit',0);
+    assert.equal(workers.length,2);assert.deepEqual(workers[1].sent.selectedCompanyIds,['a']);
+  } finally {close();}
+});
+test('Stop during discovery prevents the automatic continuation of a user-started sync',()=>{
+  const {controller:c,workers,close}=setup();
+  try {c.start();c.cancel();workers[0].emit('message',{type:'ready',companies:[{externalId:'a',name:'Alpha'}]});workers[0].emit('exit',0);assert.equal(workers.length,1);assert.equal(c.snapshot().phase,'stopped');}
+  finally {close();}
+});
 test('controller prevents overlapping work and rejects selection outside its latest discovery',()=>{
   const {controller:c,workers,close}=setup();
   try {

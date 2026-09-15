@@ -1,4 +1,5 @@
 const { entities } = require("./reportingEntities");
+const { isEmptyList } = require('./sourceTree');
 const MASTER_TYPES = new Set([
   "GROUP",
   "VOUCHERTYPE",
@@ -64,6 +65,12 @@ const BASE_TYPES = new Set([
   "reversing journal",
   "payroll",
   "attendance",
+  "job work in order",
+  "job work out order",
+  "material in",
+  "material out",
+  "rejections in",
+  "rejections out",
 ]);
 const key = (value) =>
   String(value || "")
@@ -71,7 +78,7 @@ const key = (value) =>
     .toLowerCase();
 const children = (node, tag) =>
   (node?.content || []).filter(
-    (x) => x && typeof x === "object" && key(x.tag) === key(tag),
+    (x) => x && typeof x === "object" && key(x.tag) === key(tag) && !isEmptyList(x),
   );
 
 function buildProjection(
@@ -643,7 +650,7 @@ async function writeProjection(client, companyId, snapshot, model) {
       model.company.books_from,
       model.company.starting_from,
       snapshot.captured_at,
-      JSON.stringify(model.coverage),
+      JSON.stringify({...model.coverage,history:snapshot.manifest?.historyCoverage||{kind:'full'}}),
     ],
   );
 }

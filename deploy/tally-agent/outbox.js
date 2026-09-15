@@ -29,11 +29,13 @@ function writer(directory) {
 }
 async function deliver(config, token, directory, manifest, log, fetcher=fetch, sleep=ms=>new Promise(r=>setTimeout(r,ms))) {
   const sourceMode=manifest.profile==='company-business-v1';
-  const endpoint=sourceMode ? 'source/' : '';
+  const endpoint=sourceMode ? manifest.periodMode==='replace'?'source-period-replace/':manifest.scope?'source-period/':'source/' : '';
   let retries=0, requestBytes=0, chunksAcknowledged=0;
+  const attempts=config.uploadAttempts??4;
+  if(!Number.isInteger(attempts)||attempts<1||attempts>4)throw new Error('Invalid upload attempt limit');
   async function post(operation, value) {
     const body=JSON.stringify(value);
-    for (let attempt=0; attempt<4; attempt++) {
+    for (let attempt=0; attempt<attempts; attempt++) {
       config.signal?.throwIfAborted();
       try {
         requestBytes+=Buffer.byteLength(body);
@@ -41,15 +43,19 @@ async function deliver(config, token, directory, manifest, log, fetcher=fetch, s
           method:'POST', headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`},
           body, redirect:'error', signal:config.signal?AbortSignal.any([config.signal,AbortSignal.timeout(config.requestTimeoutMs)]):AbortSignal.timeout(config.requestTimeoutMs) });
         if (response.status!==200) {
+          if(manifest.scope&&response.status===409){
+            const detail=await response.json().catch(()=>null);
+            if(detail?.code==='PERIOD_CAPTURE_STALE')throw Object.assign(new Error('PERIOD_CAPTURE_STALE'),{code:'PERIOD_CAPTURE_STALE',retryable:false});
+          }
           const error=Object.assign(new Error(`API ${operation}: HTTP ${response.status}`),{retryable:response.status===429 || response.status>=500});
-          await response.body?.cancel(); throw error;
+          if(!response.bodyUsed)await response.body?.cancel(); throw error;
         }
         const result=await response.json();
         if (result.ok!==true || result.batchId!==manifest.batchId) throw Object.assign(new Error('API acknowledgement is invalid'),{retryable:false});
         return result;
       } catch (error) {
         config.signal?.throwIfAborted();
-        if (error.retryable===false || attempt===3) throw Object.assign(error,{retries,requestBytes,chunksAcknowledged});
+        if (error.retryable===false || attempt===attempts-1) throw Object.assign(error,{retries,requestBytes,chunksAcknowledged});
         retries++;
         log({event:'retry',company:manifest.company.name,batchId:manifest.batchId,operation,attempt:attempt+1});
         await sleep(1000*2**attempt);
@@ -66,9 +72,11 @@ async function deliver(config, token, directory, manifest, log, fetcher=fetch, s
   log({event:'upload_finalizing',company:manifest.company.name,batchId:manifest.batchId});
   const result=await post('complete',{batchId:manifest.batchId});
   if(sourceMode) {
-    const expected=manifest.collections.every(c=>c.status==='success')&&manifest.consistency!=='changed'?'complete':'partial';
+    const expected=!manifest.scope&&manifest.collections.every(c=>c.status==='success')&&manifest.consistency!=='changed'?'complete':'partial';
     if(result.recordCount!==manifest.recordCount||result.coverageStatus!==expected) throw new Error('API committed source coverage differs from manifest');
   } else if (result.ledgerCount!==manifest.ledgerCount || result.voucherCount!==manifest.voucherCount) throw new Error('API committed counts differ from manifest');
-  return {retries,requestBytes,chunksAcknowledged,duplicate:result.duplicate,...(sourceMode?{coverageStatus:result.coverageStatus,reportingStatus:result.reportingStatus || 'unverified'}:{})};
+  if(manifest.scope&&!result.reportingBatchId)throw new Error('Period acknowledgement is missing its cumulative reporting reference');
+  if(manifest.periodMode==='replace'&&result.periodMode!=='replace')throw new Error('Period replacement acknowledgement is invalid');
+  return {retries,requestBytes,chunksAcknowledged,duplicate:result.duplicate,...(sourceMode?{coverageStatus:result.coverageStatus,reportingStatus:result.reportingStatus || 'unverified',...(manifest.scope?{periodUpdate:true}:{})}:{})};
 }
 module.exports = {saveJson,writer,deliver};

@@ -5,10 +5,22 @@ const reports = require('../src/reports');
 test('expense groups exclude payables and keep purchase or expense books', () => {
   assert.equal(reports.isExpenseGroup('Indirect Expenses'), true);
   assert.equal(reports.isExpenseGroup('Purchase Accounts'), true);
-  assert.equal(reports.isExpenseGroup('Office Rent Expenses (G)'), true);
+  assert.equal(reports.isExpenseGroup('Office Rent Expenses (G)'), false);
   assert.equal(reports.isExpenseGroup('Sundry Creditors - Fuel (G)'), false);
   assert.equal(reports.isExpenseGroup('Provision for Expenses (G)'), false);
   assert.equal(reports.isExpenseGroup('Salary Payable'), false);
+});
+
+test('expense classification follows resolved hierarchy rather than words in custom names', () => {
+  const rows = reports.nestExpenses([
+    { CompanyID: 1, CompanyName: 'Example', LedgerID: 1, LedgerName: 'Provision', GroupCategory: 'Provision for Expenses (G)', RootGroup: 'Provisions', CurrentBalance: '80947' },
+    { CompanyID: 1, CompanyName: 'Example', LedgerID: 2, LedgerName: 'Rent', GroupCategory: 'Premises', RootGroup: 'Indirect Expenses', CurrentBalance: '-100' },
+    { CompanyID: 1, CompanyName: 'Example', LedgerID: 3, LedgerName: 'Advance', GroupCategory: 'Purchase advance', RootGroup: 'Current Assets', CurrentBalance: '200' },
+    { CompanyID: 1, CompanyName: 'Example', LedgerID: 4, LedgerName: 'Unknown', GroupCategory: 'Expense Reserve', CurrentBalance: '300' },
+  ]);
+  assert.equal(rows[0].total, 100);
+  assert.equal(rows[0].ledgerCount, 1);
+  assert.equal(rows[0].groups[0].ledgers[0].name, 'Rent');
 });
 
 test('expense rows nest into company, group, and ledger drill-down', () => {

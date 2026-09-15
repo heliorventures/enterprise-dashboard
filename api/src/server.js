@@ -27,23 +27,30 @@ const staged = require('./ingestChunks');
 const sourceArchive = require('./sourceArchive');
 const sourceUnpack = require('./sourceUnpack');
 const sourceSync = require('./sourceSync');
-async function completeSource(body) {
-  const result = await sourceArchive.complete(body);
+async function completeSource(body,mode='full') {
+  const result = await sourceArchive.complete(body,mode);
   // Archive acknowledgement is independent of downstream reporting validation.
-  if (result.ok && result.coverageStatus === 'complete') {
-    try { result.unpack = await sourceSync.recordBatch(result.batchId); }
+  if (result.ok && (result.coverageStatus === 'complete'||result.reportingBatchId)) {
+    try { result.unpack = await sourceSync.recordBatch(result.reportingBatchId||result.batchId); }
     catch (error) { result.unpack = { ok: false, error: error.message }; }
   }
-  result.reportingStatus = result.coverageStatus !== 'complete' ? 'blocked' : result.unpack?.ok === true ? 'validated' : 'error';
+  result.reportingStatus = result.coverageStatus !== 'complete'&&!result.reportingBatchId ? 'blocked' : result.unpack?.ok === true ? 'validated' : 'error';
   return result;
 }
-for (const operation of ['begin','chunk','complete']) {
-  app.post('/api/ingest/tally/source/' + operation, authenticateSender, express.json({limit:'5mb'}), async (req,res) => {
-    try { res.json(operation === 'complete' ? await completeSource(req.body) : await sourceArchive[operation](req.body)); }
+for(const replacement of [false,true])app.post('/api/ingest/tally/'+(replacement?'source-period-replace':'source-period')+'/preflight',authenticateSender,express.json({limit:'10kb'}),async(req,res)=>{
+  try {
+    if(typeof req.body?.companyExternalId!=='string'||!req.body.companyExternalId||req.body.companyExternalId.length>200)throw Object.assign(new Error('Company identity required'),{status:400});
+    const baseline=await require('./sourcePeriod').baseline(db,req.body.companyExternalId,undefined,replacement);
+    res.json({ok:true,companyExternalId:req.body.companyExternalId,baselineBatchId:baseline?.batch_id||null,...(replacement?{periodMode:'replace'}:{})});
+  } catch(error){res.status(error.status||500).json({error:error.status?error.message:'Unable to verify full sync baseline'});}
+});
+for (const mode of ['full','period','period-replace']) for (const operation of ['begin','chunk','complete']) {
+  app.post('/api/ingest/tally/'+(mode==='full'?'source/':mode==='period'?'source-period/':'source-period-replace/') + operation, authenticateSender, express.json({limit:'5mb'}), async (req,res) => {
+    try { res.json(operation === 'complete' ? await completeSource(req.body,mode) : await sourceArchive[operation](req.body,mode)); }
     catch(error) {
       const status=error.status || (error.code==='23505' ? 409 : 500);
       if(status===500) console.error('Source archive failed:',error.code || error.name);
-      res.status(status).json({error:status===500?'Source archive failed; retry the same batch':error.code==='23505'?'Duplicate source record identity':error.message});
+      res.status(status).json({error:status===500?'Source archive failed; retry the same batch':error.code==='23505'?'Duplicate source record identity':error.message,...(error.code==='PERIOD_CAPTURE_STALE'?{code:error.code}:{})});
     }
   });
 }

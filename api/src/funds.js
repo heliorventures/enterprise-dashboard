@@ -126,6 +126,9 @@ function groupHistory(rows) {
 }
 
 function companyInsight(row) {
+  if (row.financialDataAvailable === false) {
+    return { tone: 'watch', note: 'Spending and forecasts are unavailable until the company has a validated, published snapshot.' };
+  }
   if (row.payables > row.cashAndBank) {
     return { tone: 'risk', note: 'Payables are larger than cash on the books. Review payment dates and funding; receivables are not assumed collectible.' };
   }
@@ -163,6 +166,7 @@ function buildCompanyFundRows({ today = new Date(), companies = [], histories = 
     const row = {
       id: company.id,
       name: company.name,
+      financialDataAvailable: company.financialDataAvailable !== false,
       bank: money(company.bank),
       cash: money(company.cash),
       cashAndBank: money(company.cashAndBank),
@@ -176,6 +180,10 @@ function buildCompanyFundRows({ today = new Date(), companies = [], histories = 
       nextMonthNeed: money(rate.monthlyExpense),
       nextMonthFund: next ? next.closingCash : money(company.cashAndBank),
     };
+    if (!row.financialDataAvailable) {
+      for (const name of ['lastMonthExpenses', 'lastMonthInflow', 'nextMonthNeed', 'nextMonthFund']) row[name] = null;
+      row.lastMonthEstimated = false;
+    }
     return { ...row, ...companyInsight(row) };
   });
 }
@@ -195,6 +203,7 @@ function summarizeFunds({
 }) {
   const currentKey = currentMonthKey(today);
   const lastKey = lastCompleteMonthKey(today);
+  const financialDataAvailable = companies.every(company => company.financialDataAvailable !== false);
   const lastMonth = history.find((row) => row.key === lastKey) || {
     key: lastKey,
     label: monthLabel(lastKey),
@@ -219,21 +228,22 @@ function summarizeFunds({
     receivables: money(receivables),
     payables: money(payables),
     uncommitted,
+    financialDataAvailable,
     lastMonth: {
       key: lastKey,
       label: monthLabel(lastKey),
-      expenses: money(lastMonth.expenses),
-      inflow: money(lastMonth.inflow),
-      net: money((lastMonth.inflow || 0) - (lastMonth.expenses || 0)),
+      expenses: financialDataAvailable ? money(lastMonth.expenses) : null,
+      inflow: financialDataAvailable ? money(lastMonth.inflow) : null,
+      net: financialDataAvailable ? money((lastMonth.inflow || 0) - (lastMonth.expenses || 0)) : null,
       expenseCount: lastMonth.expenseCount || 0,
       voucherCount: lastMonth.voucherCount || 0,
     },
-    runRate: rate,
-    threeMonthBudget,
-    afterThreeMonths,
-    runwayMonths: burn > 0 ? money(cashAndBank / burn) : null,
-    forecast,
-    history: history.map((row) => ({
+    runRate: financialDataAvailable ? rate : { monthlyExpense: null, monthlyInflow: null, method: 'unavailable', monthsUsed: 0 },
+    threeMonthBudget: financialDataAvailable ? threeMonthBudget : null,
+    afterThreeMonths: financialDataAvailable ? afterThreeMonths : null,
+    runwayMonths: financialDataAvailable && burn > 0 ? money(cashAndBank / burn) : null,
+    forecast: financialDataAvailable ? forecast : [],
+    history: (financialDataAvailable ? history : []).map((row) => ({
       ...row,
       label: row.label || monthLabel(row.key),
       expenses: money(row.expenses),
@@ -245,7 +255,9 @@ function summarizeFunds({
     lastMonthLabel: monthLabel(lastKey),
     byCompany: buildCompanyFundRows({ today, companies, histories }),
     methodNote:
-      rate.method === 'vouchers'
+      !financialDataAvailable
+        ? 'Spending and forecasts are unavailable because one or more company exports have not passed financial validation.'
+        : rate.method === 'vouchers'
         ? 'Next three months use the average Payment and Purchase amounts from complete months.'
         : 'Voucher amounts are mostly missing, so the three-month budget uses expense ledger closings for this financial year.',
   };

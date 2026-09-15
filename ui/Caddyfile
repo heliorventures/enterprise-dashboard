@@ -13,7 +13,7 @@
         respond "enterprise-dashboard {$RELEASE_TAG}" 200
     }
     # Machine endpoint authenticates its Bearer token in Express.
-    @sender path /api/ingest/tally /api/ingest/tally/begin /api/ingest/tally/chunk /api/ingest/tally/complete /api/ingest/tally/source/begin /api/ingest/tally/source/chunk /api/ingest/tally/source/complete /api/process/tally/unpack
+    @sender path /api/ingest/tally /api/ingest/tally/begin /api/ingest/tally/chunk /api/ingest/tally/complete /api/ingest/tally/source/begin /api/ingest/tally/source/chunk /api/ingest/tally/source/complete /api/ingest/tally/source-period/preflight /api/ingest/tally/source-period/begin /api/ingest/tally/source-period/chunk /api/ingest/tally/source-period/complete /api/ingest/tally/source-period-replace/preflight /api/ingest/tally/source-period-replace/begin /api/ingest/tally/source-period-replace/chunk /api/ingest/tally/source-period-replace/complete /api/process/tally/unpack
     handle @sender {
         reverse_proxy enterprise-dashboard-api:3000
     }

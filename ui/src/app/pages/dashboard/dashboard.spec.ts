@@ -198,6 +198,23 @@ describe('Dashboard', () => {
         .value(fixture.componentInstance.fundTotalRows()[0]),
     ).toBe('Not available');
   });
+  it('renders unavailable funding estimates without inventing zero or a funding gap', () => {
+    const fixture = TestBed.createComponent(Dashboard);
+    const d = snapshot();
+    Object.assign(d.funds, { threeMonthBudget: null, afterThreeMonths: null, forecast: [], history: [] });
+    Object.assign(d.funds.runRate, { method: 'unavailable', monthlyExpense: null, monthlyInflow: null, monthsUsed: 0 });
+    Object.assign(d.funds.lastMonth, { expenses: null, inflow: null, net: null });
+    TestBed.inject(HttpTestingController).expectOne('/api/dashboard?company=all').flush(d);
+    fixture.detectChanges();
+    expect(fixture.componentInstance.runway()).toBe('Not available');
+    expect(fixture.componentInstance.forecastRows()).toEqual([]);
+    expect(fixture.componentInstance.priorities().some(x => x.title === 'Model projects a funding gap')).toBe(false);
+    const cards = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('app-kpi-card'));
+    for (const label of ['Next 3-month spending budget', 'Headroom after 3-month budget']) {
+      const card = cards.find(x => x.textContent?.includes(label));
+      expect(card?.textContent).toContain('Not available');
+    }
+  });
   it('does not reload the page report for source navigation and cancels requests on leave', async () => {
     const { Router } = await import('@angular/router');
     const router = TestBed.inject(Router),

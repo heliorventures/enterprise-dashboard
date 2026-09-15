@@ -9,6 +9,47 @@ const {withLock}=require('../launcher');
 const envelope=rows=>`<ENVELOPE><BODY><DATA><COLLECTION>${rows}</COLLECTION></DATA></BODY></ENVELOPE>`;
 const company=(id,name)=>`<COMPANY NAME="${name}"><NAME>${name}</NAME><GUID>${id}</GUID></COMPANY>`;
 
+test('desktop failure stops at the first collection without contacting another company or uploading',async()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'finance-fail-fast-')),original=global.fetch,calls=[];
+  global.fetch=async(url,options)=>{calls.push(options.body);if(String(url).startsWith('https:'))throw new Error('Unexpected upload');if(options.body.includes('<TYPE>Group</TYPE>'))throw new Error('Synthetic busy Tally');return new Response(envelope(company('a','Alpha')+company('b','Beta')));};
+  try {
+    const result=await run(path.join(dir,'unused.json'),false,{config:{apiUrl:'https://example.invalid',tallyUrl:'http://localhost:9000',stopOnFailure:true},token:'x'.repeat(40),selectedCompanyIds:['a','b'],quiet:true});
+    assert.equal(result,1);assert.equal(calls.length,3);
+    assert.ok(!calls.some(body=>body.includes('<TYPE>Ledger</TYPE>')||body.includes('<SVCURRENTCOMPANY>Beta</SVCURRENTCOMPANY>')));
+  } finally {global.fetch=original;fs.rmSync(dir,{recursive:true});}
+});
+
+test('period baseline check fails before any collection export and never retries',async()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'finance-period-preflight-')),original=global.fetch,calls=[];
+  global.fetch=async(url)=>{calls.push(String(url));return String(url).startsWith('https:')?new Response('{}',{status:409}):new Response(envelope(company('a','Alpha')));};
+  try {
+    const events=[];
+    assert.equal(await run(path.join(dir,'unused.json'),false,{config:{apiUrl:'https://example.invalid',tallyUrl:'http://localhost:9000',stopOnFailure:true,scope:{kind:'period',from:'2026-09-01',to:'2026-09-15'}},token:'x'.repeat(40),selectedCompanyIds:['a'],quiet:true,onEvent:e=>events.push(e)}),1);
+    assert.equal(calls.length,2);assert.match(calls[1],/source-period\/preflight$/);assert.ok(!events.some(e=>e.event==='source_collection_started'));
+  } finally {global.fetch=original;fs.rmSync(dir,{recursive:true});}
+});
+
+test('an explicitly stale period is retained but cannot trap every subsequent manual sync',async()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'finance-stale-period-')),original=global.fetch;
+  const id='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',pending=path.join(dir,'state','source-outbox',id),scope={kind:'period',from:'2026-09-01',to:'2026-09-15'};
+  fs.mkdirSync(pending,{recursive:true});fs.writeFileSync(path.join(pending,'manifest.json'),JSON.stringify({batchId:id,profile:'company-business-v1',scope,company:{externalId:'a',name:'Alpha'}}));
+  const calls=[],options={config:{apiUrl:'https://example.invalid',tallyUrl:'http://localhost:9000',scope,stopOnFailure:true,uploadAttempts:1},token:'x'.repeat(40),selectedCompanyIds:['a'],quiet:true};
+  global.fetch=async(url,request)=>{
+    calls.push(String(url));
+    if(String(url).endsWith('/preflight'))return new Response(JSON.stringify({ok:true,companyExternalId:'a',baselineBatchId:'newer'}));
+    if(String(url).startsWith('https:'))return new Response(JSON.stringify({code:'PERIOD_CAPTURE_STALE'}),{status:409});
+    if(request.body.includes('<TYPE>Group</TYPE>'))throw new Error('End synthetic fresh capture');
+    return new Response(envelope(company('a','Alpha')));
+  };
+  try {
+    assert.equal(await run(path.join(dir,'unused.json'),false,options),1);
+    assert.ok(fs.existsSync(path.join(pending,'held.json')));assert.ok(fs.existsSync(path.join(pending,'manifest.json')));
+    calls.length=0;
+    await run(path.join(dir,'unused.json'),false,options);
+    assert.ok(calls.some(url=>url.endsWith('/preflight')));assert.ok(!calls.some(url=>url.endsWith('/begin')));
+  } finally {global.fetch=original;fs.rmSync(dir,{recursive:true});}
+});
+
 test('desktop selection excludes unchecked companies from capture and durable retries',async()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'finance-desktop-selection-'));
   const original=global.fetch;
@@ -90,4 +131,10 @@ test('desktop and command-line calls share the state-directory lock',async()=>{
   const file=path.join(dir,'config.json');fs.writeFileSync(file,JSON.stringify({stateDirectory:'state'}));
   try {assert.equal(await withLock({stateDirectory:path.join(dir,'state')},()=>withLock(file,()=>0)),2);}
   finally {fs.rmSync(dir,{recursive:true});}
+});
+test('manual upload makes one attempt and never automatically sleeps or retries',async()=>{
+  let calls=0;
+  await assert.rejects(()=>deliver({apiUrl:'https://example.invalid',requestTimeoutMs:1000,uploadAttempts:1},'test','unused',
+    {batchId:'test',profile:'company-business-v1',company:{name:'A'}},()=>{},async()=>{calls++;return {status:503};},async()=>{throw new Error('Unexpected retry');}),/HTTP 503/);
+  assert.equal(calls,1);
 });

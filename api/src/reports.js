@@ -1,12 +1,7 @@
 const db = require('./db');
 const { companyFilter } = require('./filters');
 const { fundsOnHand, lastCompleteMonthKey, monthLabel, money } = require('./funds');
-
-function isExpenseGroup(name) {
-  const group = String(name || '');
-  if (/(payable|provision|creditor|advance from)/i.test(group)) return false;
-  return /expense|purchase account/i.test(group);
-}
+const { isExpenseGroup } = require('./accountClassification');
 
 function toNumber(value) {
   return Number(value) || 0;

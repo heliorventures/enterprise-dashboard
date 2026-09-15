@@ -13,8 +13,9 @@ const packaged=process.argv.includes('--packaged');
 const sourceRoot=packaged?path.resolve(__dirname,'../release/win-unpacked/resources/app.asar'):path.resolve(__dirname,'..');
 const {createDesktop}=require(path.join(sourceRoot,'src/desktop.js'));
 const xml='<ENVELOPE><BODY><DATA><COLLECTION><COMPANY NAME="Solvian Consulting"><NAME>Solvian Consulting</NAME><GUID>solvian-guid</GUID></COMPANY><COMPANY NAME="Northstar Trading"><NAME>Northstar Trading</NAME><GUID>northstar-guid</GUID></COMPANY></COLLECTION></DATA></BODY></ENVELOPE>';
-let empty=false,hold=false;
+let empty=false,hold=false,requests=0;
 const server=http.createServer((req,res)=>{
+  requests++;
   req.resume();req.on('end',()=>{
     const reply=()=>{if(!res.destroyed){res.writeHead(200,{'Content-Type':'application/xml'});res.end(empty?'<ENVELOPE><BODY><DATA><COLLECTION/></DATA></BODY></ENVELOPE>':xml);}};
     if(hold){const timer=setTimeout(reply,15000);res.on('close',()=>clearTimeout(timer));}else reply();
@@ -35,7 +36,11 @@ app.whenReady().then(async()=>{
   const {window,controller}=desktop;
   const errors=[];window.webContents.on('console-message',details=>{if(details.level==='error')errors.push(details.message);});
   const js=script=>window.webContents.executeJavaScript(script);
+  await new Promise(resolve=>setTimeout(resolve,1500));
+  assert.equal(requests,0);assert.equal(controller.snapshot().phase,'idle');assert.equal(controller.snapshot().busy,false);
+  await js("document.getElementById('check').click()");
   await waitFor(controller,s=>s.phase==='ready'&&!s.busy);
+  assert.equal(await js("document.getElementById('app-version').textContent"),`v${require(path.join(sourceRoot,'package.json')).version}`);
   assert.equal(await js("document.querySelectorAll('#companies input:checked').length"),2);
   assert.equal(await js("typeof require"),'undefined');
   assert.equal(await js("typeof process"),'undefined');
@@ -47,8 +52,11 @@ app.whenReady().then(async()=>{
   await js("document.querySelector('#companies input').click()");
   assert.equal(await js("document.getElementById('selected-count').textContent"),'1 selected');
   hold=true;
+  await js("document.getElementById('period').value='today'");
   await js("document.getElementById('sync').click()");
   await waitFor(controller,s=>s.phase==='syncing'&&s.busy);
+  assert.equal(controller.scope.kind,'period');
+  assert.equal(await js("document.getElementById('period').disabled"),true);
   assert.equal(await js("document.getElementById('sync').disabled"),true);
   await js("document.getElementById('stop').click()");
   await waitFor(controller,s=>s.phase==='stopped'&&!s.busy);
@@ -57,15 +65,24 @@ app.whenReady().then(async()=>{
   await js("document.getElementById('check').click()");
   await waitFor(controller,s=>s.phase==='error'&&!s.busy);
   assert.match(await js("document.getElementById('message').textContent"),/No company/);
-  assert.equal(await js("document.getElementById('sync').disabled"),true);
+  assert.equal(await js("document.getElementById('sync').disabled"),false);
   empty=false;
   await js("document.getElementById('check').click()");
   await waitFor(controller,s=>s.phase==='ready'&&!s.busy);
   assert.equal(await js("document.querySelectorAll('#companies input:checked').length"),2);
   assert.deepEqual(errors,[]);
+  empty=true;await js("document.getElementById('check').click()");
+  await waitFor(controller,s=>s.phase==='error'&&!s.busy);empty=false;
+  await js("document.getElementById('period').value='full'");
+  const beforeManualRun=requests;
+  await js("document.getElementById('sync').click()");
+  // Fixture deliberately returns COMPANY for GROUP: fail-fast must stop here,
+  // without touching the API or starting Beta after Alpha fails.
+  await waitFor(controller,s=>s.phase==='attention'&&!s.busy);
+  assert.equal(controller.snapshot().results.length,2);assert.equal(requests-beforeManualRun,4);
   controller.config.testBuild=true;controller.changed();
   assert.equal(await js("document.getElementById('sync').disabled"),true);
   assert.equal((await js("window.financeSync.sync(['solvian-guid'])")).ok,false);
-  console.log(`${packaged?'Packaged':'Source'} Electron smoke passed: worker readiness, isolated renderer, selection, overlap prevention, cancellation, empty-company error and reset.`);
+  console.log(`${packaged?'Packaged':'Source'} Electron smoke passed: no startup requests, manual readiness, isolated renderer, selection, overlap prevention, cancellation, empty-company error and reset.`);
   window.destroy();server.closeAllConnections();server.close();app.exit(0);
 }).catch(error=>{console.error(error.stack);desktop?.window.destroy();server.closeAllConnections();server.close();app.exit(1);});

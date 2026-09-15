@@ -23,6 +23,66 @@ const row = (collection, fields, content = [], ordinal = 0) => ({
   payload: node(collection, fields, content),
 });
 const adapters = { ...unpack, voucherKey: uniqueVoucherKey };
+test('empty exported lists do not create inventory or hide populated alternative lists', () => {
+  const rows = fixture();
+  const voucher = rows.at(-1).payload;
+  voucher.content.push(node('ALLINVENTORYENTRIES.LIST', {}, ['     ']));
+  let result = buildProjection(rows, adapters);
+  assert.equal(result.inventory.length, 0);
+  assert.equal(result.issues.length, 0);
+  rows.push(row('STOCKITEM', { NAME: 'Item' }));
+  voucher.content.push(node('INVENTORYENTRIES.LIST', { STOCKITEMNAME: 'Item', AMOUNT: '25' }, [
+    node('BATCHALLOCATIONS.LIST', {}, ['\n ']),
+  ]));
+  result = buildProjection(rows, adapters);
+  assert.deepEqual(result.inventory.map(x => x.amount), ['25.00']);
+  assert.equal(result.issues.length, 0);
+});
+
+test('populated malformed inventory remains an error', () => {
+  for (const entry of [node('ALLINVENTORYENTRIES.LIST', { AMOUNT: '10' }),
+    node('ALLINVENTORYENTRIES.LIST', { STOCKITEMNAME: 'Missing' }),
+    { tag: 'ALLINVENTORYENTRIES.LIST', attributes: { STOCKITEMNAME: 'Missing' }, content: [] }]) {
+    const rows = fixture();
+    rows.at(-1).payload.content.push(entry);
+    assert.ok(buildProjection(rows, adapters).issues.some(x => x.code === 'UNKNOWN_STOCK_ITEM'));
+  }
+});
+
+test('XML list metadata does not turn an empty collection into a business entry', () => {
+  const rows = fixture();
+  rows.at(-1).payload.content.push({ tag: 'ALLINVENTORYENTRIES.LIST',
+    attributes: { TYPE: 'Collection', ISLIST: 'Yes' }, content: ['\n '] });
+  const result = buildProjection(rows, adapters);
+  assert.equal(result.inventory.length, 0);
+  assert.equal(result.issues.length, 0);
+});
+
+test('native self-parent voucher types resolve but custom self and multi-node cycles fail', () => {
+  const rows = fixture();
+  for (const name of ['Job Work In Order', 'Job Work Out Order', 'Material In', 'Material Out', 'Rejections In', 'Rejections Out']) {
+    rows.push(row('VOUCHERTYPE', { NAME: name, PARENT: name }, [], rows.length));
+  }
+  const result = buildProjection(rows, adapters);
+  assert.equal(result.issues.length, 0);
+  for (const master of result.masters.filter(x => x.collection === 'VOUCHERTYPE')) {
+    assert.ok(master.properties.resolvedRoot);
+  }
+  rows.push(row('VOUCHERTYPE', { NAME: 'Custom', PARENT: 'Custom' }, [], 100));
+  rows.push(row('VOUCHERTYPE', { NAME: 'A', PARENT: 'B' }, [], 101));
+  rows.push(row('VOUCHERTYPE', { NAME: 'B', PARENT: 'A' }, [], 102));
+  assert.equal(buildProjection(rows, adapters).issues.filter(x => x.code === 'PARENT_CYCLE').length, 3);
+});
+
+test('empty accounting placeholders do not obscure populated alternative postings', () => {
+  const rows = fixture();
+  const voucher = rows.at(-1).payload;
+  voucher.content = voucher.content.filter(x => x.tag !== 'AMOUNT').map(x =>
+    x.tag === 'ALLLEDGERENTRIES.LIST' ? { ...x, tag: 'LEDGERENTRIES.LIST' } : x);
+  voucher.content.push(node('ALLLEDGERENTRIES.LIST', {}, ['   ']));
+  assert.equal(unpack.interpretVoucher(voucher).amount, '10.00');
+  assert.equal(buildProjection(rows, adapters).issues.length, 0);
+});
 const fixture = () => [
   row("COMPANY", {
     NAME: "Example",

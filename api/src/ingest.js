@@ -111,12 +111,12 @@ function planIncremental(existing, incoming, same) {
   };
 }
 
-async function ingestSnapshot(input, { force = false, afterWrite, archivedSource = false } = {}) {
+async function ingestSnapshot(input, { force = false, afterWrite, archivedSource = false, replacementRanges = null, expectedSourceBatchId } = {}) {
   const snapshot = validateSnapshot(input, archivedSource ? 5000000 : 50000);
   const { batchId, capturedAt, company, ledgers, vouchers } = snapshot;
   const checksum = createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');
   return db.transaction(async client => {
-    const result = await applySnapshot(client, snapshot, checksum, id => replaceSnapshot(client, id, ledgers, vouchers), force, Boolean(afterWrite));
+    const result = await applySnapshot(client, snapshot, checksum, id => applyIncremental(client, id, ledgers, vouchers,replacementRanges), force, Boolean(afterWrite),expectedSourceBatchId);
     if (afterWrite) {
       const latest = result.duplicate ? (await client.query('SELECT batch_id FROM tally_ingestions WHERE company_id=$1 ORDER BY captured_at DESC LIMIT 1',[result.companyId])).rows[0] : null;
       if (!result.duplicate || latest?.batch_id === batchId) result.projects = await afterWrite(client, result.companyId);
@@ -131,10 +131,14 @@ async function clearReportingProjection(client, companyId) {
   }
 }
 
-async function applySnapshot(client, { batchId, capturedAt, company }, checksum, writeRows, force = false, preserveProjection = false) {
+async function applySnapshot(client, { batchId, capturedAt, company }, checksum, writeRows, force = false, preserveProjection = false,expectedSourceBatchId) {
     // Serialize imports before inspecting timestamps; never apply an older snapshot last.
     await client.query('SELECT pg_advisory_xact_lock(74312002)');
     const prior = await client.query('SELECT checksum, company_id FROM tally_ingestions WHERE batch_id = $1', [batchId]);
+    if(!prior.rows.length&&expectedSourceBatchId!==undefined){
+      const current=(await client.query(`SELECT f.batch_id FROM finance_snapshots f JOIN "Companies" c ON c."CompanyID"=f.company_id WHERE c."ExternalID"=$1`,[company.externalId])).rows[0];
+      if((current?.batch_id||null)!==expectedSourceBatchId)throw invalid('Finance changed while this period was processing. Run a fresh sync; no reporting data changed.',409);
+    }
     if (prior.rows.length && force) {
       const id = prior.rows[0].company_id;
       const newer = await client.query('SELECT 1 FROM tally_ingestions WHERE company_id = $1 AND captured_at > $2 LIMIT 1', [id, capturedAt]);
@@ -189,7 +193,7 @@ function sameVoucher(prior, row) {
     && (prior.narration || '') === (row.narration || '');
 }
 
-async function applyIncremental(client, companyId, ledgers, vouchers) {
+async function applyIncremental(client, companyId, ledgers, vouchers,replacementRanges=null) {
   const existingLedgers = (await client.query(
     `SELECT "SourceKey" AS "sourceKey", "LedgerName" AS name, "GroupCategory" AS "group", "CurrentBalance"::text AS balance
      FROM "Ledgers" WHERE "CompanyID" = $1 AND "SourceKey" IS NOT NULL`,
@@ -203,6 +207,12 @@ async function applyIncremental(client, companyId, ledgers, vouchers) {
   )).rows;
   const ledgerPlan = planIncremental(existingLedgers, ledgers, sameLedger);
   const voucherPlan = planIncremental(existingVouchers, vouchers, sameVoucher);
+  if(replacementRanges){
+    // Legacy imported rows outside known archived periods must survive a first
+    // period import too. A later full sync reconciles all imported rows.
+    const dated=new Map(existingVouchers.map(v=>[v.sourceKey,v.date]));
+    voucherPlan.remove=voucherPlan.remove.filter(key=>replacementRanges.some(r=>dated.get(key)>=r.from&&dated.get(key)<=r.to));
+  }
 
   if (ledgerPlan.insert.length) {
     await client.query(`INSERT INTO "Ledgers" ("CompanyID", "LedgerName", "GroupCategory", "CurrentBalance", "SourceKey")

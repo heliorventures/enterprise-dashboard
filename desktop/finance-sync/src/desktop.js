@@ -4,6 +4,7 @@ const fs=require('node:fs');
 const {pathToFileURL}=require('node:url');
 const {SyncController}=require('./controller');
 async function createDesktop({config,stateDirectory,show=true}) {
+  const version=require('../package.json').version;
   const page=path.join(__dirname,'renderer','index.html');
   const window=new BrowserWindow({width:1020,height:790,minWidth:720,minHeight:600,show:false,title:'Helior Finance Sync',
     icon:path.join(__dirname,'../generated/icon.ico'),backgroundColor:'#f5f7fb',autoHideMenuBar:true,
@@ -18,16 +19,17 @@ async function createDesktop({config,stateDirectory,show=true}) {
   controller.on('state',state=>{if(!window.isDestroyed())window.webContents.send('finance:state',state);});
   const authorized=event=>event.sender===window.webContents&&event.senderFrame===window.webContents.mainFrame&&event.senderFrame.url===pathToFileURL(page).href;
   const handlers={
-    snapshot:()=>controller.snapshot(),check:()=>controller.check(),sync:ids=>controller.sync(ids),cancel:()=>controller.cancel(),
+    version:()=>version,
+    snapshot:()=>controller.snapshot(),check:()=>controller.check(),start:mode=>controller.start(mode),sync:(ids,mode)=>controller.sync(ids,mode),cancel:()=>controller.cancel(),
     export:async()=>{
       const result=await dialog.showSaveDialog(window,{title:'Export diagnostic log',defaultPath:`Finance-Sync-Diagnostics-${new Date().toISOString().slice(0,10)}.json`,filters:[{name:'Diagnostic log',extensions:['json']}]});
       if(result.canceled||!result.filePath)return {saved:false};
-      fs.writeFileSync(result.filePath,JSON.stringify(controller.diagnostics(),null,2),{mode:0o600});return {saved:true};
+      fs.writeFileSync(result.filePath,JSON.stringify({...controller.diagnostics(),version},null,2),{mode:0o600});return {saved:true};
     }
   };
-  for(const [name,handler]of Object.entries(handlers))ipcMain.handle(`finance:${name}`,async(event,arg)=>{
+  for(const [name,handler]of Object.entries(handlers))ipcMain.handle(`finance:${name}`,async(event,...args)=>{
     if(!authorized(event))return {ok:false,error:'This operation is unavailable.'};
-    try {return {ok:true,value:await handler(arg)};}
+    try {return {ok:true,value:await handler(...args)};}
     catch(error){return {ok:false,error:name==='sync'?error.message:'The operation could not finish. Check again or contact your administrator.'};}
   });
   let closing=false;

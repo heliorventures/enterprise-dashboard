@@ -5,19 +5,20 @@ function validateSelection(ids,companies) {
   return [...ids];
 }
 function pendingSummary(state) {
-  const box=path.join(state,'source-outbox'),companies=[];let count=0,damaged=0;
+  const box=path.join(state,'source-outbox'),companies=[];let count=0,damaged=0,held=0;
   if(!fs.existsSync(box))return {count,damaged,companies};
   for(const id of fs.readdirSync(box)) {
     if(!/^[a-f0-9-]{36}$/.test(id))continue;
     const file=path.join(box,id,'manifest.json');
     if(!fs.existsSync(file))continue;
+    if(fs.existsSync(path.join(box,id,'held.json'))){held++;continue;}
     try {
       const m=JSON.parse(fs.readFileSync(file,'utf8'));
       if(typeof m.company?.externalId!=='string'||typeof m.company?.name!=='string')throw new Error('Invalid manifest');
       count++;companies.push({externalId:m.company.externalId,name:m.company.name});
     } catch {damaged++;}
   }
-  return {count,damaged,companies};
+  return {count,damaged,companies,...(held?{held}:{})};
 }
 function readHistory(state) {
   try {const value=JSON.parse(fs.readFileSync(path.join(state,'history.json'),'utf8'));return Array.isArray(value)?value.slice(-50):[];}

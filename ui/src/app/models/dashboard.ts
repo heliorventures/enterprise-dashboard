@@ -53,6 +53,7 @@ export interface CompanyOption {
 }
 
 export interface CompanyFinancial {
+  historyCoverage?: {kind:'full'|'periods';periods?: {from:string;to:string}[]} | null;
   id: string;
   name: string;
   revenue: number;
@@ -92,6 +93,7 @@ export interface BankAccount {
 }
 
 export interface CompanyFunds {
+  financialDataAvailable?: boolean;
   id: string;
   name: string;
   bank: number;
@@ -100,17 +102,18 @@ export interface CompanyFunds {
   receivables: number;
   payables: number;
   uncommitted: number;
-  lastMonthExpenses: number;
-  lastMonthInflow?: number;
+  lastMonthExpenses: number | null;
+  lastMonthInflow?: number | null;
   lastMonthEstimated?: boolean;
   lastMonthVouchers?: number;
-  nextMonthNeed: number;
-  nextMonthFund: number;
+  nextMonthNeed: number | null;
+  nextMonthFund: number | null;
   tone: 'ok' | 'watch' | 'risk';
   note: string;
 }
 
 export interface FundsOverview {
+  financialDataAvailable?: boolean;
   asOf: string;
   bank: number;
   cash: number;
@@ -118,15 +121,19 @@ export interface FundsOverview {
   receivables: number;
   payables: number;
   uncommitted: number;
-  lastMonth: FundMonth;
+  lastMonth: Omit<FundMonth, 'expenses' | 'inflow' | 'net'> & {
+    expenses: number | null;
+    inflow: number | null;
+    net?: number | null;
+  };
   runRate: {
-    monthlyExpense: number;
-    monthlyInflow: number;
-    method: 'vouchers' | 'ledgers';
+    monthlyExpense: number | null;
+    monthlyInflow: number | null;
+    method: 'vouchers' | 'ledgers' | 'unavailable';
     monthsUsed: number;
   };
-  threeMonthBudget: number;
-  afterThreeMonths: number;
+  threeMonthBudget: number | null;
+  afterThreeMonths: number | null;
   runwayMonths: number | null;
   forecast: FundMonth[];
   history: FundMonth[];

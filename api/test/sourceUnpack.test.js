@@ -116,6 +116,36 @@ test('invalid complete archive cannot mutate reporting data even when previously
   } finally { db.query = original; }
 });
 
+test('publishing never implicitly forces an old ingestion receipt into the current model', async () => {
+  const ingest = require('../src/ingest');
+  const modulePath = require.resolve('../src/sourceUnpack');
+  const originalModule = require.cache[modulePath];
+  const originalQuery = db.query, originalIngest = ingest.ingestSnapshot;
+  const options = [];
+  try {
+    ingest.ingestSnapshot = async (_input, opts) => { options.push(opts); return { ok: true }; };
+    delete require.cache[modulePath];
+    const publishing = require('../src/sourceUnpack');
+    db.query = async sql => {
+      if (sql.includes('FROM tally_source_snapshots')) return { rows: [{ batch_id: 'saved',
+        company_external_id: 'company', company_name: 'Company', captured_at: '2026-09-15T00:00:00Z', coverage_status: 'complete' }] };
+      if (sql.includes('FROM tally_source_records')) return { rows: [{ collection: 'LEDGER', ordinal: 0,
+        payload: ledger('Bank', 'Bank Accounts', '10') }] };
+      if (sql.includes('FROM tally_ingestions')) return { rows: [{ company_id: 1 }] };
+      if (sql.includes('FROM finance_snapshots') || sql.includes('INSERT INTO source_validation_issues')) return { rows: [] };
+      throw new Error('Unexpected query');
+    };
+    await publishing.unpackBatch('saved');
+    assert.equal(options[0].force, false);
+    await publishing.unpackBatch('saved', { force: true });
+    assert.equal(options[1].force, true);
+  } finally {
+    db.query = originalQuery;
+    ingest.ingestSnapshot = originalIngest;
+    require.cache[modulePath] = originalModule;
+  }
+});
+
 test('unpack writes latest complete source records into dashboard tables', {
   skip: process.env.DB_NAME !== 'enterprise_dashboard_test',
 }, async () => {

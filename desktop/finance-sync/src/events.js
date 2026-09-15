@@ -2,6 +2,12 @@ function explainError(error={}) {
   const diagnostic=error.exportDiagnostic||error.diagnostic||{};
   const codes=[error.code,...(diagnostic.errorCodes||[])];
   const message=String(error.message||error.error||'');
+  if(message.includes('PERIOD_CAPTURE_STALE'))return 'Finance already has newer data. This old capture is retained for investigation. Click Sync now again to take a fresh capture.';
+  if(message.includes('PERIOD_BASELINE_REQUIRED'))return 'Run All data once for this company and resolve any Finance processing errors before using a shorter period.';
+  if(message.includes('PERIOD_API_UPGRADE_REQUIRED'))return 'Finance needs a server update before period sync is available. Contact your administrator.';
+  if(message.includes('PERIOD_VOUCHER_')||message.includes('BATCH_VOUCHER_'))return 'Tally returned a voucher with a missing identity or a date outside the requested window. Export the diagnostic log for your administrator.';
+  if(message.includes('Finance processing was not validated'))return 'Finance processing was not validated. Review Finance sync results before continuing.';
+  if(message.includes('Tally changed during'))return 'Tally data changed during extraction. Try again when company data is stable.';
   if(error.code==='NO_COMPANIES'||message.includes('No source companies'))return 'No company is available. Load your companies and complete their login in Tally, then check again.';
   if(message.includes('selected company'))return 'A selected company is no longer available. Load it in Tally, then check again.';
   if(/API .*HTTP (401|403)/.test(message))return 'Upload credentials were rejected. Contact your administrator for an updated Finance Sync installer.';
@@ -18,7 +24,7 @@ function explainError(error={}) {
 }
 function publicEvent(event) {
   const result={};
-  for(const key of ['event','at','runId','company','companyExternalId','collection','batchId','count','records','bytesReceived','recordsReceived','durationMs','chunkCount','chunksAcknowledged','succeeded','failed','cancelled','coverageStatus','reportingStatus','consistency','attempt']) {
+  for(const key of ['event','at','runId','company','companyExternalId','collection','batchId','count','records','bytesReceived','recordsReceived','durationMs','chunkCount','chunksAcknowledged','succeeded','failed','cancelled','coverageStatus','reportingStatus','periodUpdate','consistency','attempt','from','to']) {
     if(['string','number','boolean'].includes(typeof event[key]))result[key]=typeof event[key]==='string'?event[key].slice(0,2000):event[key];
   }
   if(event.error||event.event==='tally_export_failed')result.message=explainError({...event,diagnostic:event.diagnostic||event});

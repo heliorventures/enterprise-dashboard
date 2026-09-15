@@ -1,5 +1,7 @@
 const {TallySourceParser}=require('./tally-source-parser');
 const {exportXml,xmlCode,xmlReference}=require('./export-diagnostics');
+const {setTimeout:delay}=require('node:timers/promises');
+const {calendarDate,dateWindows}=require('./scope');
 const escape=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
 const CATALOG=Object.freeze({COMPANY:'Company',GROUP:'Group',LEDGER:'Ledger',VOUCHERTYPE:'Voucher Type',
   CURRENCY:'Currency',COSTCATEGORY:'Cost Category',COSTCENTRE:'Cost Centre',STOCKGROUP:'Stock Group',
@@ -25,11 +27,17 @@ function nativeMethods(collection) {
   if(collection==='VOUCHER') return '<NATIVEMETHOD>Amount</NATIVEMETHOD>';
   return '';
 }
-function request(collection,company) {
+function request(collection,company,scope,onlyDate=false) {
   if(!Object.hasOwn(CATALOG,collection)) throw new Error('Unknown source collection');
+  if(onlyDate&&collection!=='VOUCHER')throw new Error('Date discovery requires vouchers');
+  if(scope)require('./scope').validateScope(scope);
+  const period=scope&&collection==='VOUCHER';
+  const from=period?scope.from.replaceAll('-',''):'19010101',to=period?scope.to.replaceAll('-',''):'99991231';
+  const filter=period?'<FILTER>FinancePeriodFilter</FILTER>':'';
+  const formula=period?'<SYSTEM TYPE="Formulae" NAME="FinancePeriodFilter">$Date &gt;= ##SVFromDate AND $Date &lt;= ##SVToDate</SYSTEM>':'';
   // Fetch * asks for methods and subcollections, not just dashboard fields.
   // TDL can only return methods exposed by the installed version/customization.
-  return `<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>FinanceSourceArchive</ID></HEADER><BODY><DESC><STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT><SVCURRENTCOMPANY>${escape(company)}</SVCURRENTCOMPANY><SVFROMDATE TYPE="Date">19000101</SVFROMDATE><SVTODATE TYPE="Date">99991231</SVTODATE></STATICVARIABLES><TDL><TDLMESSAGE><COLLECTION NAME="FinanceSourceArchive" ISMODIFY="No"><TYPE>${CATALOG[collection]}</TYPE><FETCH>${fetchList(collection)}</FETCH>${nativeMethods(collection)}</COLLECTION></TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>`;
+  return `<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>FinanceSourceArchive</ID></HEADER><BODY><DESC><STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT><SVCURRENTCOMPANY>${escape(company)}</SVCURRENTCOMPANY><SVFROMDATE TYPE="Date">${from}</SVFROMDATE><SVTODATE TYPE="Date">${to}</SVTODATE></STATICVARIABLES><TDL><TDLMESSAGE><COLLECTION NAME="FinanceSourceArchive" ISMODIFY="No"><TYPE>${CATALOG[collection]}</TYPE><FETCH>${onlyDate?'Date':fetchList(collection)}</FETCH>${onlyDate?'':nativeMethods(collection)}${filter}</COLLECTION>${formula}</TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>`;
 }
 // Version 1 JSON representation preserves names, attributes, text and ordered
 // child lists. It never coerces an amount/date, trims data or collapses repeats.
@@ -94,8 +102,60 @@ function field(node,name) {
   const key=Object.keys(node.attributes).find(k=>k.toUpperCase()===name);
   return key===undefined ? null : node.attributes[key];
 }
-async function extract(config,collection,company,onRecord) {
-  return exportXml(config,{collection,company,body:request(collection,company),phase:'source_capture',
+async function pause(config) {
+  config.signal?.throwIfAborted();
+  const milliseconds=config.requestPauseMs??0;
+  if(!Number.isInteger(milliseconds)||milliseconds<0||milliseconds>60000)throw new Error('Invalid requestPauseMs');
+  if(milliseconds) {
+    config.exportLog?.({event:'tally_request_pause',durationMs:milliseconds});
+    await delay(milliseconds,undefined,{signal:config.signal});
+  }
+  config.signal?.throwIfAborted();
+}
+function voucherDate(payload) {
+  const raw=field(payload,'DATE');
+  const date=typeof raw==='string'&&/^\d{8}$/.test(raw)?`${raw.slice(0,4)}-${raw.slice(4,6)}-${raw.slice(6)}`:raw;
+  if(!calendarDate(date)||date<'1901-01-01')throw new Error('BATCH_VOUCHER_DATE_INVALID');
+  return date;
+}
+async function extractOnce(config,collection,company,onRecord,onlyDate=false) {
+  await pause(config);
+  return exportXml(config,{collection,company,body:request(collection,company,config.scope,onlyDate),phase:onlyDate?'voucher_date_discovery':'source_capture',
     createParser:wrap=>parser(collection,wrap(onRecord))});
 }
-module.exports={CATALOG,request,parser,field,extract,fetchList};
+async function extract(config,collection,company,onRecord) {
+  if(config.voucherWindowDays===undefined||collection!=='VOUCHER')return extractOnce(config,collection,company,onRecord);
+  if(!Number.isInteger(config.voucherWindowDays)||config.voucherWindowDays<1||config.voucherWindowDays>7)throw new Error('Invalid voucherWindowDays');
+  let windows,bytes=0,discoveredCount=null,detailedCount=0;
+  if(!config.scope) {
+    const populated=new Map(),origin=Date.parse('1901-01-01'),end=Date.parse('9999-12-31'),width=config.voucherWindowDays*86400000;
+    discoveredCount=0;
+    // Stream only dates. Retain populated fixed buckets rather than scanning
+    // empty years between historical and future-dated vouchers.
+    bytes+=await extractOnce(config,collection,company,payload=>{
+      const date=voucherDate(payload);
+      const start=origin+Math.floor((Date.parse(date)-origin)/width)*width;
+      populated.set(start,(populated.get(start)||0)+1);
+      if(++discoveredCount>5000000)throw new Error('Source snapshot exceeds capture limits');
+    },true);
+    windows=[...populated].sort(([a],[b])=>a-b).map(([start,count])=>({kind:'period',
+      from:new Date(start).toISOString().slice(0,10),to:new Date(Math.min(end,start+width-86400000)).toISOString().slice(0,10),count}));
+  } else windows=dateWindows(config.scope,config.voucherWindowDays);
+  for(const window of windows) {
+    let windowCount=0;
+    config.signal?.throwIfAborted();
+    config.exportLog?.({event:'source_voucher_window_started',company,collection,from:window.from,to:window.to});
+    bytes+=await extractOnce({...config,scope:window},collection,company,payload=>{
+      const date=voucherDate(payload),guid=field(payload,'GUID');
+      if(date<window.from||date>window.to)throw new Error('BATCH_VOUCHER_DATE_INVALID');
+      if(typeof guid!=='string'||!guid||guid!==guid.trim()||guid.length>2000)throw new Error('BATCH_VOUCHER_GUID_REQUIRED');
+      windowCount++;detailedCount++;
+      onRecord(payload);
+    });
+    if(window.count!==undefined&&windowCount!==window.count)throw new Error('BATCH_VOUCHER_COUNT_MISMATCH');
+    config.exportLog?.({event:'source_voucher_window_finished',company,collection,from:window.from,to:window.to});
+  }
+  if(discoveredCount!==null&&detailedCount!==discoveredCount)throw new Error('BATCH_VOUCHER_COUNT_MISMATCH');
+  return bytes;
+}
+module.exports={CATALOG,request,parser,field,extract,fetchList,pause};

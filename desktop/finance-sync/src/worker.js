@@ -12,11 +12,11 @@ process.parentPort.on('message',async({data})=>{
   const send=value=>process.parentPort.postMessage(value);
   try {
     if(data.type==='check') {
-      const companies=await discoverCompanies({...config,requestTimeoutMs:10000,signal:controller.signal});
+      const companies=await discoverCompanies({...config,requestTimeoutMs:10000,signal:controller.signal,exportLog:event=>send({type:'event',event:publicEvent(event)})});
       send({type:'ready',companies:companies.map(({name,externalId})=>({name,externalId}))});
     } else if(data.type==='sync') {
       const code=await withLock({stateDirectory},()=>run(path.join(stateDirectory,'desktop.json'),false,{
-        config:{...config,stateDirectory,startup:{enabled:false}},token:config.token,selectedCompanyIds:data.selectedCompanyIds,
+        config:{...config,stateDirectory,startup:{enabled:false},uploadAttempts:1,stopOnFailure:true,requestPauseMs:500,voucherWindowDays:7,periodMode:config.scope?'replace':undefined},token:config.token,selectedCompanyIds:data.selectedCompanyIds,
         signal:controller.signal,quiet:true,onEvent:event=>send({type:'event',event:publicEvent(event)})
       }));
       send({type:'done',code});
