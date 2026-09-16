@@ -78,6 +78,13 @@ async function merge(client,m) {
   const batchId=randomUUID();
   const derived={...m,batchId,scope:undefined,kind:'cumulative',baselineBatchId:base?.batch_id||null,periodBatchId:m.batchId,period:m.scope,
     fullBaselineBatchId:base?.manifest.fullBaselineBatchId||(base&&!base.manifest.historyCoverage?base.batch_id:null),historyCoverage:historyCoverage(base,m.scope),coverageStatus:'complete'};
+  if(m.dateContext){
+    derived.captureDateContext=m.dateContext;
+    derived.dateContext={ledgers:m.dateContext.ledgers,vouchers:derived.historyCoverage.kind==='full'
+      ?{from:'1901-01-01',to:'9999-12-31'}:{periods:derived.historyCoverage.periods}};
+  }
+  // Sender checks covered the incoming capture, not this merged record set.
+  delete derived.reconciliation;
   await client.query(`INSERT INTO tally_source_snapshots(batch_id,company_external_id,company_name,captured_at,schema_version,coverage_status,manifest)
     VALUES($1,$2,$3,$4,1,'complete',$5)`,[batchId,m.company.externalId,m.company.name,m.capturedAt,JSON.stringify(derived)]);
   // Current masters use full-date context. Replacement removes missing vouchers
@@ -93,7 +100,8 @@ async function merge(client,m) {
         SELECT 1 FROM tally_source_records n WHERE n.batch_id=$2 AND n.collection='VOUCHER' AND n.source_id=b.source_id)
     ) records`,[batchId,m.batchId,base?.batch_id||null,replace]);
   const counts=(await client.query('SELECT collection,count(*)::int AS count FROM tally_source_records WHERE batch_id=$1 GROUP BY collection',[batchId])).rows;
-  derived.collections=m.collections.map(c=>({...c,count:counts.find(r=>r.collection===c.name)?.count||0}));
+  derived.collections=m.collections.map(c=>{const coverage={...c,count:counts.find(r=>r.collection===c.name)?.count||0};
+    if(c.name==='VOUCHER')delete coverage.readiness;return coverage;});
   derived.recordCount=derived.collections.reduce((sum,c)=>sum+c.count,0);
   // A derived archive is not an uploaded chunk set.
   delete derived.chunkCount;

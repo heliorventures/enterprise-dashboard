@@ -58,7 +58,8 @@ function parseXml(type, onRecord) {
   parser.on('closetag', () => {
     const node = stack.pop();
     if (['LINEERROR','ERROR'].includes(node.name) || (node.name === 'STATUS' && node.text.trim() === '0') ||
-        (node.name === 'ERRORS' && node.text.trim() !== '' && node.text.trim() !== '0')) throw new Error('Tally reported an export error');
+        (node.name === 'ERRORS' && node.text.trim() !== '' && node.text.trim() !== '0')) throw Object.assign(new Error('Tally reported an export error'),
+          {code:'TALLY_SOURCE_ERROR',tallyMessage:require('./export-diagnostics').safeText(node.text),xmlDiagnostic:{...diagnostics(),xmlPath:'/'+[...stack.map(n=>n.name),node.name].join('/')}});
     if (recordDepth === stack.length) {
       onRecord(node.value);
       recordDepth = -1;

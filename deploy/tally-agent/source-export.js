@@ -9,10 +9,12 @@ const CATALOG=Object.freeze({COMPANY:'Company',GROUP:'Group',LEDGER:'Ledger',VOU
 function fetchList(collection) {
   // Fetch * returns empty tax/date methods and skips calculated Amount plus
   // AllLedgerEntries. Ask for those methods by name on ledgers and vouchers.
-  if(collection==='LEDGER') return 'Name,Parent,OpeningBalance,ClosingBalance,*';
+  if(collection==='COMPANY') return 'Name,GUID,CurrencyName,BaseCurrencyName,BooksFrom,StartingFrom,LastAlterID,LastVchID,*';
+  if(collection==='LEDGER') return 'Name,Parent,OpeningBalance,ClosingBalance,CurrencyName,IsBillWiseOn,BillCreditPeriod,BillAllocations.Name,BillAllocations.BillDate,BillAllocations.OpeningBalance,BillAllocations.BillCreditPeriod,*';
   if(collection==='VOUCHER') {
     const fields=['Date','VoucherTypeName','VoucherNumber','Narration','PartyLedgerName','Amount','MasterID','GUID','IsCancelled','IsOptional'];
     for(const entries of ['AllLedgerEntries','LedgerEntries']) {
+      for(const method of ['Name','BillType','Amount','BillCreditPeriod']) fields.push(`${entries}.BillAllocations.${method}`);
       for(const method of ['LedgerName','Amount','IsDeemedPositive','CategoryAllocations.Category','CategoryAllocations.CostCentreAllocations.Name','CategoryAllocations.CostCentreAllocations.Amount','CostCentreAllocations.Name','CostCentreAllocations.Amount']) fields.push(`${entries}.${method}`);
     }
     for(const entries of ['AllInventoryEntries','InventoryEntries']) {
@@ -78,15 +80,18 @@ function parser(collection,onRecord) {
       if(typeof node.content[last]==='string') node.content[last]+=text;
       else node.content.push(text);
     } else if(['STATUS','LINEERROR','ERROR','ERRORS'].includes(node.name)) {
-      // Do not retain/log arbitrary server error contents.
-      node.text=(node.text+text).slice(0,1000);
+      // Only server error elements outside business records are diagnostics.
+      node.text=(node.text+text).slice(0,2000);
     }
   };
   xml.on('text',add);xml.on('cdata',add);
   xml.on('closetag',()=>{
     const node=stack.pop();
     if(recordDepth<0&&(['LINEERROR','ERROR'].includes(node.name)||(node.name==='STATUS'&&node.text.trim()==='0')||
-      (node.name==='ERRORS'&&node.text.trim()!==''&&node.text.trim()!=='0'))) reject('Tally reported a source export error');
+      (node.name==='ERRORS'&&node.text.trim()!==''&&node.text.trim()!=='0'))) {
+      throw Object.assign(new Error('Tally reported a source export error'),{code:'TALLY_SOURCE_ERROR',
+        tallyMessage:require('./export-diagnostics').safeText(node.text),xmlDiagnostic:{...diagnostics(),xmlPath:'/'+[...stack.map(n=>n.name),node.name].join('/')}});
+    }
     if(recordDepth>=0) {
       const value={tag:node.tag,attributes:node.attributes,content:node.content};
       if(recordDepth===stack.length) {onRecord(value);recordDepth=-1;}

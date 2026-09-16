@@ -11,6 +11,19 @@ describe('Source cursor navigation', () => {
       providers: [provideRouter([]), provideHttpClient(), provideHttpClientTesting()],
     }),
   );
+  it('shows saved failure details and filters by batch without rendering error text as HTML',()=>{
+    const fixture=TestBed.createComponent(SourceBrowser);
+    fixture.componentRef.setInput('mode','diagnostics');fixture.componentRef.setInput('title','Export diagnostics');
+    fixture.detectChanges();
+    TestBed.inject(HttpTestingController).expectOne(r=>r.url==='/api/tally/diagnostics').flush({items:[{
+      id:'error-1',company_name:'Company',occurred_at:'2026-09-15T10:00:00Z',batch_id:null,event:'source_collection_failed',collection:'VOUCHER',severity:'error',
+      message:'<img src=x onerror=alert(1)>',details:{stage:'parse',xmlPath:'/ENVELOPE/LINEERROR',xmlLine:4,xmlColumn:8,tallyMessage:'Unknown collection',action:'Review collection',errorCodes:['TALLY_SOURCE_ERROR'],from:'2026-09-01',to:'2026-09-07'},
+    }],total:1,page:1,pageSize:25});
+    fixture.detectChanges();
+    const content=fixture.nativeElement.textContent;
+    expect(content).toContain('Unknown collection');expect(content).toContain('line 4');expect(content).toContain('2026-09-07');
+    expect(content).toContain('not created');expect(fixture.nativeElement.querySelector('img')).toBeNull();
+  });
   it('uses server cursors for Next and Previous and recovers from a replaced snapshot', async () => {
     const router = TestBed.inject(Router),
       http = TestBed.inject(HttpTestingController);

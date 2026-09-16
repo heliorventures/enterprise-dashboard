@@ -199,9 +199,12 @@ async function execute(runId, { force = false } = {}) {
           ]
         );
       } catch (error) {
+        let diagnosticId;
+        try {diagnosticId=await require('./sourceDiagnostics').recordApiFailure(error,{operation:'reporting/publish',body:{batchId:item.batch_id}});}
+        catch(diagnosticError){console.error('Reporting diagnostic persistence failed:',diagnosticError.code||diagnosticError.name);}
         await db.query(
           `UPDATE source_sync_items SET status = 'error', finished_at = now(), message = $2 WHERE item_id = $1`,
-          [item.item_id, error.message.slice(0, 1000)]
+          [item.item_id, `${error.message.slice(0, 850)}${diagnosticId?' Diagnostic: '+diagnosticId:''}`]
         );
       }
       done += 1;
@@ -261,6 +264,7 @@ async function recordBatch(batchId, { triggeredBy = 'source-complete' } = {}) {
     duplicate: item?.status === 'skipped',
     batchId,
     companyName: snapshot.company_name,
+    ...(item?.status==='error'?{error:item.message}:{}),
     run,
   };
 }

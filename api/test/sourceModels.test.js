@@ -23,6 +23,11 @@ const row = (collection, fields, content = [], ordinal = 0) => ({
   payload: node(collection, fields, content),
 });
 const adapters = { ...unpack, voucherKey: uniqueVoucherKey };
+test('company base currency is used without inventing a default',()=>{
+  const model=buildProjection([row('COMPANY',{BASECURRENCYNAME:'INR',BOOKSFROM:'20260401',STARTINGFROM:'20260401'})],adapters);
+  assert.equal(model.company.currency,'INR');assert.equal(model.company.books_from,'2026-04-01');
+  assert.equal(buildProjection([row('COMPANY',{})],adapters).company.currency,null);
+});
 test('empty exported lists do not create inventory or hide populated alternative lists', () => {
   const rows = fixture();
   const voucher = rows.at(-1).payload;

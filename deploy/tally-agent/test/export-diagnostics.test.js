@@ -60,3 +60,12 @@ test('discovery uses diagnostics and differentiates HTTP, decode, and record pro
     const e=events.find(e=>e.event==='tally_export_failed');assert.equal(e.stage,'record_handler');assert.equal(e.recordsReceived,1);assert.equal(e.recordsProcessed,0);
   });
 });
+test('Tally server error reason and date window survive without logging credentials',async()=>{
+  await scenario(async()=>new Response('<ENVELOPE><BODY><DATA><LINEERROR>Unknown collection FinanceSourceArchive token=private</LINEERROR></DATA></BODY></ENVELOPE>'),async(config,events)=>{
+    await assert.rejects(()=>source.extract({...config,scope:{kind:'period',from:'2026-09-01',to:'2026-09-07'}},'VOUCHER','Company',()=>{}));
+    const failure=events.find(e=>e.event==='tally_export_failed');
+    assert.match(failure.tallyMessage,/Unknown collection FinanceSourceArchive/);
+    assert.ok(!failure.tallyMessage.includes('private'));
+    assert.equal(failure.from,'2026-09-01');assert.match(failure.xmlPath,/LINEERROR$/);assert.match(failure.requestHash,/^[a-f0-9]{64}$/);
+  });
+});

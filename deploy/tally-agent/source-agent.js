@@ -7,6 +7,9 @@ const tally=require('./tally');
 const {ensureTally}=require('./startup');
 const {saveJson,deliver}=require('./outbox');
 const {validateScope,calendarDate}=require('./scope');
+const {readiness,reconciliation}=require('./source-readiness');
+const {diagnosticQueue,exporterIdentity}=require('./diagnostic-outbox');
+const {safeText,codes}=require('./export-diagnostics');
 
 async function preflight(config,token,company) {
   const replacement=config.periodMode==='replace';
@@ -14,7 +17,9 @@ async function preflight(config,token,company) {
     method:'POST',redirect:'error',headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`},
     body:JSON.stringify({companyExternalId:company.externalId}),
     signal:config.signal?AbortSignal.any([config.signal,AbortSignal.timeout(config.requestTimeoutMs)]):AbortSignal.timeout(config.requestTimeoutMs)});
-  if(response.status!==200){await response.body?.cancel();throw new Error(response.status===409?'PERIOD_BASELINE_REQUIRED':response.status===404?'PERIOD_API_UPGRADE_REQUIRED':`API preflight: HTTP ${response.status}`);}
+  if(response.status!==200){const detail=await response.json().catch(()=>null);
+    throw Object.assign(new Error(response.status===409?'PERIOD_BASELINE_REQUIRED':response.status===404?'PERIOD_API_UPGRADE_REQUIRED':`API preflight: HTTP ${response.status}`),
+      {exportDiagnostic:{stage:'preflight',httpStatus:response.status,action:safeText(detail?.error||'Verify the server and baseline before retrying this period.'),...(detail?.diagnosticId?{serverDiagnosticId:detail.diagnosticId}:{})}});}
   const result=await response.json();
   if(result.ok!==true||result.companyExternalId!==company.externalId||(replacement?result.periodMode!=='replace':typeof result.baselineBatchId!=='string'))throw new Error('Invalid period preflight acknowledgement');
 }
@@ -48,14 +53,19 @@ function identity(row) {
   return typeof value==='string'&&value.length<=2000 ? value : null;
 }
 async function capture(config,company,directory,log) {
+  const originalLog=log;
+  log=fields=>originalLog({batchId:path.basename(directory),companyExternalId:company.externalId,...fields,company:fields.company||company.name});
+  config={...config,exportLog:log};
   if(config.scope)config.scope=validateScope(config.scope);
   fs.mkdirSync(directory,{recursive:true,mode:0o700});
   const capturedAt=new Date().toISOString(),collections=[];
+  const reconcile=reconciliation(config.scope);
   let storedBytes=0;
   for(const collection of Object.keys(source.CATALOG)) {
     config.signal?.throwIfAborted();
     const file=path.join(directory,`${collection}.jsonl`);
     let count=0,sourceBytes=0;
+    const check=readiness(collection);
     let buffered=[],bufferedBytes=0;
     const flush=()=>{if(buffered.length)fs.appendFileSync(file,buffered.join(''));buffered=[];bufferedBytes=0;};
     const collectionStarted=Date.now();
@@ -74,6 +84,8 @@ async function capture(config,company,directory,log) {
           if(!guid||guid!==guid.trim())throw new Error('PERIOD_VOUCHER_GUID_REQUIRED');
         }
         const row={collection,ordinal:count,sourceId:identity(payload),payload};
+        check.add(payload,count);
+        reconcile.add(collection,payload,count);
         const line=JSON.stringify(row)+'\n';
         storedBytes+=Buffer.byteLength(line);
         if(storedBytes>500*1024**2||count>=5000000) throw new Error('Source snapshot exceeds capture limits');
@@ -81,13 +93,18 @@ async function capture(config,company,directory,log) {
       });
       flush();
       if(collection==='COMPANY'&&count!==1) throw new Error('Selected source company was not returned exactly once');
-      collections.push({name:collection,status:'success',count});
+      const health=check.result();
+      collections.push({name:collection,status:'success',count,readiness:health});
+      if(health.status!=='ready')log({event:health.errorCount?'source_readiness_failed':'source_readiness_warning',company:company.name,collection,
+        error:`${health.errorCount} financial errors, ${health.warningCount} warnings. ${health.issues.map(i=>`${i.code} at #${i.ordinal}.${i.field}`).join('; ')}`,
+        errorCount:health.errorCount,warningCount:health.warningCount,issues:health.issues});
       log({event:'source_collection_finished',company:company.name,collection,count,sourceBytes,durationMs:Date.now()-collectionStarted});
     } catch(error) {
       // Never label the prefix of a truncated/failed collection as complete.
       fs.unlinkSync(file);
       config.signal?.throwIfAborted();
-      collections.push({name:collection,status:'failed',count:0});
+      collections.push({name:collection,status:'failed',count:0,diagnostic:{...error.exportDiagnostic,
+        errorCodes:codes(error),discardedRecords:count,action:error.exportDiagnostic?.action||safeText(error.message)}});
       log({event:'source_collection_failed',company:company.name,collection,error:error.message,
         discardedRecords:count,durationMs:Date.now()-collectionStarted,diagnostic:error.exportDiagnostic||null});
       if(config.stopOnFailure||config.voucherWindowDays!==undefined)throw error;
@@ -106,9 +123,14 @@ async function capture(config,company,directory,log) {
   log({event:'source_consistency_finished',company:company.name,consistency});
   if(consistency==='changed'&&(config.stopOnFailure||config.scope||config.voucherWindowDays!==undefined))throw new Error('Tally changed during the export. Try again when company data is stable.');
   const stats=await pack(directory,collections);
+  const reconciliationResult=reconcile.result(collections.every(c=>c.status==='success')&&consistency!=='changed');
+  if(reconciliationResult.warningCount)log({event:'source_readiness_warning',company:company.name,collection:'LEDGER',
+    error:`Ledger reconciliation: ${reconciliationResult.warningCount} warnings. ${reconciliationResult.issues[0].message}`,...reconciliationResult});
   config.signal?.throwIfAborted();
   const manifest={batchId:path.basename(directory),capturedAt,company:{name:company.name,externalId:company.externalId},
-    schemaVersion:1,profile:'company-business-v1',collections,consistency,...stats,...(config.scope?{scope:config.scope,...(config.periodMode==='replace'?{periodMode:'replace'}:{})}:{})};
+    schemaVersion:1,profile:'company-business-v1',exporter:exporterIdentity(),collections,consistency,reconciliation:reconciliationResult,
+    dateContext:{ledgers:{from:'1901-01-01',to:'9999-12-31'},vouchers:{from:config.scope?.from||'1901-01-01',to:config.scope?.to||'9999-12-31'}},
+    ...stats,...(config.scope?{scope:config.scope,...(config.periodMode==='replace'?{periodMode:'replace'}:{})}:{})};
   saveJson(path.join(directory,'manifest.json'),manifest);
   // The durable transfer chunks now contain the full JSON records.
   for(const c of collections.filter(c=>c.status==='success')) fs.unlinkSync(path.join(directory,`${c.name}.jsonl`));
@@ -141,15 +163,22 @@ async function run(configFile,dryRun=false,options={}) {
   const runId=randomUUID(),started=Date.now();
   const logFile=path.join(logs,`${new Date().toISOString().replace(/[:.]/g,'-')}-${runId}.jsonl`);
   const failedCollections=[];
+  let queue;
   const log=fields=>{
     if(fields.event==='source_collection_failed')failedCollections.push({company:fields.company,collection:fields.collection,
       error:fields.error,errorCodes:fields.diagnostic?.errorCodes||[],requestId:fields.diagnostic?.requestId||null});
     const event={at:new Date().toISOString(),runId,...fields};
+    if(queue)try {queue.add(event);}catch(error){
+      // Disk failure must be visible; do not mask the original export failure.
+      fs.appendFileSync(logFile,JSON.stringify({at:event.at,runId,event:'diagnostics_local_save_failed',error:safeText(error.message)})+'\n',{mode:0o600});
+    }
     const line=JSON.stringify(event);fs.appendFileSync(logFile,line+'\n',{mode:0o600});
     if(!options.quiet)console.log(line);
     options.onEvent?.(event);
   };
   config.exportLog=log;
+  if(!dryRun)queue=diagnosticQueue(path.join(state,'diagnostics-outbox'),config,log);
+  let token='';
   let succeeded=0,failed=0,recordCount=0;
   log({event:'run_started',mode:'source',dryRun,scope:config.scope||{kind:'full'}});
   try {
@@ -157,9 +186,10 @@ async function run(configFile,dryRun=false,options={}) {
     if(!Number.isInteger(retention)||retention<1) throw new Error('Invalid logRetentionDays');
     for(const file of fs.readdirSync(logs)) if(/^[\dTZ-]+-[a-f0-9-]+\.jsonl$/.test(file)&&fs.statSync(path.join(logs,file)).mtimeMs<Date.now()-retention*86400000) fs.unlinkSync(path.join(logs,file));
     config.signal?.throwIfAborted();
-    const token=dryRun ? '' : options.token!==undefined?options.token:config.tokenEnvironmentVariable ? (process.env[config.tokenEnvironmentVariable]||'').trim()
+    token=dryRun ? '' : options.token!==undefined?options.token:config.tokenEnvironmentVariable ? (process.env[config.tokenEnvironmentVariable]||'').trim()
       : fs.readFileSync(path.resolve(base,config.tokenFile||'token.txt'),'utf8').trim();
     if(!dryRun&&(token.length<32||/[\r\n]/.test(token))) throw new Error('Token file must contain TALLY_INGEST_TOKEN');
+    await queue?.flush(token);
     const seen=new Set();
     // Interactive runs must revalidate selected identities before any delivery.
     // CLI runs retain their established outbox-first behavior.
@@ -176,11 +206,12 @@ async function run(configFile,dryRun=false,options={}) {
         const accepted=(result.coverageStatus==='complete'||result.periodUpdate)&&(!config.stopOnFailure||result.reportingStatus==='validated');
         if(accepted)succeeded++;else if(!config.stopOnFailure)failed++;
         log({event:'source_snapshot_saved',companyExternalId:m.company.externalId,company:m.company.name,batchId:m.batchId,records:m.recordCount,...result});
-        if(config.stopOnFailure&&result.reportingStatus!=='validated')throw new Error('Finance processing was not validated. Review the Finance sync results before continuing.');
+        if(config.stopOnFailure&&result.reportingStatus!=='validated')throw Object.assign(new Error('Finance processing was not validated. '+(result.reportingError||'Review the Finance sync results before continuing.')),
+          {uploadDiagnostic:{stage:'reporting',serverDiagnosticId:result.serverDiagnosticId}});
       } catch(error) {
         config.signal?.throwIfAborted();
         if(error.code==='PERIOD_CAPTURE_STALE')saveJson(path.join(directory,'held.json'),{reason:error.code,at:new Date().toISOString()});
-        failed++;error.failureRecorded=true;log({event:'source_upload_failed',companyExternalId:m.company.externalId,company:m.company.name,batchId:m.batchId,error:error.message});if(config.stopOnFailure)throw error;
+        failed++;error.failureRecorded=true;log({event:'source_upload_failed',companyExternalId:m.company.externalId,company:m.company.name,batchId:m.batchId,error:safeText(error.message),diagnostic:error.uploadDiagnostic||{errorCodes:codes(error)}});if(config.stopOnFailure)throw error;
       }
     }
     if(!dryRun) for(const id of fs.readdirSync(outbox).sort()) {
@@ -209,19 +240,21 @@ async function run(configFile,dryRun=false,options={}) {
         const m=await capture(config,company,directory,fields=>log({companyExternalId:company.externalId,...fields}));
         if(dryRun) {
           const complete=m.collections.every(c=>c.status==='success')&&m.consistency!=='changed';
-          if(complete)succeeded++;else failed++;
+          const ready=m.collections.every(c=>!c.readiness?.errorCount);
+          if(complete&&ready)succeeded++;else failed++;
           recordCount+=m.recordCount;
-          log({event:'source_preview',company:company.name,directory,records:m.recordCount,coverageStatus:complete?'complete':'partial',consistency:m.consistency});
+          log({event:'source_preview',company:company.name,directory,records:m.recordCount,coverageStatus:complete?'complete':'partial',readiness:ready?'ready':'blocked',consistency:m.consistency});
         } else await send(directory,m);
       } catch(error) {
         if(fs.existsSync(directory)&&!fs.existsSync(path.join(directory,'manifest.json'))) fs.rmSync(directory,{recursive:true});
         config.signal?.throwIfAborted();
-        if(!error.failureRecorded){failed++;log({event:'source_capture_failed',companyExternalId:company.externalId,company:company.name,error:error.message});error.failureRecorded=true;}
+        if(!error.failureRecorded){failed++;log({event:'source_capture_failed',companyExternalId:company.externalId,company:company.name,batchId:path.basename(directory),error:safeText(error.message),diagnostic:error.exportDiagnostic||{errorCodes:codes(error)}});error.failureRecorded=true;}
         if(config.stopOnFailure)throw error;
       }
+      await queue?.flush(token);
     }
   } catch(error) {if(!error.failureRecorded)failed++;log({event:config.signal?.aborted?'run_cancelled':'run_failure',error:config.signal?.aborted?'Sync stopped. Completed captures remain available for retry.':error.message,diagnostic:error.exportDiagnostic||null});}
-  finally {log({event:'run_finished',mode:'source',dryRun,cancelled:config.signal?.aborted===true,succeeded,failed,records:recordCount,failedCollections,durationMs:Date.now()-started});}
+  finally {await queue?.flush(token);log({event:'run_finished',mode:'source',dryRun,cancelled:config.signal?.aborted===true,succeeded,failed,records:recordCount,failedCollections,durationMs:Date.now()-started});}
   return failed?1:0;
 }
 module.exports={run,capture,pack,discoverCompanies};

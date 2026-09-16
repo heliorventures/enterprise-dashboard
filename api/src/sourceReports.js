@@ -101,7 +101,8 @@ async function archives(query = {}, client) {
     await client.query(`SELECT count(*)::int count ${where}`, [id])
   ).rows[0].count;
   const rows = await client.query(
-    `SELECT s.batch_id id,s.company_name,s.captured_at,s.received_at,s.coverage_status,s.manifest->'collections' collections,
+    `SELECT s.batch_id id,s.company_name,s.captured_at,s.received_at,s.coverage_status,s.manifest->'collections' collections,s.manifest->'exporter' exporter,
+    (SELECT count(*)::int FROM tally_diagnostics d WHERE d.batch_id=s.batch_id) diagnostic_count,
     (SELECT i.status FROM source_sync_items i WHERE i.batch_id=s.batch_id ORDER BY i.item_id DESC LIMIT 1) sync_status,
     (SELECT count(*)::int FROM source_validation_issues i WHERE i.batch_id=s.batch_id) issue_count
     ${where} ORDER BY s.received_at DESC,s.batch_id DESC LIMIT $2 OFFSET $3`,

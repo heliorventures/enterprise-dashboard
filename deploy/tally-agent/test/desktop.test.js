@@ -8,10 +8,11 @@ const {deliver}=require('../outbox');
 const {withLock}=require('../launcher');
 const envelope=rows=>`<ENVELOPE><BODY><DATA><COLLECTION>${rows}</COLLECTION></DATA></BODY></ENVELOPE>`;
 const company=(id,name)=>`<COMPANY NAME="${name}"><NAME>${name}</NAME><GUID>${id}</GUID></COMPANY>`;
+const diagnostics=(url,options)=>String(url).endsWith('/diagnostics')?new Response(JSON.stringify({ok:true,ids:JSON.parse(options.body).events.map(e=>e.id)})):null;
 
 test('desktop failure stops at the first collection without contacting another company or uploading',async()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'finance-fail-fast-')),original=global.fetch,calls=[];
-  global.fetch=async(url,options)=>{calls.push(options.body);if(String(url).startsWith('https:'))throw new Error('Unexpected upload');if(options.body.includes('<TYPE>Group</TYPE>'))throw new Error('Synthetic busy Tally');return new Response(envelope(company('a','Alpha')+company('b','Beta')));};
+  global.fetch=async(url,options)=>{const ack=diagnostics(url,options);if(ack)return ack;calls.push(options.body);if(String(url).startsWith('https:'))throw new Error('Unexpected upload');if(options.body.includes('<TYPE>Group</TYPE>'))throw new Error('Synthetic busy Tally');return new Response(envelope(company('a','Alpha')+company('b','Beta')));};
   try {
     const result=await run(path.join(dir,'unused.json'),false,{config:{apiUrl:'https://example.invalid',tallyUrl:'http://localhost:9000',stopOnFailure:true},token:'x'.repeat(40),selectedCompanyIds:['a','b'],quiet:true});
     assert.equal(result,1);assert.equal(calls.length,3);
@@ -21,7 +22,7 @@ test('desktop failure stops at the first collection without contacting another c
 
 test('period baseline check fails before any collection export and never retries',async()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'finance-period-preflight-')),original=global.fetch,calls=[];
-  global.fetch=async(url)=>{calls.push(String(url));return String(url).startsWith('https:')?new Response('{}',{status:409}):new Response(envelope(company('a','Alpha')));};
+  global.fetch=async(url,options)=>{const ack=diagnostics(url,options);if(ack)return ack;calls.push(String(url));return String(url).startsWith('https:')?new Response('{}',{status:409}):new Response(envelope(company('a','Alpha')));};
   try {
     const events=[];
     assert.equal(await run(path.join(dir,'unused.json'),false,{config:{apiUrl:'https://example.invalid',tallyUrl:'http://localhost:9000',stopOnFailure:true,scope:{kind:'period',from:'2026-09-01',to:'2026-09-15'}},token:'x'.repeat(40),selectedCompanyIds:['a'],quiet:true,onEvent:e=>events.push(e)}),1);
@@ -68,6 +69,7 @@ test('desktop selection excludes unchecked companies from capture and durable re
     assert.deepEqual(events.filter(e=>e.event==='source_preview').map(e=>e.company),['Alpha']);
     // Live run retries only the selected Alpha capture, never pending Beta.
     global.fetch=async(url,options)=>{
+      const ack=diagnostics(url,options);if(ack)return ack;
       if(String(url).startsWith('https:')) {
         const body=JSON.parse(options.body);uploads.push(body);
         return {status:401};
@@ -83,7 +85,7 @@ test('desktop selection excludes unchecked companies from capture and durable re
 test('empty selection and disappeared selected GUID fail before uploads',async()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'finance-desktop-missing-'));
   const original=global.fetch;let uploads=0;
-  global.fetch=async(url)=>{if(String(url).startsWith('https:'))uploads++;return new Response(envelope(company('b','Beta')));};
+  global.fetch=async(url,options)=>{const ack=diagnostics(url,options);if(ack)return ack;if(String(url).startsWith('https:'))uploads++;return new Response(envelope(company('b','Beta')));};
   const options={config:{apiUrl:'https://example.invalid',tallyUrl:'http://localhost:9000'},token:'x'.repeat(40),quiet:true};
   try {
     await assert.rejects(()=>run(path.join(dir,'unused.json'),false,{...options,selectedCompanyIds:[]}),/select|selection/i);
@@ -98,6 +100,7 @@ test('cancellation during extraction never uploads a partial cancelled snapshot'
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'finance-desktop-stop-'));
   const original=global.fetch,controller=new AbortController();let uploads=0;
   global.fetch=async(url,options)=>{
+    const ack=diagnostics(url,options);if(ack)return ack;
     if(String(url).startsWith('https:'))uploads++;
     if(options.body.includes('<TYPE>Ledger</TYPE>'))controller.abort();
     return new Response(envelope(options.body.includes('<TYPE>Company</TYPE>')||options.body.includes('<ID>FinanceAgent</ID>')?company('a','Alpha'):''));

@@ -2,6 +2,7 @@ const {createHash}=require('node:crypto');
 const db=require('./db');
 const {validateSnapshot}=require('./ingest');
 const period=require('./sourcePeriod');
+const diagnostics=require('./sourceDiagnostics');
 const COLLECTIONS=['COMPANY','GROUP','LEDGER','VOUCHERTYPE','CURRENCY','COSTCATEGORY','COSTCENTRE','STOCKGROUP','STOCKCATEGORY','STOCKITEM','UNIT','GODOWN','VOUCHER'];
 const fail=(message,status=400)=>{throw Object.assign(new Error(message),{status});};
 // JSONB changes object key order, so hashes must be independent of key order.
@@ -26,7 +27,9 @@ function manifest(input,mode='full') {
     const c=matches[0];
     if(!['success','failed'].includes(c.status)||!Number.isSafeInteger(c.count)||c.count<0||c.count>5000000) fail('Invalid collection coverage');
     if(c.status==='failed'&&c.count!==0) fail('Failed collections cannot publish partial records');
-    return {name,status:c.status,count:c.count};
+    if(c.readiness&&c.readiness.records!==c.count)fail('Financial readiness record count mismatch');
+    return {name,status:c.status,count:c.count,...(c.readiness?{readiness:diagnostics.readiness(c.readiness)}:{}),
+      ...(c.diagnostic?{diagnostic:diagnostics.details(c.diagnostic)}:{})};
   });
   if(!['stable','unavailable','changed'].includes(input.consistency)) fail('Source consistency required');
   if(!Number.isSafeInteger(input.recordCount)||input.recordCount!==collections.reduce((n,c)=>n+c.count,0)) fail('Source count mismatch');
@@ -34,8 +37,17 @@ function manifest(input,mode='full') {
   if(scope&&!complete)fail('A period update requires complete collection coverage and unchanged source');
   const coverageStatus=complete&&!scope ? 'complete' : 'partial';
   if(collections.find(c=>c.name==='COMPANY').status==='success'&&collections.find(c=>c.name==='COMPANY').count!==1) fail('Exactly one company record required');
+  let dateContext;
+  if(input.dateContext){
+    const readDates=key=>{const value=input.dateContext[key];return {from:period.scope({kind:'period',...value}).from,to:value.to};};
+    dateContext={ledgers:readDates('ledgers'),vouchers:readDates('vouchers')};
+    if(scope&&(dateContext.vouchers.from!==scope.from||dateContext.vouchers.to!==scope.to))fail('Voucher date context does not match capture scope');
+  }
   return {batchId,capturedAt,company,schemaVersion:1,profile:input.profile,chunkCount:input.chunkCount,
-    recordCount:input.recordCount,collections,consistency:input.consistency,coverageStatus,...(scope?{scope}:{}),...(mode==='period-replace'?{periodMode:'replace'}:{})};
+    recordCount:input.recordCount,collections,consistency:input.consistency,coverageStatus,
+    ...(input.exporter?{exporter:diagnostics.exporter(input.exporter)}:{}),
+    ...(input.reconciliation?{reconciliation:diagnostics.readiness(input.reconciliation)}:{}),...(dateContext?{dateContext}:{}),
+    ...(scope?{scope}:{}),...(mode==='period-replace'?{periodMode:'replace'}:{})};
 }
 function validateTree(node,depth=0,budget={nodes:0}) {
   if(++budget.nodes>100000||depth>64) fail('Source XML tree exceeds limits');

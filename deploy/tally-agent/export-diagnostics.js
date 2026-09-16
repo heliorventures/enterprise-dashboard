@@ -1,6 +1,15 @@
 // Log transport/structure metadata, never response text, credentials or record
 // values. In particular fetch's cause.message and XML parser messages can echo
 // sensitive input; expose bounded error codes and positions instead.
+function safeText(value,max=2000) {
+  return String(value??'').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g,'')
+    .replace(/\b(?:Bearer|Basic)\s+[^\s,;"<>]+/gi,'[redacted credentials]')
+    .replace(/(["'](?:token|password|secret|authorization|api[_-]?key)["']\s*:\s*)(["'])(.*?)\2/gi,'$1"[redacted]"')
+    .replace(/<(token|password|secret|authorization|api[_-]?key)\b[^>]*>[\s\S]*?<\/\1>/gi,'<$1>[redacted]</$1>')
+    .replace(/https?:\/\/[^\s<>"']+/gi,value=>{try{return new URL(value).origin;}catch{return '[redacted URL]';}})
+    .replace(/\b(token|password|secret|authorization|api[_-]?key)\s*[:=]\s*[^\s,;]+/gi,'$1=[redacted]')
+    .slice(0,max);
+}
 function codes(error) {
   const found=new Set(),seen=new Set();
   const visit=(value,depth=0)=>{
@@ -48,9 +57,11 @@ function xmlReference(parser) {
 }
 async function exportXml(config,{collection,company,body,createParser,phase='export'}) {
   const log=config.exportLog||(()=>{}),started=Date.now(),requestId=require('node:crypto').randomUUID();
-  const context={requestId,phase,collection,company:company||null,endpoint:new URL(config.tallyUrl).origin};
-  let stage='connect',status=null,bytes=0,recordsReceived=0,recordsProcessed=0,xml;
-  const snapshot=()=>({...context,stage,httpStatus:status,bytesReceived:bytes,recordsReceived,recordsProcessed,durationMs:Date.now()-started,...xml?.diagnostics?.()});
+  const context={requestId,phase,collection,company:company||null,endpoint:new URL(config.tallyUrl).origin,
+    requestHash:require('node:crypto').createHash('sha256').update(body).digest('hex'),
+    ...(config.scope?{from:config.scope.from,to:config.scope.to}:{})};
+  let stage='connect',status=null,bytes=0,recordsReceived=0,recordsProcessed=0,xml,contentType,charset;
+  const snapshot=()=>({...context,stage,httpStatus:status,bytesReceived:bytes,recordsReceived,recordsProcessed,durationMs:Date.now()-started,contentType,charset,...xml?.diagnostics?.()});
   log({event:'tally_export_started',...context,timeoutMs:config.requestTimeoutMs,requestBytes:Buffer.byteLength(body)});
   const heartbeat=setInterval(()=>log({event:'tally_export_progress',...snapshot()}),10000);
   heartbeat.unref?.();
@@ -60,8 +71,8 @@ async function exportXml(config,{collection,company,body,createParser,phase='exp
       redirect:'error',signal:config.signal?AbortSignal.any([config.signal,AbortSignal.timeout(config.requestTimeoutMs)]):AbortSignal.timeout(config.requestTimeoutMs)});
     status=response.status;
     const rawType=response.headers?.get('content-type')||'';
-    const contentType=rawType.match(/^[a-z0-9.+-]+\/[a-z0-9.+-]+/i)?.[0]||'unspecified';
-    const charset=rawType.match(/charset\s*=\s*["']?([a-z0-9_-]{1,30})/i)?.[1]||'unspecified';
+    contentType=rawType.match(/^[a-z0-9.+-]+\/[a-z0-9.+-]+/i)?.[0]||'unspecified';
+    charset=rawType.match(/charset\s*=\s*["']?([a-z0-9_-]{1,30})/i)?.[1]||'unspecified';
     const length=response.headers?.get('content-length');
     log({event:'tally_export_response',...context,httpStatus:status,contentType,charset,
       contentLength:length&&/^\d{1,12}$/.test(length)?Number(length):null,durationMs:Date.now()-started});
@@ -81,9 +92,9 @@ async function exportXml(config,{collection,company,body,createParser,phase='exp
     log({event:'tally_export_finished',...snapshot()});return bytes;
   } catch(error) {
     const errorCodes=codes(error);
-    const diagnostic={...snapshot(),errorCodes,...error.xmlDiagnostic,action:hint(errorCodes,stage,status)};
+    const diagnostic={...snapshot(),errorCodes,...error.xmlDiagnostic,...(error.tallyMessage?{tallyMessage:safeText(error.tallyMessage)}:{}),action:hint(errorCodes,stage,status)};
     error.exportDiagnostic=diagnostic;
     log({event:'tally_export_failed',...diagnostic});throw error;
   } finally {clearInterval(heartbeat);}
 }
-module.exports={exportXml,codes,xmlCode,xmlReference};
+module.exports={exportXml,codes,xmlCode,xmlReference,safeText};

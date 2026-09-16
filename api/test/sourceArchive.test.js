@@ -25,6 +25,15 @@ test('archive protocol checks transfer structure without validating amounts/date
   assert.throws(()=>api.manifest({...input(),recordCount:3}));
   assert.equal(api.manifest({...input(),consistency:'changed'}).coverageStatus,'partial');
 });
+test('archive retains exporter, period context, readiness and failed collection diagnosis',()=>{
+  const original=input();
+  const m={...original,exporter:{version:'1.0.0',contract:'financial-source-v2',buildHash:'a'.repeat(64)},
+    dateContext:{ledgers:{from:'1901-01-01',to:'9999-12-31'},vouchers:{from:'1901-01-01',to:'9999-12-31'}},
+    collections:original.collections.map(c=>({...c,readiness:{status:'ready',records:c.count,errorCount:0,warningCount:0,issues:[]}}))};
+  const result=api.manifest(m);
+  assert.deepEqual(result.exporter,m.exporter);assert.deepEqual(result.dateContext,m.dateContext);
+  assert.equal(result.collections[0].readiness.status,'ready');
+});
 test('JSONB source archive is atomic, company-isolated, lossless and retry-safe without dashboard writes',{skip:!enabled},async()=>{
   await db.migrate();await db.migrate();
   const m=input();

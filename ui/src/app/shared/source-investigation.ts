@@ -25,6 +25,12 @@ import { SourceBrowser } from './source-browser';
       </section>
     }
     <app-source-browser
+      mode="diagnostics"
+      [refreshKey]="syncVersion()"
+      title="Export failures and diagnostics"
+      description="Saved failure reasons, including exports that stopped before creating a batch. Offline agents send retained diagnostics when they reconnect."
+    />
+    <app-source-browser
       mode="archives"
       [refreshKey]="syncVersion()"
       title="Export history"

@@ -39,7 +39,9 @@ export interface ArchiveRow {
   coverage_status: string;
   sync_status: string | null;
   issue_count: number;
-  collections: { name: string; count: number; status: string }[];
+  diagnostic_count?: number;
+  exporter?: {version: string; contract: string; buildHash: string};
+  collections: { name: string; count: number; status: string; readiness?: {status: string; errorCount: number; warningCount: number} }[];
 }
 export interface ValidationIssue {
   id: string;

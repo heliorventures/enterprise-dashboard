@@ -35,6 +35,7 @@ test('period merge preserves history, updates GUIDs, rejects stale/invalid input
   await unpack.unpackBatch(base.batchId);
   const rows=[company,v('edited','20260903','25',0),v('new','20260905','40',1)];
   const m=make('period-one','2026-09-11T00:00:00Z',rows);
+  m.dateContext={ledgers:{from:'1901-01-01',to:'9999-12-31'},vouchers:{from:m.scope.from,to:m.scope.to}};
   await archive.begin(m,'period');
   await assert.rejects(()=>archive.chunk({batchId:m.batchId,index:0,records:rows}),/endpoint mismatch/);
   await assert.rejects(()=>archive.chunk({batchId:m.batchId,index:0,records:[company,v('bad','20260801','10')]},'period'),/outside/);
@@ -42,6 +43,12 @@ test('period merge preserves history, updates GUIDs, rejects stale/invalid input
   await archive.chunk({batchId:m.batchId,index:0,records:rows},'period');
   const receipt=await archive.complete({batchId:m.batchId},'period');
   assert.equal(receipt.coverageStatus,'partial');assert.ok(receipt.reportingBatchId);
+  const derived=(await db.query('SELECT manifest FROM tally_source_snapshots WHERE batch_id=$1',[receipt.reportingBatchId])).rows[0].manifest;
+  assert.equal(derived.dateContext.vouchers.from,'1901-01-01');
+  assert.deepEqual(derived.captureDateContext,m.dateContext);
+  const diagnostics=require('../src/sourceDiagnostics');
+  const diagnosticId=await diagnostics.recordApiFailure(Object.assign(new Error('Synthetic database failure'),{code:'23505'}),{operation:'reporting',body:{batchId:receipt.reportingBatchId}});
+  assert.equal((await db.query('SELECT company_external_id FROM tally_diagnostics WHERE id=$1',[diagnosticId])).rows[0].company_external_id,'period-co');
   assert.equal((await archive.complete({batchId:m.batchId},'period')).reportingBatchId,receipt.reportingBatchId);
   await assert.rejects(()=>period.baseline(db,'period-co'),/full sync/); // unpublished derived archive blocks racing updates
   await unpack.unpackBatch(receipt.reportingBatchId);

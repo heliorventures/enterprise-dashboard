@@ -140,7 +140,12 @@ function buildProjection(
     model.coverage[row.collection] = (model.coverage[row.collection] || 0) + 1;
     const p = row.payload;
     if (row.collection === "COMPANY") {
-      model.company.currency = text(p, "CURRENCYNAME");
+      // BaseCurrencyName describes the company's accounting currency. Keep
+      // CurrencyName as an exposed native alternative, never infer INR.
+      const baseCurrency=text(p, "BASECURRENCYNAME"),currency=text(p, "CURRENCYNAME");
+      model.company.currency = baseCurrency || currency;
+      if(baseCurrency&&currency&&key(baseCurrency)!==key(currency))
+        issue(row,"BASECURRENCYNAME","CURRENCY_LABEL_DIFFERENCE","Company currency labels differ; base currency is used. Inspect the archived company record.","warning");
       for (const [target, source] of [
         ["books_from", "BOOKSFROM"],
         ["starting_from", "STARTINGFROM"],

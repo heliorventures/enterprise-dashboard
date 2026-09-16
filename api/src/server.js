@@ -21,18 +21,29 @@ function authenticateSender(req, res, next) {
   if (config.ingestToken.length < 32 || !timingSafeEqual(hash(supplied), hash(expected))) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
+  req.senderAuthenticated=true;
   next();
 }
 const staged = require('./ingestChunks');
 const sourceArchive = require('./sourceArchive');
 const sourceUnpack = require('./sourceUnpack');
 const sourceSync = require('./sourceSync');
+const sourceDiagnostics = require('./sourceDiagnostics');
+app.post('/api/ingest/tally/diagnostics',authenticateSender,express.json({limit:'512kb'}),async(req,res)=>{
+  try {res.json(await sourceDiagnostics.save(req.body));}
+  catch(error){res.status(error.status||503).json({error:error.status?error.message:'Diagnostics could not be saved; retain and retry the same events'});}
+});
 async function completeSource(body,mode='full') {
   const result = await sourceArchive.complete(body,mode);
   // Archive acknowledgement is independent of downstream reporting validation.
   if (result.ok && (result.coverageStatus === 'complete'||result.reportingBatchId)) {
     try { result.unpack = await sourceSync.recordBatch(result.reportingBatchId||result.batchId); }
-    catch (error) { result.unpack = { ok: false, error: error.message }; }
+    catch (error) {
+      let diagnosticId=null;
+      try {diagnosticId=await sourceDiagnostics.recordApiFailure(error,{operation:'reporting',body:{batchId:result.reportingBatchId||result.batchId}});}
+      catch(diagnosticError){console.error('Reporting diagnostic persistence failed:',diagnosticError.code||diagnosticError.name);}
+      result.unpack = { ok: false, error: error.status?error.message:'Reporting publication failed; review saved diagnostics',diagnosticId };
+    }
   }
   result.reportingStatus = result.coverageStatus !== 'complete'&&!result.reportingBatchId ? 'blocked' : result.unpack?.ok === true ? 'validated' : 'error';
   return result;
@@ -42,15 +53,22 @@ for(const replacement of [false,true])app.post('/api/ingest/tally/'+(replacement
     if(typeof req.body?.companyExternalId!=='string'||!req.body.companyExternalId||req.body.companyExternalId.length>200)throw Object.assign(new Error('Company identity required'),{status:400});
     const baseline=await require('./sourcePeriod').baseline(db,req.body.companyExternalId,undefined,replacement);
     res.json({ok:true,companyExternalId:req.body.companyExternalId,baselineBatchId:baseline?.batch_id||null,...(replacement?{periodMode:'replace'}:{})});
-  } catch(error){res.status(error.status||500).json({error:error.status?error.message:'Unable to verify full sync baseline'});}
+  } catch(error){
+    let diagnosticId=null;
+    try {diagnosticId=await sourceDiagnostics.recordApiFailure(error,{operation:replacement?'period-replace/preflight':'period/preflight',body:req.body});}
+    catch(diagnosticError){console.error('Preflight diagnostic persistence failed:',diagnosticError.code||diagnosticError.name);}
+    res.status(error.status||500).json({error:error.status?error.message:'Unable to verify full sync baseline',diagnosticId});}
 });
 for (const mode of ['full','period','period-replace']) for (const operation of ['begin','chunk','complete']) {
   app.post('/api/ingest/tally/'+(mode==='full'?'source/':mode==='period'?'source-period/':'source-period-replace/') + operation, authenticateSender, express.json({limit:'5mb'}), async (req,res) => {
     try { res.json(operation === 'complete' ? await completeSource(req.body,mode) : await sourceArchive[operation](req.body,mode)); }
     catch(error) {
       const status=error.status || (error.code==='23505' ? 409 : 500);
+      let diagnosticId=null;
+      try {diagnosticId=await sourceDiagnostics.recordApiFailure(error,{operation:mode+'/'+operation,body:req.body});}
+      catch(diagnosticError){console.error('Source diagnostic persistence failed:',diagnosticError.code||diagnosticError.name);}
       if(status===500) console.error('Source archive failed:',error.code || error.name);
-      res.status(status).json({error:status===500?'Source archive failed; retry the same batch':error.code==='23505'?'Duplicate source record identity':error.message,...(error.code==='PERIOD_CAPTURE_STALE'?{code:error.code}:{})});
+      res.status(status).json({error:status===500?'Source archive failed; retry the same batch':error.code==='23505'?'Duplicate source record identity':error.message,diagnosticId,...(error.code==='PERIOD_CAPTURE_STALE'?{code:error.code}:{})});
     }
   });
 }
@@ -152,6 +170,7 @@ for (const [path, handler] of [
   ['/api/reports/source/masters', sourceReports.masterRows],
   ['/api/reports/source/details', sourceReports.details],
   ['/api/tally/archives', sourceReports.archives],
+  ['/api/tally/diagnostics', sourceDiagnostics.list],
   ['/api/tally/issues', sourceReports.issues],
   ['/api/tally/source-record', sourceReports.record],
 ]) app.get(path, async (req,res) => {
@@ -216,7 +235,15 @@ if (!(config.tallyMode === 'pull' && !config.production)) {
     }
   });
 }
-app.use((error, _req, res, _next) => res.status(error.status || 500).json({ error: error.type === 'entity.too.large' ? 'Request exceeds the endpoint size limit' : 'Invalid request' }));
+app.use(async(error, req, res, _next) => {
+  const message=error.type==='entity.too.large'?'Request exceeds the endpoint size limit':'Invalid request';
+  let diagnosticId=null;
+  if(req.senderAuthenticated&&!req.path.endsWith('/diagnostics'))try {
+    diagnosticId=await sourceDiagnostics.recordApiFailure(Object.assign(new Error(message),{status:error.status||400,code:error.type==='entity.too.large'?'REQUEST_TOO_LARGE':'INVALID_REQUEST'}),
+      {operation:'request/'+req.path.split('/').at(-1),body:{}});
+  }catch(diagnosticError){console.error('Request diagnostic persistence failed:',diagnosticError.code||diagnosticError.name);}
+  res.status(error.status||500).json({error:message,diagnosticId});
+});
 
 async function start() {
   if (config.production && config.ingestToken.length < 32) throw new Error('TALLY_INGEST_TOKEN must contain at least 32 characters');

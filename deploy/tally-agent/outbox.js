@@ -43,11 +43,14 @@ async function deliver(config, token, directory, manifest, log, fetcher=fetch, s
           method:'POST', headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`},
           body, redirect:'error', signal:config.signal?AbortSignal.any([config.signal,AbortSignal.timeout(config.requestTimeoutMs)]):AbortSignal.timeout(config.requestTimeoutMs) });
         if (response.status!==200) {
+          const detail=await response.json?.().catch(()=>null);
           if(manifest.scope&&response.status===409){
-            const detail=await response.json().catch(()=>null);
             if(detail?.code==='PERIOD_CAPTURE_STALE')throw Object.assign(new Error('PERIOD_CAPTURE_STALE'),{code:'PERIOD_CAPTURE_STALE',retryable:false});
           }
-          const error=Object.assign(new Error(`API ${operation}: HTTP ${response.status}`),{retryable:response.status===429 || response.status>=500});
+          const {safeText}=require('./export-diagnostics');
+          const error=Object.assign(new Error(`API ${operation}: HTTP ${response.status}${typeof detail?.error==='string'?' - '+safeText(detail.error):''}`),
+            {retryable:response.status===429 || response.status>=500,uploadDiagnostic:{operation,stage:'upload',httpStatus:response.status,attempt:attempt+1,
+              ...(typeof detail?.diagnosticId==='string'?{serverDiagnosticId:detail.diagnosticId}:{})}});
           if(!response.bodyUsed)await response.body?.cancel(); throw error;
         }
         const result=await response.json();
@@ -77,6 +80,8 @@ async function deliver(config, token, directory, manifest, log, fetcher=fetch, s
   } else if (result.ledgerCount!==manifest.ledgerCount || result.voucherCount!==manifest.voucherCount) throw new Error('API committed counts differ from manifest');
   if(manifest.scope&&!result.reportingBatchId)throw new Error('Period acknowledgement is missing its cumulative reporting reference');
   if(manifest.periodMode==='replace'&&result.periodMode!=='replace')throw new Error('Period replacement acknowledgement is invalid');
-  return {retries,requestBytes,chunksAcknowledged,duplicate:result.duplicate,...(sourceMode?{coverageStatus:result.coverageStatus,reportingStatus:result.reportingStatus || 'unverified',...(manifest.scope?{periodUpdate:true}:{})}:{})};
+  return {retries,requestBytes,chunksAcknowledged,duplicate:result.duplicate,...(sourceMode?{coverageStatus:result.coverageStatus,reportingStatus:result.reportingStatus || 'unverified',
+    ...(result.unpack?.diagnosticId?{serverDiagnosticId:result.unpack.diagnosticId}:{}),
+    ...(result.unpack?.error?{reportingError:require('./export-diagnostics').safeText(result.unpack.error)}:{}),...(manifest.scope?{periodUpdate:true}:{})}:{})};
 }
 module.exports = {saveJson,writer,deliver};

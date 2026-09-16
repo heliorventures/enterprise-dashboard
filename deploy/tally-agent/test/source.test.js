@@ -84,14 +84,18 @@ test('default source import captures empty/unrecognized values without dashboard
     const preview=logs.find(row=>row.event==='source_preview');assert.equal(preview.coverageStatus,'partial');
     const m=JSON.parse(fs.readFileSync(path.join(preview.directory,'manifest.json'),'utf8'));
     assert.equal(m.recordCount,3);
-    assert.deepEqual(m.collections.find(c=>c.name==='STOCKITEM'),{name:'STOCKITEM',status:'failed',count:0});
+    const stock=m.collections.find(c=>c.name==='STOCKITEM');
+    assert.equal(stock.status,'failed');assert.equal(stock.count,0);
+    assert.ok(stock.diagnostic.errorCodes.includes('XML_TRUNCATED'));
+    assert.equal(stock.diagnostic.discardedRecords,1);
     const records=JSON.parse(fs.readFileSync(path.join(preview.directory,'0.json'),'utf8')).records;
     assert.equal(source.field(records.find(r=>r.collection==='VOUCHER').payload,'AMOUNT'),'USD 1,23,456.789 Cr');
     assert.equal(source.field(records.find(r=>r.collection==='LEDGER').payload,'CLOSINGBALANCE'),null);
     assert.equal(records.some(r=>r.collection==='STOCKITEM'),false);
     logs.length=0;failStock=false;
-    assert.equal(await run(configFile,true),0);
+    assert.equal(await run(configFile,true),1); // Transport succeeds, financial readiness remains blocked.
     assert.equal(logs.find(row=>row.event==='source_preview').coverageStatus,'complete');
+    assert.equal(logs.find(row=>row.event==='source_preview').readiness,'blocked');
   } finally {global.fetch=originalFetch;console.log=originalLog;fs.rmSync(directory,{recursive:true});}
 });
 test('source delivery uses its own routes and retries the exact persisted payload',async()=>{

@@ -15,7 +15,7 @@ const text = (row: Row, field: string) => (row[field] == null ? 'Unavailable' : 
       <h2>{{ title() }}</h2>
       <p>{{ description() }}</p>
     </header>
-    @if (mode() === 'issues' && batch()) {
+    @if ((mode() === 'issues' || mode() === 'diagnostics') && batch()) {
       <p>
         Batch: {{ batch() }}
         <button class="btn ghost" type="button" (click)="clearBatch()">Show all batches</button>
@@ -109,7 +109,7 @@ const text = (row: Row, field: string) => (row[field] == null ? 'Unavailable' : 
   `,
 })
 export class SourceBrowser {
-  readonly mode = input.required<'archives' | 'issues' | 'masters' | 'details'>();
+  readonly mode = input.required<'archives' | 'issues' | 'masters' | 'details' | 'diagnostics'>();
   readonly title = input.required<string>();
   readonly description = input('');
   readonly refreshKey = input('');
@@ -148,6 +148,17 @@ export class SourceBrowser {
   readonly error = signal('');
   readonly rowKey = (r: Row) => String(r['id']);
   readonly columns = computed<DataColumn<Row>[]>(() => {
+    if (this.mode() === 'diagnostics') return [
+      { key: 'company', label: 'Company / time', value: r => String(r['company_name'] || 'Before company selection'),
+        secondary: r => new Date(String(r['occurred_at'])).toLocaleString('en-IN') },
+      { key: 'failure', label: 'Failure', value: r => text(r, 'message'), primary: true,
+        secondary: r => `${r['event']} · ${r['collection'] || 'Run'} · ${r['severity']}` },
+      { key: 'context', label: 'Location and cause', value: r => this.diagnosticContext(r),
+        secondary: r => String((r['details'] as Row)?.['tallyMessage'] || '') },
+      { key: 'action', label: 'Suggested action', value: r => String((r['details'] as Row)?.['action'] || 'Review the failure and source location.'), primary: true },
+      { key: 'reference', label: 'References', value: r => `Error ${r['id']} · Batch ${r['batch_id'] || 'not created'}`,
+        secondary: r => `Run ${r['run_id'] || 'API'} · Exporter ${(r['exporter'] as Row)?.['version'] || 'unknown'} · Build ${(r['exporter'] as Row)?.['buildHash'] || 'unknown'}` },
+    ];
     if (this.mode() === 'archives')
       return [
         {
@@ -180,6 +191,11 @@ export class SourceBrowser {
             ((r['collections'] as { name: string; count: number; status: string }[]) || [])
               .map((c) => `${c.name}: ${c.count} (${c.status})`)
               .join('; '),
+        },
+        {
+          key: 'diagnostics', label: 'Export diagnostics',
+          value: r => `${r['diagnostic_count'] ?? 0} saved diagnostics`,
+          link: r => ({ path: '/operations', query: { batch: String(r['id']), diagnosticsPage: 1 } }),
         },
         {
           key: 'issues',
@@ -275,7 +291,7 @@ export class SourceBrowser {
       const params: Record<string, string | number> = { page: this.page(), pageSize: 25 };
       const company = this.params().get('company');
       if (company) params['company'] = company;
-      if (mode === 'issues' && this.batch()) params['batch'] = this.batch();
+      if ((mode === 'issues' || mode === 'diagnostics') && this.batch()) params['batch'] = this.batch();
       if (mode === 'masters' && this.collection()) params['collection'] = this.collection();
       if (mode === 'details') {
         delete params['page'];
@@ -338,6 +354,20 @@ export class SourceBrowser {
       });
     } else this.revision.update((n) => n + 1);
   }
+  private diagnosticContext(r: Row): string {
+    const d = (r['details'] || {}) as Row;
+    return [d['stage'], d['phase'], d['operation'], d['httpStatus'] ? `HTTP ${d['httpStatus']}` : '',
+      Array.isArray(d['errorCodes']) ? d['errorCodes'].join(', ') : '', d['xmlPath'],
+      d['xmlLine'] != null ? `line ${d['xmlLine']}, column ${d['xmlColumn'] ?? '?'}` : '',
+      d['from'] ? `${d['from']} to ${d['to']}` : '',
+      d['recordsReceived'] != null ? `${d['recordsReceived']} records received` : '',
+      d['bytesReceived'] != null ? `${d['bytesReceived']} bytes` : '',
+      d['requestId'] ? `Request ${d['requestId']}` : '',
+      d['serverDiagnosticId'] ? `Server error ${d['serverDiagnosticId']}` : '',
+      d['constraint'], d['table'],
+      d['stackLocation'],
+    ].filter(Boolean).join(' · ') || 'No additional location was available.';
+  }
   private sourceLink(r: Row) {
     return {
       path: '/operations',
@@ -372,7 +402,7 @@ export class SourceBrowser {
   clearBatch() {
     void this.router.navigate([], {
       relativeTo: this.route,
-      queryParams: { batch: null, issuesPage: 1, sourceCollection: null, sourceOrdinal: null },
+      queryParams: { batch: null, issuesPage: 1, diagnosticsPage: 1, sourceCollection: null, sourceOrdinal: null },
       queryParamsHandling: 'merge',
     });
   }
