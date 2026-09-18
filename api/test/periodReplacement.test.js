@@ -4,8 +4,10 @@ const archive=require('../src/sourceArchive');
 const db=require('../src/db');
 after(()=>db.close());
 const node=(tag,value)=>({tag,attributes:{},content:[value]});
-const company={collection:'COMPANY',ordinal:0,sourceId:'replace-co',payload:{tag:'COMPANY',attributes:{NAME:'Replace Co'},content:[node('GUID','replace-co')]}};
-const v=(guid,date,amount='10',ordinal=0)=>({collection:'VOUCHER',ordinal,sourceId:guid,payload:{tag:'VOUCHER',attributes:{},content:[node('GUID',guid),node('DATE',date),node('VOUCHERTYPENAME','Sales'),node('VOUCHERNUMBER',guid),node('AMOUNT',amount)]}});
+// Real Tally repeats explicit scalar FETCH fields when wildcard export is also used.
+const repeated=(tag,value)=>[node(tag,value),node(tag,value)];
+const company={collection:'COMPANY',ordinal:0,sourceId:'replace-co',payload:{tag:'COMPANY',attributes:{NAME:'Replace Co'},content:[...repeated('GUID','replace-co'),...repeated('NAME','Replace Co')]}};
+const v=(guid,date,amount='10',ordinal=0)=>({collection:'VOUCHER',ordinal,sourceId:guid,payload:{tag:'VOUCHER',attributes:{},content:[...repeated('GUID',guid),...repeated('DATE',date),node('VOUCHERTYPENAME','Sales'),node('VOUCHERNUMBER',guid),...repeated('AMOUNT',amount)]}});
 const make=(id,day,records,from='2026-09-01',to='2026-09-30')=>({batchId:id,capturedAt:`2026-09-${day}T00:00:00Z`,company:{externalId:'replace-co',name:'Replace Co'},schemaVersion:1,profile:'company-business-v1',periodMode:'replace',scope:{kind:'period',from,to},chunkCount:1,recordCount:records.length,consistency:'stable',collections:archive.COLLECTIONS.map(name=>({name,status:'success',count:records.filter(r=>r.collection===name).length}))});
 test('replacement protocol is explicit and cannot be silently accepted by legacy period route',()=>{
   const m=make('protocol','10',[company]);

@@ -1,7 +1,7 @@
 const db = require('./db');
 const { attachProjects, ingestSnapshot, uniqueVoucherKey } = require('./ingest');
 const { buildProjection, writeProjection } = require('./sourceModels');
-const { isEmptyList } = require('./sourceTree');
+const { isEmptyList, scalarField: field } = require('./sourceTree');
 
 function invalid(message, status = 400) {
   return Object.assign(new Error(message), { status });
@@ -10,16 +10,6 @@ function invalid(message, status = 400) {
 function children(node, name) {
   if (!node || !Array.isArray(node.content)) return [];
   return node.content.filter((child) => child && typeof child === 'object' && child.tag.toUpperCase() === name && !isEmptyList(child));
-}
-
-function field(node, name) {
-  const matches = children(node, name);
-  if (matches.length === 1 && matches[0].content.every((value) => typeof value === 'string')) {
-    return matches[0].content.join('');
-  }
-  if (matches.length) return null;
-  const key = Object.keys(node?.attributes || {}).find((nameKey) => nameKey.toUpperCase() === name);
-  return key === undefined ? null : node.attributes[key];
 }
 
 function clipped(value, max) {

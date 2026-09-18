@@ -3,6 +3,7 @@ const db=require('./db');
 const {validateSnapshot}=require('./ingest');
 const period=require('./sourcePeriod');
 const diagnostics=require('./sourceDiagnostics');
+const {scalarField}=require('./sourceTree');
 const COLLECTIONS=['COMPANY','GROUP','LEDGER','VOUCHERTYPE','CURRENCY','COSTCATEGORY','COSTCENTRE','STOCKGROUP','STOCKCATEGORY','STOCKITEM','UNIT','GODOWN','VOUCHER'];
 const fail=(message,status=400)=>{throw Object.assign(new Error(message),{status});};
 // JSONB changes object key order, so hashes must be independent of key order.
@@ -138,9 +139,7 @@ async function complete(input,mode='full') {
       for(const record of payload) {
         counts[record.collection]++;
         if(record.collection==='COMPANY') {
-          const fields=record.payload.content.filter(n=>typeof n==='object'&&n.tag.toUpperCase()==='GUID');
-          const attribute=Object.entries(record.payload.attributes).find(([key])=>key.toUpperCase()==='GUID')?.[1];
-          const guid=fields.length===1&&fields[0].content.every(v=>typeof v==='string')?fields[0].content.join(''):fields.length?null:attribute;
+          const guid=scalarField(record.payload,'GUID');
           if(guid!==m.company.externalId) fail('Source company does not match transfer identity',409);
         }
       }

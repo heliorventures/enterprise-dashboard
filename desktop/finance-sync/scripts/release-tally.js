@@ -33,10 +33,13 @@ class SyntheticTally extends EventEmitter {
     if(fault?.kind==='http'){res.writeHead(503);res.end('Synthetic Tally unavailable');return;}
     const selected=company?this.companies.filter(c=>c.name===company):this.companies;
     let rows='';
-    if(type==='Company')rows=selected.map(c=>`<COMPANY NAME="${escape(c.name)}"><NAME>${escape(c.name)}</NAME><GUID>${escape(c.id)}</GUID><LASTALTERID>1</LASTALTERID><LASTVCHID>1</LASTVCHID></COMPANY>`).join('');
+    if(type==='Company')rows=this.companies.map(c=>`<COMPANY NAME="${escape(c.name)}"><NAME>${escape(c.name)}</NAME><GUID>${escape(c.id)}</GUID><LASTALTERID>1</LASTALTERID><LASTVCHID>1</LASTVCHID></COMPANY>`).join('');
     else if(type==='Group')rows=['Sales Accounts','Bank Accounts','Indirect Expenses'].map(name=>`<GROUP NAME="${name}"><NAME>${name}</NAME><PARENT>Primary</PARENT></GROUP>`).join('');
     else if(type==='Ledger')rows=selected.flatMap(c=>c.ledgers||[]).map(l=>`<LEDGER NAME="${escape(l.name)}"><NAME>${escape(l.name)}</NAME><PARENT>${escape(l.parent)}</PARENT><OPENINGBALANCE>0.00</OPENINGBALANCE><CLOSINGBALANCE>${l.balance}</CLOSINGBALANCE></LEDGER>`).join('');
     else if(type==='Voucher')rows=selected.flatMap(c=>c.vouchers).filter(v=>(!from||v.date>=from)&&(!to||v.date<=to)).map(v=>entry.dateOnly?`<VOUCHER><DATE>${v.date}</DATE></VOUCHER>`:`<VOUCHER><GUID>${escape(v.id)}</GUID><DATE>${v.date}</DATE><VOUCHERTYPENAME>Sales</VOUCHERTYPENAME><VOUCHERNUMBER>${escape(v.id)}</VOUCHERNUMBER><AMOUNT>${escape(v.amount)}</AMOUNT><ALLLEDGERENTRIES.LIST><LEDGERNAME>Sales</LEDGERNAME><AMOUNT>${escape(v.amount)}</AMOUNT></ALLLEDGERENTRIES.LIST><ALLLEDGERENTRIES.LIST><LEDGERNAME>Bank</LEDGERNAME><AMOUNT>-${escape(v.amount)}</AMOUNT></ALLLEDGERENTRIES.LIST></VOUCHER>`).join('');
+    // Replay the real client's explicit-FETCH + wildcard response shape. Duplicate
+    // scalar leaves only; do not duplicate or collapse business subcollections.
+    if(/<FETCH>[^<]*,\*<\/FETCH>/.test(body))rows=rows.replace(/<([A-Z][A-Z0-9]*)>([^<]*)<\/\1>/g,match=>match+match);
     const reply=()=>{if(!res.destroyed){res.writeHead(200,{'Content-Type':'application/xml'});res.end(envelope(rows));}};
     if(fault?.kind==='slow'){const timer=setTimeout(reply,fault.delayMs);res.once('close',()=>clearTimeout(timer));}else reply();
   }

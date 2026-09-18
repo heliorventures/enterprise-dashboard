@@ -1,15 +1,10 @@
 const {randomUUID}=require('node:crypto');
+const {scalarField:field}=require('./sourceTree');
 const fail=(message,status=409,code)=>{throw Object.assign(new Error(message),{status,...(code?{code}:{})});};
 function scope(value) {
   const valid=d=>typeof d==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(d)&&Number.isFinite(Date.parse(d))&&new Date(d).toISOString().slice(0,10)===d;
   if(!value||value.kind!=='period'||!valid(value.from)||!valid(value.to)||value.from>value.to)fail('Invalid period dates',400);
   return {kind:'period',from:value.from,to:value.to};
-}
-function field(node,name) {
-  const children=node.content.filter(n=>typeof n==='object'&&n.tag.toUpperCase()===name);
-  if(children.length===1&&children[0].content.every(v=>typeof v==='string'))return children[0].content.join('');
-  if(children.length)return null;
-  return Object.entries(node.attributes).find(([key])=>key.toUpperCase()===name)?.[1];
 }
 function voucher(row,period) {
   const guid=field(row.payload,'GUID');

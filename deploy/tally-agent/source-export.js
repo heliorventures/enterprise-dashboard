@@ -102,8 +102,13 @@ function parser(collection,onRecord) {
 }
 function field(node,name) {
   const children=node.content.filter(c=>typeof c==='object'&&c.tag.toUpperCase()===name);
-  if(children.length===1&&children[0].content.every(c=>typeof c==='string')) return children[0].content.join('');
-  if(children.length) return null; // Never guess an index when indexing identity.
+  if(children.length) {
+    // Explicit FETCH fields combined with * can repeat identical scalar nodes.
+    // Keep every raw node, but resolve a scalar only when all copies agree.
+    if(children.some(child=>!child.content.every(c=>typeof c==='string')))return null;
+    const values=children.map(child=>child.content.join(''));
+    return values.every(value=>value===values[0])?values[0]:null;
+  }
   const key=Object.keys(node.attributes).find(k=>k.toUpperCase()===name);
   return key===undefined ? null : node.attributes[key];
 }
