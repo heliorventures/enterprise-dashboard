@@ -60,8 +60,9 @@ async function exportXml(config,{collection,company,body,createParser,phase='exp
   const context={requestId,phase,collection,company:company||null,endpoint:new URL(config.tallyUrl).origin,
     requestHash:require('node:crypto').createHash('sha256').update(body).digest('hex'),
     ...(config.scope?{from:config.scope.from,to:config.scope.to}:{})};
-  let stage='connect',status=null,bytes=0,recordsReceived=0,recordsProcessed=0,xml,contentType,charset;
-  const snapshot=()=>({...context,stage,httpStatus:status,bytesReceived:bytes,recordsReceived,recordsProcessed,durationMs:Date.now()-started,contentType,charset,...xml?.diagnostics?.()});
+  let stage='connect',status=null,bytes=0,recordsReceived=0,recordsProcessed=0,xml,contentType,charset,decoder;
+  const snapshot=()=>({...context,stage,httpStatus:status,bytesReceived:bytes,recordsReceived,recordsProcessed,durationMs:Date.now()-started,contentType,charset,...xml?.diagnostics?.(),
+    ...(decoder?.count?{encodingCompatibility:decoder.diagnostics()}:{})});
   log({event:'tally_export_started',...context,timeoutMs:config.requestTimeoutMs,requestBytes:Buffer.byteLength(body)});
   const heartbeat=setInterval(()=>log({event:'tally_export_progress',...snapshot()}),10000);
   heartbeat.unref?.();
@@ -80,7 +81,7 @@ async function exportXml(config,{collection,company,body,createParser,phase='exp
     xml=createParser(callback=>record=>{
       recordsReceived++;stage='record_handler';callback(record);recordsProcessed++;stage='parse';
     });
-    const decoder=new TextDecoder('utf-8',{fatal:true});
+    decoder=new (require('./tally-encoding').TallyUtf8Decoder)();
     stage='read';
     for await(const part of response.body) {
       config.signal?.throwIfAborted();

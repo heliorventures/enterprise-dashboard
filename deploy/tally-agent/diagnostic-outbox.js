@@ -5,7 +5,7 @@ const {safeText}=require('./export-diagnostics');
 const EVENTS=new Set(['tally_export_failed','source_collection_failed','source_consistency_failed','source_capture_failed','source_upload_failed','run_failure','run_cancelled','source_readiness_failed','source_readiness_warning']);
 function exporterIdentity() {
   const hash=createHash('sha256');
-  for(const file of ['source-agent.js','source-export.js','source-readiness.js','export-diagnostics.js','diagnostic-outbox.js','outbox.js','tally.js','scope.js'])hash.update(file).update(fs.readFileSync(path.join(__dirname,file)));
+  for(const file of ['source-agent.js','source-export.js','source-readiness.js','export-diagnostics.js','tally-encoding.js','diagnostic-outbox.js','outbox.js','tally.js','scope.js'])hash.update(file).update(fs.readFileSync(path.join(__dirname,file)));
   return {version:require('./package.json').version,contract:'financial-source-v2',buildHash:hash.digest('hex')};
 }
 function diagnosticQueue(directory,config,log) {
