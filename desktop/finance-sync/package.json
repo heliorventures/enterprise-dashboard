@@ -1,6 +1,6 @@
 {
   "name": "helior-finance-sync",
-  "version": "1.3.2",
+  "version": "1.4.0",
   "private": true,
   "description": "Synchronize accessible Tally companies with Helior Finance",
   "author": "Helior",

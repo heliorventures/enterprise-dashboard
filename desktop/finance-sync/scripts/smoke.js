@@ -38,6 +38,12 @@ app.whenReady().then(async()=>{
   const js=script=>window.webContents.executeJavaScript(script);
   await new Promise(resolve=>setTimeout(resolve,1500));
   assert.equal(requests,0);assert.equal(controller.snapshot().phase,'idle');assert.equal(controller.snapshot().busy,false);
+  await js("document.getElementById('period').value='custom';document.getElementById('period').dispatchEvent(new Event('change'))");
+  assert.equal(await js("document.getElementById('custom-range').hidden"),false);
+  await js("document.getElementById('sync').click()");
+  await new Promise(resolve=>setTimeout(resolve,100));assert.equal(requests,0);
+  assert.match(await js("document.getElementById('message').textContent"),/month/);
+  await js("document.getElementById('from-month').value='2021-01';document.getElementById('to-month').value='2024-02'");
   await js("document.getElementById('check').click()");
   await waitFor(controller,s=>s.phase==='ready'&&!s.busy);
   assert.equal(await js("document.getElementById('app-version').textContent"),`v${require(path.join(sourceRoot,'package.json')).version}`);
@@ -52,10 +58,11 @@ app.whenReady().then(async()=>{
   await js("document.querySelector('#companies input').click()");
   assert.equal(await js("document.getElementById('selected-count').textContent"),'1 selected');
   hold=true;
-  await js("document.getElementById('period').value='today'");
+
   await js("document.getElementById('sync').click()");
   await waitFor(controller,s=>s.phase==='syncing'&&s.busy);
-  assert.equal(controller.scope.kind,'period');
+  assert.deepEqual(controller.scope,{kind:'period',from:'2021-01-01',to:'2024-02-29'});
+  assert.equal(await js("document.getElementById('from-month').disabled"),true);
   assert.equal(await js("document.getElementById('period').disabled"),true);
   assert.equal(await js("document.getElementById('sync').disabled"),true);
   await js("document.getElementById('stop').click()");

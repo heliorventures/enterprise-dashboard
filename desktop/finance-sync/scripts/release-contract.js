@@ -6,6 +6,7 @@ const REQUIRED_SCENARIOS=Object.freeze([
   'First Today sync without full baseline, two sequential companies',
   'Full sync restores complete history and preserves manual entries',
   'Month replacement changes exact amounts and preserves other company/history',
+  'Custom month range replaces selected history and preserves other dates',
   'Empty Today replacement deletes omitted vouchers only in that day',
   'Last month replacement and a voucher moved into Today reconcile both dates',
   'Full replacement removes omitted history',

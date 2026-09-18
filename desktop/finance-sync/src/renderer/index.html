@@ -24,7 +24,8 @@
     </section>
     <section class="card" aria-labelledby="period-title">
       <label for="period" id="period-title"><strong>Data to sync</strong></label>
-      <select id="period" aria-describedby="period-note"><option value="full">All data</option><option value="today">Today</option><option value="current-month">Current month</option><option value="last-month">Last month</option></select>
+      <select id="period" aria-describedby="period-note"><option value="full">All data</option><option value="today">Today</option><option value="current-month">Current month</option><option value="last-month">Last month</option><option value="custom">Custom month range</option></select>
+      <div id="custom-range" hidden><label>Start month and year <input id="from-month" type="month" min="1901-01" max="9999-12" required></label><label>End month and year <input id="to-month" type="month" min="1901-01" max="9999-12" required></label></div>
       <p id="period-note" class="note">Choose All data or replace a shorter period. No initial full sync is required. Manual Finance entries are preserved.</p>
     </section>
     <section class="card" aria-labelledby="companies-title">

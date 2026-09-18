@@ -14,6 +14,8 @@ function describe(event) {
   if(!event)return 'Preparing synchronization…';
   const company=event.company?`${event.company} · `:'';
   switch(event.event){
+    case 'source_ledger_batch_started':return `${company}Reading ledgers: batch ${event.batchNumber} of ${event.batchCount}?`;
+    case 'source_ledger_batch_finished':return `${company}Ledger batch ${event.batchNumber} of ${event.batchCount} captured`;
     case 'source_voucher_window_started':return `${company}Reading vouchers: ${event.from} to ${event.to}…`;
     case 'source_voucher_window_finished':return `${company}Vouchers captured: ${event.from} to ${event.to}`;
     case 'tally_request_pause':return 'Pausing briefly before the next Tally request…';
@@ -51,6 +53,7 @@ function render(next){
   $('pending-note').hidden=!state.pending.count&&!state.pending.damaged;
   $('pending-note').textContent=state.pending.damaged?'A saved upload needs administrator attention. Export a diagnostic log before making changes.':missing.length?'Some saved uploads belong to companies that are not currently available. Load those companies in Tally to retry them.':'Only saved captures matching the selected dates and companies are retried. Other captures remain saved.';
   $('period').disabled=state.busy;
+  $('from-month').disabled=state.busy;$('to-month').disabled=state.busy;
   if(state.busy&&state.scope)$('period-note').textContent=`Replacing voucher dates: ${state.scope.from} to ${state.scope.to}. Other dates and manual Finance entries are preserved.`;
   else $('period-note').textContent='All data replaces Tally-imported history. A shorter period replaces only its vouchers, even on your first sync. Masters are always refreshed. Manual Finance entries are preserved.';
   $('check').disabled=state.busy;$('check').textContent=state.phase==='idle'?'Check connection':'Check again';
@@ -83,8 +86,10 @@ function render(next){
   for(const item of state.history){const names=item.results.map(r=>r.company).join(', ');$('history').append(node('div',`${date(item.at)} · ${phases[item.phase]||item.phase} · ${names}`,'history-row'));}
   $('footer-note').textContent=state.phase==='ready'?`${selection.size} selected · Tally data stays unchanged`:!state.busy&&state.results.length?'Check again to choose companies for your next sync.':'No changes are made to your Tally data.';
 }
+function chosenPeriod(){return $('period').value==='custom'?{kind:'custom',fromMonth:$('from-month').value,toMonth:$('to-month').value}:$('period').value;}
+$('period').addEventListener('change',()=>{$('custom-range').hidden=$('period').value!=='custom';});
 $('check').addEventListener('click',()=>invoke('check'));
-$('sync').addEventListener('click',()=>state?.phase==='ready'?invoke('sync',[...selection],$('period').value):invoke('start',$('period').value));
+$('sync').addEventListener('click',()=>state?.phase==='ready'?invoke('sync',[...selection],chosenPeriod()):invoke('start',chosenPeriod()));
 $('stop').addEventListener('click',()=>invoke('cancel'));
 $('select-all').addEventListener('change',event=>{selection=new Set(event.target.checked?state.companies.map(c=>c.externalId):[]);for(const input of $('companies').querySelectorAll('input'))input.checked=selection.has(input.value);selectionChanged();});
 $('export').addEventListener('click',async()=>{const result=await invoke('exportDiagnostics');$('export-result').textContent=result.ok&&result.value.saved?'Diagnostic log saved.':'';});

@@ -35,7 +35,13 @@ class SyntheticTally extends EventEmitter {
     let rows='';
     if(type==='Company')rows=this.companies.map(c=>`<COMPANY NAME="${escape(c.name)}"><NAME>${escape(c.name)}</NAME><GUID>${escape(c.id)}</GUID><LASTALTERID>1</LASTALTERID><LASTVCHID>1</LASTVCHID></COMPANY>`).join('');
     else if(type==='Group')rows=['Sales Accounts','Bank Accounts','Indirect Expenses'].map(name=>`<GROUP NAME="${name}"><NAME>${name}</NAME><PARENT>Primary</PARENT></GROUP>`).join('');
-    else if(type==='Ledger')rows=selected.flatMap(c=>c.ledgers||[]).map(l=>`<LEDGER NAME="${escape(l.name)}"><NAME>${escape(l.name)}</NAME><PARENT>${escape(l.parent)}</PARENT><OPENINGBALANCE>0.00</OPENINGBALANCE><CLOSINGBALANCE>${l.balance}</CLOSINGBALANCE></LEDGER>`).join('');
+    else if(type==='Ledger') {
+      const range=body.match(/\$MasterID &gt;= (\d+) AND \$MasterID &lt;= (\d+)/);
+      rows=selected.flatMap(c=>(c.ledgers||[]).map((l,i)=>({...l,masterId:i+1})))
+        .filter(l=>!range||(l.masterId>=Number(range[1])&&l.masterId<=Number(range[2])))
+        .map(l=>body.includes('<FETCH>MasterID</FETCH>')?`<LEDGER><MASTERID>${l.masterId}</MASTERID></LEDGER>`:
+          `<LEDGER NAME="${escape(l.name)}"><MASTERID>${l.masterId}</MASTERID><NAME>${escape(l.name)}</NAME><PARENT>${escape(l.parent)}</PARENT><OPENINGBALANCE>0.00</OPENINGBALANCE><CLOSINGBALANCE>${l.balance}</CLOSINGBALANCE></LEDGER>`).join('');
+    }
     else if(type==='Voucher')rows=selected.flatMap(c=>c.vouchers).filter(v=>(!from||v.date>=from)&&(!to||v.date<=to)).map(v=>entry.dateOnly?`<VOUCHER><DATE>${v.date}</DATE></VOUCHER>`:`<VOUCHER><GUID>${escape(v.id)}</GUID><DATE>${v.date}</DATE><VOUCHERTYPENAME>Sales</VOUCHERTYPENAME><VOUCHERNUMBER>${escape(v.id)}</VOUCHERNUMBER><AMOUNT>${escape(v.amount)}</AMOUNT><ALLLEDGERENTRIES.LIST><LEDGERNAME>Sales</LEDGERNAME><AMOUNT>${escape(v.amount)}</AMOUNT></ALLLEDGERENTRIES.LIST><ALLLEDGERENTRIES.LIST><LEDGERNAME>Bank</LEDGERNAME><AMOUNT>-${escape(v.amount)}</AMOUNT></ALLLEDGERENTRIES.LIST></VOUCHER>`).join('');
     // Replay the real client's explicit-FETCH + wildcard response shape. Duplicate
     // scalar leaves only; do not duplicate or collapse business subcollections.

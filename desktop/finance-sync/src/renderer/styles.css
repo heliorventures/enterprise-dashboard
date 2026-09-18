@@ -2,3 +2,5 @@
 #app-version{display:inline-block;white-space:nowrap}
 select { font: inherit; color: inherit; background: white; border: 1px solid #ccd8ed; border-radius: 8px; padding: 10px 14px; margin-left: 18px; }
 select:focus-visible { outline: 3px solid #759ce9; outline-offset: 2px; }
+
+#custom-range:not([hidden]){display:flex;flex-wrap:wrap;gap:16px;margin-top:16px}#custom-range label{display:flex;flex-direction:column;gap:6px;font-size:13px}#custom-range input{padding:10px;border:1px solid #ccd8ed;border-radius:8px;color:inherit;background:white}

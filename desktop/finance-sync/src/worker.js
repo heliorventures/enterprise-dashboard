@@ -25,7 +25,7 @@ process.parentPort.on('message',async({data})=>{
       terminal={type:'ready',companies:companies.map(({name,externalId})=>({name,externalId}))};
     } else if(data.type==='sync') {
       const code=await withLock({stateDirectory},()=>run(path.join(stateDirectory,'desktop.json'),false,{
-        config:{...config,stateDirectory,startup:{enabled:false},uploadAttempts:1,stopOnFailure:true,requestPauseMs:500,voucherWindowDays:7,periodMode:config.scope?'replace':undefined},token:config.token,selectedCompanyIds:data.selectedCompanyIds,
+        config:{...config,stateDirectory,startup:{enabled:false},uploadAttempts:1,stopOnFailure:true,requestPauseMs:500,voucherWindowDays:7,ledgerBatchSize:100,periodMode:config.scope?'replace':undefined},token:config.token,selectedCompanyIds:data.selectedCompanyIds,
         signal:controller.signal,quiet:true,onEvent:event=>send({type:'event',event:publicEvent(event)})
       }));
       terminal={type:'done',code};

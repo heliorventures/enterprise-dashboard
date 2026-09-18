@@ -2,6 +2,7 @@ function explainError(error={}) {
   const diagnostic=error.exportDiagnostic||error.diagnostic||{};
   const codes=[error.code,...(diagnostic.errorCodes||[])];
   const message=String(error.message||error.error||'');
+  if(message.includes('BATCH_LEDGER_'))return 'Tally returned an incomplete or changed ledger batch. No complete capture was uploaded. Check Tally and share the diagnostic log.';
   if(message.includes('PERIOD_CAPTURE_STALE'))return 'Finance already has newer data. This old capture is retained for investigation. Click Sync now again to take a fresh capture.';
   if(message.includes('PERIOD_BASELINE_REQUIRED'))return 'Run All data once for this company and resolve any Finance processing errors before using a shorter period.';
   if(message.includes('PERIOD_API_UPGRADE_REQUIRED'))return 'Finance needs a server update before period sync is available. Contact your administrator.';
@@ -24,7 +25,7 @@ function explainError(error={}) {
 }
 function publicEvent(event) {
   const result={};
-  for(const key of ['event','at','runId','company','companyExternalId','collection','batchId','count','records','bytesReceived','recordsReceived','durationMs','chunkCount','chunksAcknowledged','succeeded','failed','cancelled','coverageStatus','reportingStatus','periodUpdate','consistency','attempt','from','to']) {
+  for(const key of ['event','at','runId','company','companyExternalId','collection','batchId','count','records','bytesReceived','recordsReceived','durationMs','chunkCount','chunksAcknowledged','succeeded','failed','cancelled','coverageStatus','reportingStatus','periodUpdate','consistency','attempt','from','to','batchNumber','batchCount','totalLedgers']) {
     if(['string','number','boolean'].includes(typeof event[key]))result[key]=typeof event[key]==='string'?event[key].slice(0,2000):event[key];
   }
   if(event.error||event.event==='tally_export_failed')result.message=explainError({...event,diagnostic:event.diagnostic||event});

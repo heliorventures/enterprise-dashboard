@@ -142,6 +142,12 @@ async function main() {
     alpha.vouchers=alpha.vouchers.map(v=>v.id==='today'?{...v,amount:'150.55'}:v);
     await successful('current-month',[alpha.id]);await checkRows(alpha.vouchers);await checkRows(beta.vouchers,beta.id,false);
   });
+  await scenario('Custom month range replaces selected history and preserves other dates',async()=>{
+    alpha.vouchers=alpha.vouchers.map(v=>v.id==='previous'?{...v,amount:'44.44'}:v);
+    const month=iso(previous).slice(0,7);
+    await successful({kind:'custom',fromMonth:month,toMonth:month},[alpha.id]);
+    await checkRows(alpha.vouchers);await checkRows(beta.vouchers,beta.id,false);
+  });
   await scenario('Empty Today replacement deletes omitted vouchers only in that day',async()=>{
     alpha.vouchers=alpha.vouchers.filter(v=>v.date!==today);
     await successful('today',[alpha.id]);await checkRows(alpha.vouchers);await checkRows(beta.vouchers,beta.id,false);

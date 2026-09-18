@@ -30,7 +30,7 @@ async function createDesktop({config,stateDirectory,show=true}) {
   for(const [name,handler]of Object.entries(handlers))ipcMain.handle(`finance:${name}`,async(event,...args)=>{
     if(!authorized(event))return {ok:false,error:'This operation is unavailable.'};
     try {return {ok:true,value:await handler(...args)};}
-    catch(error){return {ok:false,error:name==='sync'?error.message:'The operation could not finish. Check again or contact your administrator.'};}
+    catch(error){return {ok:false,error:(name==='sync'||name==='start')?error.message:'The operation could not finish. Check again or contact your administrator.'};}
   });
   let closing=false;
   window.on('close',event=>{

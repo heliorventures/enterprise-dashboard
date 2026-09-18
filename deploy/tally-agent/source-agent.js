@@ -107,7 +107,7 @@ async function capture(config,company,directory,log) {
         errorCodes:codes(error),discardedRecords:count,action:error.exportDiagnostic?.action||safeText(error.message)}});
       log({event:'source_collection_failed',company:company.name,collection,error:error.message,
         discardedRecords:count,durationMs:Date.now()-collectionStarted,diagnostic:error.exportDiagnostic||null});
-      if(config.stopOnFailure||config.voucherWindowDays!==undefined)throw error;
+      if(config.stopOnFailure||config.voucherWindowDays!==undefined||config.ledgerBatchSize!==undefined)throw error;
       if(storedBytes>500*1024**2) throw error;
     }
   }
