@@ -11,6 +11,7 @@ const PATHS: Record<string, string> = {
   transactions: 'M5 4h14v2H5V4zm0 4h14l-2 12H7L5 8zm4 3h6v2H9v-2z',
   operations:
     'M4 6h10v2H4V6zm0 5h16v2H4v-2zm0 5h10v2H4v-2zm14.5-1.5 1.5 1.5 3.5-3.5-1.4-1.4-2.1 2.1-1-1-1.5 1.3z',
+  upload: 'M5 20h14v-2H5v2zM12 4l-5 5 1.41 1.41L11 7.83V16h2V7.83l2.59 2.58L17 9l-5-5z',
   logout: 'M10 4H4v16h6v-2H6V6h4V4zm7.6 5.4L15 7l6 5-6 5 2.6-2.4H10v-2h7.6z',
   refresh: 'M17.65 6.35A8 8 0 1 0 20 12h-2a6 6 0 1 1-6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z',
   download: 'M5 20h14v-2H5v2zM11 4v8.17l-2.59-2.58L7 11l5 5 5-5-1.41-1.41L13 12.17V4h-2z',

@@ -1,0 +1,78 @@
+<section class="grid-page">
+  <app-page-header [title]="meta().title" eyebrow="Management reports" [description]="meta().description">
+    <button class="btn ghost" type="button" (click)="exportCsv()" [disabled]="exporting() || loading() || !!error()">
+      <app-icon name="download" />
+      {{ exporting() ? 'Exporting…' : 'Export CSV' }}
+    </button>
+  </app-page-header>
+  <app-report-nav />
+
+  @if (error()) {
+    <p class="banner" role="alert">{{ error() }}</p>
+  }
+
+  <section class="kpi-grid">
+    <app-kpi-card label="Vouchers" [value]="text(cards()['vouchers'])" icon="transactions" [hint]="period().from ? period().from + ' to ' + period().to : ''" />
+    <app-kpi-card label="Receipts / sales" [value]="money(cards()['inflow'])" icon="receivables" tone="positive" />
+    <app-kpi-card label="Payments / purchases" [value]="money(cards()['outflow'])" icon="payables" />
+    <app-kpi-card
+      label="Net movement"
+      [value]="money(cards()['net'])"
+      icon="overview"
+      [tone]="netTone()"
+    />
+  </section>
+
+  <article class="grid-card">
+    <div class="grid-toolbar">
+      <div>
+        <h2><app-icon name="reports" /> {{ meta().title }}</h2>
+        <p>Imported Tally vouchers. Amounts follow voucher type: receipts and sales as inflow, payments and purchases as outflow.</p>
+      </div>
+    </div>
+    <app-filter-panel [summary]="filterSummary()">
+      <form class="filter-bar filters-6" (submit)="apply($event)">
+        <app-company-select [companies]="companies()" [value]="company()" (companyChange)="onCompany($event)" />
+        <label class="field">
+          <span>From</span>
+          <input type="date" [value]="from()" (change)="onFrom($event)" />
+        </label>
+        <label class="field">
+          <span>To</span>
+          <input type="date" [value]="to()" (change)="onTo($event)" />
+        </label>
+        <label class="field">
+          <span>Voucher type</span>
+          <select [value]="type()" (change)="onType($event)">
+            <option value="">All types</option>
+            @for (name of types(); track name) {
+              <option [value]="name">{{ name }}</option>
+            }
+          </select>
+        </label>
+        @if (kind() === 'large') {
+          <label class="field">
+            <span>Minimum amount</span>
+            <input type="number" min="0" [value]="minAmount()" (input)="onMin($event)" />
+          </label>
+        }
+        <div class="filter-actions">
+          <button type="submit" class="btn ghost" [disabled]="loading()">Apply</button>
+          <button type="button" class="btn ghost" (click)="clear()">
+            <app-icon name="close" />
+            Reset
+          </button>
+        </div>
+      </form>
+    </app-filter-panel>
+    <app-data-table
+      [label]="meta().title"
+      [rows]="items()"
+      [columns]="columns()"
+      [rowKey]="rowId"
+      [loading]="loading()"
+      [error]="error()"
+      empty="No vouchers in this period. Widen the dates or choose another company."
+    />
+  </article>
+</section>

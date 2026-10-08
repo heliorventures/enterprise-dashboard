@@ -1,0 +1,8 @@
+node_modules/
+storage/imports/*
+storage/documents/*
+!storage/imports/.gitkeep
+!storage/documents/.gitkeep
+.env
+ui/node_modules/
+ui/dist/
