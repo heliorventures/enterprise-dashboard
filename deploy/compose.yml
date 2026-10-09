@@ -10,9 +10,16 @@ services:
       HOST: 0.0.0.0
       PORT: "3000"
       TALLY_MODE: push
+      EXCEL_IMPORT_STORAGE: /app/storage
     init: true
     restart: unless-stopped
     read_only: true
+    volumes:
+      - type: bind
+        source: ${APP_SHARED_DIR}/storage
+        target: /app/storage
+        bind:
+          create_host_path: false
     tmpfs: [/tmp]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]

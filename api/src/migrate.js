@@ -39,7 +39,9 @@ module.exports = { migrate };
 
 if (require.main === module) {
   const db = require('./db');
-  db.migrate().then(() => console.log('Database migrations applied.'))
+  db.migrate()
+    .then(() => require('./intelligence/migrate').migrate())
+    .then(() => console.log('Core and Excel-import database migrations applied.'))
     .catch(error => { console.error(error.message); process.exitCode = 1; })
     .finally(() => db.close());
 }

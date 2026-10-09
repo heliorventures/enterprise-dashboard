@@ -7,6 +7,13 @@ param()
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $shared = Join-Path $root 'dist-images/container-test-shared'
 New-Item -ItemType Directory -Path $shared -Force | Out-Null
+$storage = Join-Path $shared 'storage'
+New-Item -ItemType Directory -Path $storage -Force | Out-Null
+Invoke-Native docker @('run', '--rm', '--network', 'none', '--read-only', '--user', '0:0',
+    '--cap-drop', 'ALL', '--cap-add', 'CHOWN', '--cap-add', 'FOWNER', '--cap-add', 'DAC_OVERRIDE',
+    '--security-opt', 'no-new-privileges:true', '--mount', "type=bind,src=$storage,dst=/app/storage",
+    'enterprise-dashboard-api:local-test', 'sh', '-eu', '-c',
+    'mkdir -p /app/storage/imports; chown node:node /app/storage /app/storage/imports; chmod 700 /app/storage /app/storage/imports')
 $hash = & docker run --rm enterprise-dashboard-ui:local-test caddy hash-password --plaintext local-test-password
 if ($LASTEXITCODE -ne 0) { throw 'Unable to generate test hash' }
 $utf8 = New-Object Text.UTF8Encoding($false)

@@ -20,6 +20,7 @@ Only `/opt/apps/enterprise-dashboard` and Compose project `enterprise-dashboard`
 /opt/apps/enterprise-dashboard/
   shared/api.env          # database credentials and sender token, mode 600
   shared/ui.env           # dashboard username and bcrypt hash, mode 600
+  shared/storage/imports/ # uploaded Excel workbooks, persistent across releases
   incoming/<tag>.<uuid>/   # staged uploads
   releases/<tag>/         # current or unpromoted release artifacts
   current -> releases/<tag>
@@ -27,6 +28,10 @@ Only `/opt/apps/enterprise-dashboard` and Compose project `enterprise-dashboard`
 ```
 
 Requires Linux Bash, curl, flock, sha256sum, SSH/SCP and Docker Compose **2.30 or newer** (raw env-file support). The account must manage Docker and own this dedicated app directory. Commands build Linux amd64 images by default; use `-Platform linux/arm64` if the VPS is ARM.
+
+Excel workbooks are stored in `/opt/apps/enterprise-dashboard/shared/storage/imports` on the VPS. Compose binds `shared/storage` to `/app/storage` inside the API. Deployment creates the directories, assigns them to the image's `node` user, and restricts access to that owner while keeping the remaining API filesystem read-only. Uploaded files survive container replacement and release rollback.
+
+Back up the application's `shared` folder with an account that can read these owner-only files, and back up the PostgreSQL `enterprise_dashboard` database separately. The folder contains both runtime credentials and uploaded workbooks; the database contains the import records and processed financial data. Restore both together, keeping the same `/app/storage` container path so stored workbook references remain valid. Release archives alone are not a complete backup.
 
 ## First deployment preparation
 
@@ -63,10 +68,18 @@ Requires Linux Bash, curl, flock, sha256sum, SSH/SCP and Docker Compose **2.30 o
 
 ## Build, upload, deploy and test
 
+To apply database changes first from an already uploaded release, run from local PowerShell:
+
+```powershell
+.\deploy\scripts\migrate-database.ps1 -Tag finance-023
+```
+
+This updates the live database with both core and Excel-import migrations, using the uploaded image and credentials on the VPS. It does not build or upload images, restart application services, or promote the release. Take a database backup before applying changes. SSH prompts work as with the deployment scripts. Wait for `All database migrations completed.` before deploying the application. Future releases also run both migration sets during their pre-start database step.
+
 From this repository in PowerShell, after setup (the scripts default to the confirmed finance domain):
 
 ```powershell
-.\deploy\scripts\build-save-upload-images.ps1 -Tag finance-008 -PublicBaseUrl https://finance.heliorsoft.com -DeployAfterUpload
+.\deploy\scripts\build-save-upload-images.ps1 -Tag finance-023 -PublicBaseUrl https://finance.heliorsoft.com -DeployAfterUpload
 ```
 
 This builds both images locally, saves tarballs, computes SHA-256 hashes, uploads to a unique staging directory, verifies checksums on the VPS, loads images, validates UI configuration, applies database migrations, starts the containers, runs API checks and verifies public health/access protection. It archives the previous release only after validation succeeds. Repeat with a new immutable tag:

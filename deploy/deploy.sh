@@ -47,6 +47,18 @@ compose() { docker compose -p enterprise-dashboard -f "$target/compose.yml" "$@"
 compose config --quiet
 docker load -i "$target/enterprise-dashboard-api-$tag.tar"
 docker load -i "$target/enterprise-dashboard-ui-$tag.tar"
+# Prepare only the app's storage mount; the API continues to run as node.
+[[ ! -L "$APP_SHARED_DIR/storage" ]] || { echo 'Storage directory must not be a symbolic link'; exit 1; }
+mkdir -p "$APP_SHARED_DIR/storage"
+docker run --rm --network none --read-only --user 0:0 \
+  --cap-drop ALL --cap-add CHOWN --cap-add FOWNER --cap-add DAC_OVERRIDE \
+  --security-opt no-new-privileges:true \
+  --mount "type=bind,src=$APP_SHARED_DIR/storage,dst=/app/storage" \
+  "enterprise-dashboard-api:$tag" sh -eu -c '
+    mkdir -p /app/storage/imports
+    chown node:node /app/storage /app/storage/imports
+    chmod 700 /app/storage /app/storage/imports
+  '
 compose run --rm --no-deps enterprise-dashboard-ui caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 # Runs before replacing healthy containers. Migrations must support the previous image.
 if [[ ! -f "$target/.deployed" && "$target" != "$app/archive/"* ]]; then
@@ -56,6 +68,8 @@ fi
 restore_previous() {
   result=$?
   trap - ERR
+  echo "Release $tag failed validation. API startup logs before recovery:"
+  compose logs --no-color --tail 80 enterprise-dashboard-api || true
   if [[ -n "$previous" && "$previous" != "$target" ]]; then
     echo 'Validation failed; restoring previous application containers.'
     IMAGE_TAG=$(basename "$previous") docker compose -p enterprise-dashboard -f "$previous/compose.yml" up -d --wait --wait-timeout 180 || echo 'Automatic recovery failed; inspect containers immediately.'
