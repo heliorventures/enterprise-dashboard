@@ -9,6 +9,8 @@ import { KpiCard } from '../../shared/kpi-card';
 import { fullInr } from '../../shared/money';
 import { PageHeader } from '../../shared/page-header';
 import { recordKey } from '../../shared/record-columns';
+import { LatestRequest } from '../../shared/latest-request';
+import { importDate, importText } from './import-columns';
 import { ImportNav } from './import-nav';
 
 interface IssueRow {
@@ -28,8 +30,12 @@ export class ImportDetail {
   private readonly api = inject(ExcelImportService);
   private readonly route = inject(ActivatedRoute);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly detailRequest = new LatestRequest();
+  private readonly issuesRequest = new LatestRequest();
   readonly recordKey = recordKey;
   readonly fullInr = fullInr;
+  readonly date = importDate;
+  readonly provenanceText = importText;
   readonly loading = signal(true);
   readonly error = signal('');
   readonly title = signal('Import');
@@ -43,7 +49,12 @@ export class ImportDetail {
   readonly issues = signal<IssueRow[]>([]);
   private pollSub?: Subscription;
   readonly reconColumns: DataColumn<{ status: string; count: number; difference: number }>[] = [
-    { key: 'status', label: 'Status', value: (row) => row.status.replaceAll('_', ' '), primary: true },
+    {
+      key: 'status',
+      label: 'Status',
+      value: (row) => row.status.replaceAll('_', ' '),
+      primary: true,
+    },
     { key: 'count', label: 'Count', value: (row) => String(row.count), primary: true },
     { key: 'diff', label: 'Difference', value: (row) => fullInr(row.difference), numeric: true },
   ];
@@ -54,39 +65,53 @@ export class ImportDetail {
   ];
 
   constructor() {
-    const id = this.route.snapshot.paramMap.get('id') || '';
     this.destroyRef.onDestroy(() => this.pollSub?.unsubscribe());
-    this.api
-      .get(id)
+    this.route.paramMap
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (data) => {
-          this.title.set(String(data.file?.['fileName'] || data.file?.['file_name'] || 'Import'));
-          this.companyName.set(data.companyName || '');
-          this.description.set(String(data.file?.['detectedTitle'] || data.file?.['detected_title'] || ''));
-          this.batch.set(data.batch || null);
-          this.reconciliation.set(data.reconciliation || []);
-          this.loading.set(false);
-          const status = String(data.file?.['status'] || data.batch?.['status'] || '');
-          if (status === 'PROCESSING') this.watchProgress(id);
-        },
-        error: (err) => {
-          this.error.set(err.error?.error || 'Unable to load import');
-          this.loading.set(false);
-        },
-      });
-    this.api
-      .errors(id)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (rows) =>
-          this.issues.set(
-            (rows || []).map((row, index) => ({
-              id: String(row.source_row_number) + '-' + index,
-              ...row,
-            })),
-          ),
-      });
+      .subscribe((params) => this.load(params.get('id') || ''));
+  }
+
+  private load(id: string) {
+    this.pollSub?.unsubscribe();
+    this.loading.set(true);
+    this.error.set('');
+    this.batch.set(null);
+    this.issues.set([]);
+    this.reconciliation.set([]);
+    this.title.set('Import');
+    this.companyName.set('');
+    this.description.set('');
+    this.progressLabel.set('');
+    this.progressPercent.set(0);
+    this.progressActive.set(false);
+    this.detailRequest.run(this.api.get(id), {
+      next: (data) => {
+        this.title.set(String(data.file?.['fileName'] || data.file?.['file_name'] || 'Import'));
+        this.companyName.set(data.companyName || '');
+        this.description.set(
+          String(data.file?.['detectedTitle'] || data.file?.['detected_title'] || ''),
+        );
+        this.batch.set(data.batch || null);
+        this.reconciliation.set(data.reconciliation || []);
+        this.loading.set(false);
+        const status = String(data.file?.['status'] || data.batch?.['status'] || '');
+        if (status === 'PROCESSING') this.watchProgress(id);
+      },
+      error: (err) => {
+        this.error.set(err.error?.error || 'Unable to load import');
+        this.loading.set(false);
+      },
+    });
+    this.issuesRequest.run(this.api.errors(id), {
+      next: (rows) =>
+        this.issues.set(
+          (rows || []).map((row, index) => ({
+            id: String(row.source_row_number) + '-' + index,
+            ...row,
+          })),
+        ),
+      error: (err) => this.error.set(err.error?.error || 'Unable to load row issues'),
+    });
   }
 
   private watchProgress(id: string) {
@@ -104,11 +129,19 @@ export class ImportDetail {
           this.progressLabel.set(state.message || state.status);
           if (state.batch) this.batch.set(state.batch);
           if (state.reconciliation?.length) this.reconciliation.set(state.reconciliation);
-          if (state.status === 'COMPLETED' || state.batchStatus === 'COMPLETED' || state.status === 'FAILED') {
+          if (
+            state.status === 'COMPLETED' ||
+            state.batchStatus === 'COMPLETED' ||
+            state.status === 'FAILED'
+          ) {
             this.progressActive.set(false);
             this.pollSub?.unsubscribe();
             if (state.status === 'FAILED') this.error.set(state.error || 'Processing failed');
           }
+        },
+        error: (err) => {
+          this.progressActive.set(false);
+          this.error.set(err.error?.error || 'Unable to follow import progress');
         },
       });
   }

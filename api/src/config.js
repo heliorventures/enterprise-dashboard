@@ -7,6 +7,7 @@ module.exports = {
   tallyMode: process.env.TALLY_MODE || 'push',
   dashboardUser: process.env.DASHBOARD_USER || 'admin',
   dashboardPassword: process.env.DASHBOARD_PASSWORD || (process.env.NODE_ENV === 'production' ? '' : 'admin'),
+  dashboardPasswordHash: process.env.DASHBOARD_PASSWORD_HASH || '',
   sessionSecret: process.env.DASHBOARD_SESSION_SECRET || '',
   db: {
     user: process.env.DB_USER || 'enterprise_dashboard',

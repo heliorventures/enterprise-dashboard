@@ -19,7 +19,7 @@ Only `/opt/apps/enterprise-dashboard` and Compose project `enterprise-dashboard`
 ```text
 /opt/apps/enterprise-dashboard/
   shared/api.env          # database credentials and sender token, mode 600
-  shared/ui.env           # dashboard username and bcrypt hash, mode 600
+  shared/ui.env           # API dashboard username, bcrypt hash and session key, mode 600
   shared/storage/imports/ # uploaded Excel workbooks, persistent across releases
   incoming/<tag>.<uuid>/   # staged uploads
   releases/<tag>/         # current or unpromoted release artifacts
@@ -62,7 +62,7 @@ Back up the application's `shared` folder with an account that can read these ow
    .\deploy\scripts\configure-ui.ps1 -DashboardUser admin -GeneratePassword
    ```
 
-   Save the generated password displayed once after success. Omit `-GeneratePassword` to enter your own password at a hidden prompt. The script connects over SSH, hashes the password using a temporary Caddy container, and creates or atomically replaces `/opt/apps/enterprise-dashboard/shared/ui.env` from `ui.env.example` with permissions `600`. Only the hash is saved; failed hashing or template validation preserves the existing file. Running this command again changes the saved login; deploy afterward to apply it. It does not restart existing applications or change database credentials. The same SSH options as initialization are supported.
+   Save the generated password displayed once after success. Omit `-GeneratePassword` to enter your own password at a hidden prompt. The script connects over SSH, hashes the password using a temporary Caddy container, and creates or atomically replaces `/opt/apps/enterprise-dashboard/shared/ui.env` with permissions `600`. The API reads this login file; only the password hash and a separate random session signing key are saved. Failed hashing or template validation preserves the existing file. Existing installations receive a random session key during deployment if one is missing. Running this command again changes the saved login; deploy afterward to apply it. It does not restart existing applications or change database credentials. The same SSH options as initialization are supported.
 
    Env files use raw format: no surrounding quotes and no doubling `$`. Never place the ingestion token in Angular code or browser storage. Configure the Tally sender with the token from `shared/api.env` using a secure channel.
 
@@ -71,15 +71,27 @@ Back up the application's `shared` folder with an account that can read these ow
 To apply database changes first from an already uploaded release, run from local PowerShell:
 
 ```powershell
-.\deploy\scripts\migrate-database.ps1 -Tag finance-023
+.\deploy\scripts\migrate-database.ps1 -Tag finance-024
 ```
 
-This updates the live database with both core and Excel-import migrations, using the uploaded image and credentials on the VPS. It does not build or upload images, restart application services, or promote the release. Take a database backup before applying changes. SSH prompts work as with the deployment scripts. Wait for `All database migrations completed.` before deploying the application. Future releases also run both migration sets during their pre-start database step.
+Use the tag you have actually built and uploaded; `finance-024` is an example for the consolidated release, not an already uploaded image. This updates the live database through the single `api/migrations` runner, using that image and the credentials on the VPS. It does not build or upload images, restart services, or promote the release. Take a database backup before applying changes. Wait for `All database migrations completed.` before deploying the application. Older uploaded images contain only the migrations available when they were built.
+
+To keep database deployment first, build/upload the new release without starting it, then apply migrations and deploy:
+
+```powershell
+.\deploy\scripts\build-save-upload-images.ps1 -Tag finance-024 -PublicBaseUrl https://finance.heliorsoft.com
+.\deploy\scripts\migrate-database.ps1 -Tag finance-024
+.\deploy\scripts\deploy-on-vps.ps1 -Tag finance-024 -PublicBaseUrl https://finance.heliorsoft.com
+```
+
+The consolidated runner adopts existing core/Intel migration evidence into `application_migrations` without changing the legacy identities that older images recognise. All new migration files live in `api/migrations`; there is no separate Intelligence migration folder or service. See [Intelligence data and publication rules](../docs/intelligence/README.md).
+
+For the first consolidated migration, finish any Excel processing and prevent new uploads until the new API is running. After migration 019, older Excel processors are unsupported: their writes lack the generation ownership required to preserve history. Legacy tracker compatibility allows older Tally/reporting containers to start, but does not make old Excel import behavior safe. Use a consolidated image for uploads, reprocessing and reconciliation corrections. Application rollback does not undo the database migration or restore workbook files; future schema changes must be reviewed for compatibility with the intended rollback image.
 
 From this repository in PowerShell, after setup (the scripts default to the confirmed finance domain):
 
 ```powershell
-.\deploy\scripts\build-save-upload-images.ps1 -Tag finance-023 -PublicBaseUrl https://finance.heliorsoft.com -DeployAfterUpload
+.\deploy\scripts\build-save-upload-images.ps1 -Tag finance-024 -PublicBaseUrl https://finance.heliorsoft.com -DeployAfterUpload
 ```
 
 This builds both images locally, saves tarballs, computes SHA-256 hashes, uploads to a unique staging directory, verifies checksums on the VPS, loads images, validates UI configuration, applies database migrations, starts the containers, runs API checks and verifies public health/access protection. It archives the previous release only after validation succeeds. Repeat with a new immutable tag:

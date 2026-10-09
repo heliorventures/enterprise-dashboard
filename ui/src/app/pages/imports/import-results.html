@@ -2,9 +2,13 @@
   <app-page-header
     title="Excel outstanding"
     eyebrow="Excel vs Tally"
-    description="Balances from your uploaded Excel files. Use Compare with Tally to see differences. This is not the Overview."
+    description="Current balances use the latest successful dated snapshot for each company. Uploaded files retain historical generations."
   >
-    <app-company-select [companies]="companies()" [value]="company()" (companyChange)="onCompany($event)" />
+    <app-company-select
+      [companies]="companies()"
+      [value]="company()"
+      (companyChange)="onCompany($event)"
+    />
   </app-page-header>
   <app-import-nav />
 
@@ -13,7 +17,11 @@
   }
 
   <section class="kpi-grid">
-    <app-kpi-card label="Outstanding" [value]="money(cards()['totalOutstanding'])" icon="receivables" />
+    <app-kpi-card
+      label="Outstanding"
+      [value]="money(cards()['totalOutstanding'])"
+      icon="receivables"
+    />
     <app-kpi-card label="Paid" [value]="money(cards()['totalPaid'])" icon="cash" />
     <app-kpi-card
       label="Financial gap"
@@ -30,9 +38,24 @@
     <div class="grid-toolbar">
       <div>
         <h2><app-icon name="receivables" /> Outstanding</h2>
-        <p>From uploaded Excel, scoped to the company on each file.</p>
+        <p>
+          Current published company snapshots. Open an account for balances, ageing and decisions.
+        </p>
       </div>
+      <app-import-export type="outstanding" [company]="company()" [q]="query()" />
     </div>
+    <form class="filter-bar" (submit)="applySearch($event)">
+      <label class="field search"
+        ><span>Search outstanding</span>
+        <input
+          type="search"
+          [value]="search()"
+          (input)="onSearch($event)"
+          placeholder="Account, PAN or GST"
+        />
+      </label>
+      <button type="submit" class="btn ghost">Search</button>
+    </form>
     <app-data-table
       label="Excel outstanding"
       [rows]="outstanding()"
@@ -40,6 +63,14 @@
       [rowKey]="rowId"
       [loading]="loading()"
       empty="No Excel outstanding for this company."
+    />
+    <app-pager
+      [total]="total()"
+      [busy]="outstandingLoading()"
+      [page]="page()"
+      [pageSize]="pageSize()"
+      (pageChange)="onPage($event)"
+      (pageSizeChange)="onPageSize($event)"
     />
   </article>
 
@@ -66,6 +97,7 @@
         <h2><app-icon name="ledgers" /> Reconciliation</h2>
         <p>Each file is matched only to that company’s existing Tally ledgers.</p>
       </div>
+      <app-import-export type="reconciliation" [company]="company()" />
     </div>
     <app-data-table
       label="Excel reconciliation"

@@ -1,4 +1,5 @@
 const { parseDate, parseDecimal, parseInteger, normalizeSpace } = require('../excel/parser');
+const decimal = require('./decimal');
 
 const DATE_FIELDS = new Set(['last_payment_date', 'last_date']);
 const INT_FIELDS = new Set(['credit_days']);
@@ -51,7 +52,6 @@ function transformRow(raw, columns) {
     if (result.value != null) mapped[col.target] = result.value;
   }
   if (!mapped.account_name && mapped.particulars) mapped.account_name = mapped.particulars;
-  if (!mapped.account_name && raw.Particulars) mapped.account_name = normalizeSpace(raw.Particulars);
   if (mapped.account_name && !mapped.particulars) mapped.particulars = mapped.account_name;
   mapped.extra = extra;
   return { mapped, errors };
@@ -62,8 +62,8 @@ function money(value) {
 }
 
 function netOutstanding(mapped, formula = 'pending_bill_debit - pending_bill_credit') {
-  if (formula === 'bill_amount - paid_amount') return money((mapped.bill_amount || 0) - (mapped.paid_amount || 0));
-  return money((mapped.pending_bill_debit || 0) - (mapped.pending_bill_credit || 0));
+  if (formula === 'bill_amount - paid_amount') return decimal.subtract(mapped.bill_amount || 0, mapped.paid_amount || 0);
+  return decimal.subtract(mapped.pending_bill_debit || 0, mapped.pending_bill_credit || 0);
 }
 
 function ageingEntries(mapped, columns) {

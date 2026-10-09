@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Apply core and Excel-import database migrations from an uploaded VPS release.
+Apply application database migrations from an uploaded VPS release.
 .DESCRIPTION
 Updates the live database without rebuilding images or restarting application
 services. SSH may prompt for the VPS password or key passphrase. Database
@@ -18,20 +18,6 @@ param(
 )
 . "$PSScriptRoot/common.ps1"
 Assert-RemoteInputs $VpsHost $VpsUser $AppDir ''
-$migration = @'
-const db = require('./src/db');
-db.migrate()
-  .then(() => {
-    console.log('Core database migrations applied.');
-    return require('./src/intelligence/migrate').migrate();
-  })
-  .then(() => console.log('Excel-import database migrations applied. All database migrations completed.'))
-  .catch(error => {
-    console.error('Database migration failed:', error.stack || error.message);
-    process.exitCode = 1;
-  })
-  .finally(() => db.close());
-'@
 $remoteCommand = @'
 set -eu
 app='__APP_DIR__'
@@ -48,7 +34,7 @@ exec 9>"$app/.deploy.lock"
 flock -n 9 || { echo 'Another setup, migration or deployment is running.' >&2; exit 1; }
 export APP_SHARED_DIR="$app/shared" IMAGE_TAG="$tag"
 test -s "$APP_SHARED_DIR/api.env"
-tr -d '\r' | docker compose -p enterprise-dashboard-migrations -f "$release/compose.yml" run --rm -T --no-deps enterprise-dashboard-api node
+docker compose -p enterprise-dashboard-migrations -f "$release/compose.yml" run --rm -T --no-deps enterprise-dashboard-api node src/migrate.js
 '@
 $remoteCommand = $remoteCommand.Replace('__APP_DIR__', $AppDir).Replace('__TAG__', $Tag).Replace("`r`n", "`n")
 $sshOptions = @(Get-SshOptions $SshPort $SshIdentityFile -Interactive:(-not $NonInteractive))
@@ -57,7 +43,9 @@ Write-Host "Applying database migrations from $Tag on $remote. Application servi
 $previousEncoding = $OutputEncoding
 try {
     $OutputEncoding = New-Object Text.UTF8Encoding($false)
-    $migration.Replace("`r`n", "`n") | & ssh @sshOptions -T $remote $remoteCommand
+    # Keep Bash syntax in stdin; Windows native argument quoting can strip nested
+    # quotes when a multiline command is supplied as an SSH command argument.
+    $remoteCommand | & ssh @sshOptions -T $remote "tr -d '\r' | bash -se"
     if ($LASTEXITCODE -ne 0) { throw "Database migration failed (SSH exit code $LASTEXITCODE). Review the migration error above." }
 } finally {
     $OutputEncoding = $previousEncoding

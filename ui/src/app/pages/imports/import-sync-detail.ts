@@ -1,5 +1,6 @@
 import { Component, inject, signal } from '@angular/core';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ExcelImportService } from '../../services/excel-import';
 import { DataColumn, DataTable } from '../../shared/data-table';
 import { Icon } from '../../shared/icon';
@@ -8,6 +9,7 @@ import { LatestRequest } from '../../shared/latest-request';
 import { fullInr } from '../../shared/money';
 import { PageHeader } from '../../shared/page-header';
 import { ImportNav } from './import-nav';
+import { comparisonMoney, importDate } from './import-columns';
 
 interface Suggestion {
   id: number;
@@ -27,8 +29,10 @@ interface Suggestion {
 export class ImportSyncDetail {
   private readonly api = inject(ExcelImportService);
   private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
   private readonly request = new LatestRequest();
   private readonly searchRequest = new LatestRequest();
+  private readonly saveRequest = new LatestRequest();
   readonly loading = signal(true);
   readonly saving = signal(false);
   readonly error = signal('');
@@ -37,17 +41,45 @@ export class ImportSyncDetail {
   readonly ledgerHits = signal<Suggestion[]>([]);
   readonly selectedLedgerId = signal<string>('');
   readonly fullInr = fullInr;
+  readonly comparisonMoney = comparisonMoney;
+  readonly date = importDate;
   readonly ageingColumns: DataColumn<Record<string, unknown>>[] = [
-    { key: 'label', label: 'Bucket', value: (row) => String(row['bucket_label'] || row['ageing_bucket'] || '—'), primary: true },
-    { key: 'debit', label: 'Debit', value: (row) => fullInr(Number(row['debit_amount'] || 0)), numeric: true, primary: true },
-    { key: 'credit', label: 'Credit', value: (row) => fullInr(Number(row['credit_amount'] || 0)), numeric: true },
+    {
+      key: 'label',
+      label: 'Bucket',
+      value: (row) => String(row['bucket_label'] || row['ageing_bucket'] || '—'),
+      primary: true,
+    },
+    {
+      key: 'debit',
+      label: 'Debit',
+      value: (row) => fullInr(Number(row['debit_amount'] || 0)),
+      numeric: true,
+      primary: true,
+    },
+    {
+      key: 'credit',
+      label: 'Credit',
+      value: (row) => fullInr(Number(row['credit_amount'] || 0)),
+      numeric: true,
+    },
   ];
 
   constructor() {
-    this.load(this.route.snapshot.paramMap.get('id') || '');
+    this.route.paramMap
+      .pipe(takeUntilDestroyed())
+      .subscribe((params) => this.load(params.get('id') || ''));
   }
 
   load(id: string) {
+    this.searchRequest.cancel();
+    this.saveRequest.cancel();
+    this.detail.set(null);
+    this.ledgerHits.set([]);
+    this.ledgerQuery.set('');
+    this.selectedLedgerId.set('');
+    this.saving.set(false);
+    this.error.set('');
     this.loading.set(true);
     this.request.run(this.api.syncDetail(id), {
       next: (data) => {
@@ -120,6 +152,14 @@ export class ImportSyncDetail {
     return this.comparison()['inSync'] === true;
   }
 
+  comparisonAvailable() {
+    return (
+      this.comparison()['comparisonAvailable'] !== false &&
+      this.detail()?.['status'] !== 'COMPARISON_UNAVAILABLE' &&
+      this.comparison()['difference'] != null
+    );
+  }
+
   canMap() {
     return this.mapping()['canMap'] === true;
   }
@@ -137,6 +177,7 @@ export class ImportSyncDetail {
     this.ledgerQuery.set(q);
     const company = String(this.company()['tallyCompanyId'] || '');
     if (!company || !q.trim()) {
+      this.searchRequest.cancel();
       this.ledgerHits.set([]);
       return;
     }
@@ -148,13 +189,18 @@ export class ImportSyncDetail {
 
   save() {
     const id = String(this.detail()?.['id'] || '');
-    if (!id || !this.canMap()) return;
+    if (!id || !this.canMap() || this.saving() || this.loading()) return;
+    const selected = this.selectedLedgerId();
+    if (selected && (!Number.isSafeInteger(Number(selected)) || Number(selected) <= 0)) return;
     this.saving.set(true);
-    this.api.mapLedger(id, this.selectedLedgerId() ? Number(this.selectedLedgerId()) : null).subscribe({
+    this.saveRequest.run(this.api.mapLedger(id, selected ? Number(selected) : null), {
       next: (data) => {
         this.detail.set(data);
         this.saving.set(false);
         this.error.set('');
+        const updatedId = String(data['id'] || '');
+        if (updatedId && updatedId !== id)
+          void this.router.navigate(['/imports/sync', updatedId], { replaceUrl: true });
       },
       error: (err) => {
         this.saving.set(false);
@@ -164,6 +210,7 @@ export class ImportSyncDetail {
   }
 
   clearMap() {
+    if (this.saving() || this.loading()) return;
     this.selectedLedgerId.set('');
     this.save();
   }

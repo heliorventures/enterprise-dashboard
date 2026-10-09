@@ -11,6 +11,7 @@ import { fullInr } from '../../shared/money';
 import { PageHeader } from '../../shared/page-header';
 import { Pager } from '../../shared/pager';
 import { ImportNav } from './import-nav';
+import { comparisonMoney, importDate } from './import-columns';
 
 @Component({
   providers: [CompanyDirectory],
@@ -70,7 +71,7 @@ export class ImportSync {
     {
       key: 'diff',
       label: 'Difference',
-      value: (row) => fullInr(Number(row['difference'] || 0)),
+      value: (row) => comparisonMoney(row['difference']),
       numeric: true,
       primary: true,
       tone: (row) => (Math.abs(Number(row['difference'] || 0)) > 1000 ? 'negative' : 'neutral'),
@@ -81,11 +82,23 @@ export class ImportSync {
       value: (row) => this.statusLabel(String(row['status'] || '')),
       primary: true,
     },
+    { key: 'reportDate', label: 'Excel date', value: (row) => importDate(row['reporting_date']) },
+    {
+      key: 'tallyDate',
+      label: 'Tally balance date',
+      value: (row) => importDate(row['tally_balance_date']),
+    },
   ];
   readonly filterSummary = computed(() =>
     [
-      this.company() === 'all' ? 'All companies' : this.companies().find((item) => item.id === this.company())?.name,
-      this.status() === 'differences' ? 'Differences only' : this.status() === 'all' ? 'All statuses' : this.status().replaceAll('_', ' '),
+      this.company() === 'all'
+        ? 'All companies'
+        : this.companies().find((item) => item.id === this.company())?.name,
+      this.status() === 'differences'
+        ? 'Differences only'
+        : this.status() === 'all'
+          ? 'All statuses'
+          : this.status().replaceAll('_', ' '),
       this.query() ? `Search “${this.query()}”` : '',
       this.minDifference() ? `Gap ≥ ${this.minDifference()}` : '',
       this.mapped() ? this.mapped() : '',
@@ -101,6 +114,7 @@ export class ImportSync {
     { id: 'MISSING_IN_SOURCE', label: 'Missing in Excel' },
     { id: 'PARTIALLY_MATCHED', label: 'Needs confirmation' },
     { id: 'MATCHED', label: 'In sync' },
+    { id: 'COMPARISON_UNAVAILABLE', label: 'Comparison unavailable' },
   ];
 
   constructor() {
@@ -129,12 +143,16 @@ export class ImportSync {
     if (status === 'MISSING_IN_TALLY') return 'In Excel, not in Tally';
     if (status === 'MISSING_IN_SOURCE') return 'In Tally, not in Excel';
     if (status === 'PARTIALLY_MATCHED') return 'Needs confirmation';
+    if (status === 'COMPARISON_UNAVAILABLE') return 'Comparison unavailable';
     return status.replaceAll('_', ' ') || '—';
   }
 
   load() {
     this.loading.set(true);
     this.error.set('');
+    this.items.set([]);
+    this.counts.set({});
+    this.total.set(0);
     this.request.run(
       this.api.sync({
         company: this.company(),

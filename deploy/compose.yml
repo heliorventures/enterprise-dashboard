@@ -5,6 +5,8 @@ services:
     env_file:
       - path: ${APP_SHARED_DIR:?APP_SHARED_DIR is required}/api.env
         format: raw
+      - path: ${APP_SHARED_DIR}/ui.env
+        format: raw
     environment:
       NODE_ENV: production
       HOST: 0.0.0.0
@@ -38,9 +40,6 @@ services:
     image: enterprise-dashboard-ui:${IMAGE_TAG:?IMAGE_TAG is required}
     environment:
       RELEASE_TAG: ${IMAGE_TAG}
-    env_file:
-      - path: ${APP_SHARED_DIR}/ui.env
-        format: raw
     restart: unless-stopped
     depends_on:
       enterprise-dashboard-api:

@@ -1,11 +1,13 @@
 const db = require('../db');
 const { money } = require('../transform/normalize');
+const decimal = require('../transform/decimal');
 
 function inr(value) {
-  return money(value);
+  return decimal.amount(value);
 }
 
 async function summary({ companyId } = {}) {
+  return db.readSnapshot(async()=>{
   const filter = companyId ? 'AND o.company_id=$1' : '';
   const params = companyId ? [companyId] : [];
   const outstanding = await db.query(
@@ -15,14 +17,14 @@ async function summary({ companyId } = {}) {
         COALESCE(sum(paid_amount),0) AS paid,
         COALESCE(sum(pending_bill_debit),0) AS debit,
         COALESCE(sum(pending_bill_credit),0) AS credit
-     FROM intel_outstanding o
+     FROM intel_current_outstanding o
      WHERE 1=1 ${filter}`,
     params
   );
   const recon = await db.query(
     `SELECT status, count(*)::int AS count, COALESCE(sum(abs(difference)),0) AS gap
-     FROM intel_reconciliations r
-     JOIN intel_outstanding o ON o.id=r.outstanding_id
+     FROM intel_current_reconciliations r
+     LEFT JOIN intel_current_outstanding o ON o.id=r.outstanding_id
      WHERE 1=1 ${filter.replaceAll('o.company_id', 'r.company_id')}
      GROUP BY status`,
     params
@@ -30,7 +32,7 @@ async function summary({ companyId } = {}) {
   const exceptions = await db.query(
     `SELECT count(*) FILTER (WHERE status='OPEN')::int AS open,
             count(*) FILTER (WHERE severity='HIGH' AND status='OPEN')::int AS critical
-     FROM intel_exceptions e
+     FROM intel_current_exceptions e
      WHERE 1=1 ${companyId ? 'AND e.company_id=$1' : ''}`,
     params
   );
@@ -39,7 +41,7 @@ async function summary({ companyId } = {}) {
             COALESCE(sum(a.debit_amount),0) AS debit,
             COALESCE(sum(a.credit_amount),0) AS credit
      FROM intel_ageing a
-     JOIN intel_outstanding o ON o.id=a.outstanding_id
+     JOIN intel_current_outstanding o ON o.id=a.outstanding_id
      WHERE 1=1 ${filter}
      GROUP BY a.ageing_bucket, a.bucket_label
      ORDER BY min(a.ageing_bucket)`,
@@ -49,10 +51,9 @@ async function summary({ companyId } = {}) {
     `SELECT c.id, c.name,
             COALESCE(sum(o.pending_bill_debit),0) AS debit,
             COALESCE(sum(o.pending_bill_credit),0) AS credit,
-            COALESCE(sum(abs(r.difference)),0) AS gap
+            COALESCE((SELECT sum(abs(r.difference)) FROM intel_current_reconciliations r WHERE r.company_id=c.id),0) AS gap
      FROM intel_companies c
-     LEFT JOIN intel_outstanding o ON o.company_id=c.id
-     LEFT JOIN intel_reconciliations r ON r.outstanding_id=o.id
+     LEFT JOIN intel_current_outstanding o ON o.company_id=c.id
      WHERE c.active=true ${companyId ? 'AND c.id=$1' : ''}
      GROUP BY c.id, c.name
      ORDER BY abs(COALESCE(sum(o.pending_bill_debit-o.pending_bill_credit),0)) DESC`,
@@ -62,12 +63,12 @@ async function summary({ companyId } = {}) {
     `SELECT a.id, a.account_name, c.name AS company_name,
             o.pending_bill_debit, o.pending_bill_credit, o.bill_amount, o.paid_amount,
             r.status, r.difference, r.tally_amount, r.source_amount
-     FROM intel_outstanding o
+     FROM intel_current_outstanding o
      JOIN intel_accounts a ON a.id=o.account_id
      JOIN intel_companies c ON c.id=o.company_id
-     LEFT JOIN intel_reconciliations r ON r.outstanding_id=o.id
+     LEFT JOIN intel_current_reconciliations r ON r.outstanding_id=o.id
      WHERE 1=1 ${filter}
-     ORDER BY abs(o.pending_bill_debit-o.pending_bill_credit) DESC
+     ORDER BY abs(o.pending_bill_debit-o.pending_bill_credit) DESC, o.id
      LIMIT 10`,
     params
   );
@@ -75,14 +76,14 @@ async function summary({ companyId } = {}) {
   const reconMap = Object.fromEntries(recon.rows.map((item) => [item.status, item]));
   const matched = reconMap.MATCHED?.count || 0;
   const unmatched = recon.rows.filter((item) => item.status !== 'MATCHED').reduce((sum, item) => sum + item.count, 0);
-  const gap = recon.rows.reduce((sum, item) => sum + Number(item.gap), 0);
+  const gap = decimal.sum(recon.rows.map(item => item.gap));
   return {
     cards: {
-      totalOutstanding: inr(Number(row.debit) - Number(row.credit)),
+      totalOutstanding: decimal.subtract(row.debit,row.credit),
       totalPaid: inr(row.paid),
       totalPending: inr(row.debit),
       totalBill: inr(row.bill),
-      totalFinancialGap: inr(gap),
+      totalFinancialGap: gap,
       matched: matched,
       unmatched,
       criticalExceptions: exceptions.rows[0].critical,
@@ -95,21 +96,23 @@ async function summary({ companyId } = {}) {
       label: item.bucket_label,
       debit: inr(item.debit),
       credit: inr(item.credit),
-      net: inr(Number(item.debit) - Number(item.credit)),
+      net: decimal.subtract(item.debit,item.credit),
     })),
     byCompany: byCompany.rows.map((item) => ({
       id: item.id,
       name: item.name,
-      outstanding: inr(Number(item.debit) - Number(item.credit)),
+      outstanding: decimal.subtract(item.debit,item.credit),
       debit: inr(item.debit),
       credit: inr(item.credit),
       gap: inr(item.gap),
     })),
     topAccounts: topAccounts.rows,
   };
+  });
 }
 
-async function outstanding({ companyId, q, page = 1, pageSize = 50 } = {}) {
+async function outstanding({ companyId, q, status, page = 1, pageSize = 50 } = {}) {
+  return db.readSnapshot(async()=>{
   const where = ['1=1'];
   const params = [];
   if (companyId) {
@@ -120,25 +123,30 @@ async function outstanding({ companyId, q, page = 1, pageSize = 50 } = {}) {
     params.push(`%${q}%`);
     where.push(`(a.account_name ILIKE $${params.length} OR a.pan_number ILIKE $${params.length} OR a.gst_number ILIKE $${params.length})`);
   }
+  if (status && status !== 'all') {
+    if (status === 'differences') where.push(`r.status <> 'MATCHED'`);
+    else { params.push(status); where.push(`r.status=$${params.length}`); }
+  }
   params.push(pageSize, (page - 1) * pageSize);
   const result = await db.query(
     `SELECT o.*, a.account_name, a.gst_number, a.pan_number, a.msme_number, a.credit_days,
             a.level_1_category, a.level_2_category, a.category_path, c.name AS company_name,
             r.status AS recon_status, r.difference, r.tally_amount, r.source_amount, r.match_method
-     FROM intel_outstanding o
+     FROM intel_current_outstanding o
      JOIN intel_accounts a ON a.id=o.account_id
      JOIN intel_companies c ON c.id=o.company_id
-     LEFT JOIN intel_reconciliations r ON r.outstanding_id=o.id
+     LEFT JOIN intel_current_reconciliations r ON r.outstanding_id=o.id
      WHERE ${where.join(' AND ')}
-     ORDER BY abs(o.pending_bill_debit-o.pending_bill_credit) DESC
+     ORDER BY abs(o.pending_bill_debit-o.pending_bill_credit) DESC, o.id
      LIMIT $${params.length - 1} OFFSET $${params.length}`,
     params
   );
   const total = await db.query(
-    `SELECT count(*)::int AS count FROM intel_outstanding o JOIN intel_accounts a ON a.id=o.account_id WHERE ${where.join(' AND ')}`,
+    `SELECT count(*)::int AS count FROM intel_current_outstanding o JOIN intel_accounts a ON a.id=o.account_id LEFT JOIN intel_current_reconciliations r ON r.outstanding_id=o.id WHERE ${where.join(' AND ')}`,
     params.slice(0, params.length - 2)
   );
   return { items: result.rows, total: total.rows[0].count, page: Number(page), pageSize: Number(pageSize) };
+  });
 }
 
 async function ageing({ companyId } = {}) {
@@ -146,49 +154,58 @@ async function ageing({ companyId } = {}) {
     `SELECT a.ageing_bucket, a.bucket_label, a.bucket_from, a.bucket_to,
             COALESCE(sum(a.debit_amount),0) AS debit, COALESCE(sum(a.credit_amount),0) AS credit
      FROM intel_ageing a
-     JOIN intel_outstanding o ON o.id=a.outstanding_id
+     JOIN intel_current_outstanding o ON o.id=a.outstanding_id
      WHERE ($1::uuid IS NULL OR o.company_id=$1)
      GROUP BY 1,2,3,4
      ORDER BY 1`,
     [companyId || null]
   );
-  const totalNet = summary.rows.reduce((sum, row) => sum + Number(row.debit) - Number(row.credit), 0);
+  const totalNet = decimal.sum(summary.rows.map(row => decimal.subtract(row.debit,row.credit)));
   return {
     buckets: summary.rows.map((row) => {
-      const net = Number(row.debit) - Number(row.credit);
-      return { ...row, debit: inr(row.debit), credit: inr(row.credit), net: inr(net), pct: totalNet ? money((net / totalNet) * 100) : 0 };
+      const net = decimal.subtract(row.debit,row.credit);
+      return { ...row, debit: inr(row.debit), credit: inr(row.credit), net, pct: decimal.cents(totalNet)!==0n ? money((Number(net) / Number(totalNet)) * 100) : 0 };
     }),
   };
 }
 
-async function gaps({ companyId, status } = {}) {
+async function gaps({ companyId, status, q, limit = 500 } = {}) {
   const result = await db.query(
     `SELECT r.*, a.account_name, c.name AS company_name
-     FROM intel_reconciliations r
-     LEFT JOIN intel_outstanding o ON o.id=r.outstanding_id
+     FROM intel_current_reconciliations r
+     LEFT JOIN intel_current_outstanding o ON o.id=r.outstanding_id
      LEFT JOIN intel_accounts a ON a.id=o.account_id
      JOIN intel_companies c ON c.id=r.company_id
      WHERE ($1::uuid IS NULL OR r.company_id=$1)
-       AND ($2::text IS NULL OR r.status=$2)
+       AND ($2::text IS NULL OR ($2='differences' AND r.status<>'MATCHED') OR r.status=$2)
+       AND ($3::text IS NULL OR a.account_name ILIKE $3 OR r.tally_ledger_name ILIKE $3 OR a.pan_number ILIKE $3 OR a.gst_number ILIKE $3)
      ORDER BY abs(r.difference) DESC NULLS LAST
-     LIMIT 500`,
-    [companyId || null, status || null]
+     LIMIT $4`,
+    [companyId || null, status && status!=='all' ? status : null, q ? `%${q}%` : null, limit]
   );
   return result.rows;
 }
 
 async function accountDetail(id) {
+  return db.readSnapshot(async()=>{
   const account = await db.query(
     `SELECT a.*, c.name AS company_name FROM intel_accounts a JOIN intel_companies c ON c.id=a.company_id WHERE a.id=$1`,
     [id]
   );
   if (!account.rowCount) throw Object.assign(new Error('Account not found'), { status: 404 });
   const outstanding = await db.query(
-    `SELECT o.*, r.status, r.tally_amount, r.source_amount, r.difference, r.match_method, r.match_score, r.tally_ledger_name
+    `SELECT o.*, ir.mapped_data AS source_account, b.generation, b.tally_batch_id, b.tally_balance_date, (p.import_batch_id=o.import_batch_id) AS is_current, r.comparison_available,
+       CASE WHEN p.import_batch_id=o.import_batch_id AND NOT r.comparison_available THEN 'COMPARISON_UNAVAILABLE' ELSE r.status END AS status,
+       r.tally_amount, r.source_amount,
+       CASE WHEN p.import_batch_id=o.import_batch_id AND NOT r.comparison_available THEN NULL ELSE r.difference END AS difference,
+       r.status AS historical_status,r.difference AS historical_difference,r.match_method, r.match_score, r.tally_ledger_name
      FROM intel_outstanding o
+     JOIN intel_import_batches b ON b.id=o.import_batch_id
+     LEFT JOIN intel_import_rows ir ON ir.id=o.import_row_id
+     LEFT JOIN intel_company_publications p ON p.company_id=o.company_id
      LEFT JOIN intel_reconciliations r ON r.outstanding_id=o.id
      WHERE o.account_id=$1
-     ORDER BY o.reporting_date DESC NULLS LAST`,
+     ORDER BY o.reporting_date DESC NULLS LAST,b.generation DESC`,
     [id]
   );
   const ageingRows = outstanding.rowCount
@@ -203,69 +220,75 @@ async function accountDetail(id) {
     [[id, ...exceptions.rows.map((row) => String(row.id))]]
   );
   return { account: account.rows[0], outstanding: outstanding.rows, ageing: ageingRows.rows, exceptions: exceptions.rows, audit: audit.rows };
+  });
 }
 
 async function dataQuality({ companyId } = {}) {
+  return db.readSnapshot(async()=>{
   const result = await db.query(
     `SELECT
         count(*)::int AS accounts,
         count(*) FILTER (WHERE gst_number IS NULL OR gst_number='')::int AS missing_gst,
         count(*) FILTER (WHERE pan_number IS NULL OR pan_number='')::int AS missing_pan,
         count(*) FILTER (WHERE msme_number IS NULL OR msme_number='')::int AS missing_msme
-     FROM intel_accounts a
+     FROM intel_accounts a JOIN intel_current_outstanding o ON o.account_id=a.id
      WHERE ($1::uuid IS NULL OR a.company_id=$1)`,
     [companyId || null]
   );
   const payments = await db.query(
     `SELECT count(*) FILTER (WHERE last_payment_date IS NULL)::int AS missing_payment_date,
             count(*)::int AS outstanding_rows
-     FROM intel_outstanding o WHERE ($1::uuid IS NULL OR o.company_id=$1)`,
+     FROM intel_current_outstanding o WHERE ($1::uuid IS NULL OR o.company_id=$1)`,
     [companyId || null]
   );
   const exceptions = await db.query(
-    `SELECT type, count(*)::int AS count FROM intel_exceptions
+    `SELECT type, count(*)::int AS count FROM intel_current_exceptions
      WHERE ($1::uuid IS NULL OR company_id=$1) GROUP BY type`,
     [companyId || null]
   );
   return { ...result.rows[0], ...payments.rows[0], issues: exceptions.rows };
+  });
 }
 
-async function listExceptions({ companyId, status = 'OPEN', owner } = {}) {
+async function listExceptions({ companyId, status = 'OPEN', owner, q, limit = 500, offset=0 } = {}) {
   const result = await db.query(
     `SELECT e.*, a.account_name, c.name AS company_name
-     FROM intel_exceptions e
-     LEFT JOIN intel_outstanding o ON o.id=e.outstanding_id
+     FROM intel_current_exceptions e
+     LEFT JOIN intel_current_outstanding o ON o.id=e.outstanding_id
      LEFT JOIN intel_accounts a ON a.id=o.account_id
      LEFT JOIN intel_companies c ON c.id=e.company_id
      WHERE ($1::uuid IS NULL OR e.company_id=$1)
        AND ($2::text IS NULL OR e.status=$2)
        AND ($3::text IS NULL OR e.owner=$3)
-     ORDER BY CASE e.severity WHEN 'HIGH' THEN 0 WHEN 'MEDIUM' THEN 1 ELSE 2 END, e.created_at DESC`,
-    [companyId || null, status || null, owner || null]
+       AND ($4::text IS NULL OR a.account_name ILIKE $4 OR e.title ILIKE $4)
+     ORDER BY CASE e.severity WHEN 'HIGH' THEN 0 WHEN 'MEDIUM' THEN 1 ELSE 2 END, e.created_at DESC,e.id DESC LIMIT $5 OFFSET $6`,
+    [companyId || null, status && status!=='all' ? status : null, owner || null, q ? `%${q}%` : null, limit,offset]
   );
   return result.rows;
 }
 
+async function listExceptionsPage({page=1,pageSize=50,...scope}={}) {
+  return db.readSnapshot(async()=>{
+    const items=await listExceptions({...scope,limit:pageSize,offset:(page-1)*pageSize});
+    const total=(await db.query(`SELECT count(*)::int AS count FROM intel_current_exceptions e
+      LEFT JOIN intel_current_outstanding o ON o.id=e.outstanding_id LEFT JOIN intel_accounts a ON a.id=o.account_id
+      WHERE ($1::uuid IS NULL OR e.company_id=$1) AND ($2::text IS NULL OR e.status=$2)
+        AND ($3::text IS NULL OR e.owner=$3) AND ($4::text IS NULL OR a.account_name ILIKE $4 OR e.title ILIKE $4)`,
+      [scope.companyId || null,scope.status==='all' || scope.status===null ? null : scope.status || 'OPEN',scope.owner || null,scope.q?`%${scope.q}%`:null])).rows[0].count;
+    return {items,total,page:Number(page),pageSize:Number(pageSize)};
+  });
+}
+
 async function updateException(id, patch, username) {
-  const current = await db.query('SELECT * FROM intel_exceptions WHERE id=$1', [id]);
-  if (!current.rowCount) throw Object.assign(new Error('Exception not found'), { status: 404 });
-  const next = {
-    status: patch.status || current.rows[0].status,
-    owner: patch.owner === undefined ? current.rows[0].owner : patch.owner,
-    severity: patch.severity || current.rows[0].severity,
-  };
-  const updated = await db.query(
-    `UPDATE intel_exceptions SET status=$2, owner=$3, severity=$4, updated_at=now() WHERE id=$1 RETURNING *`,
-    [id, next.status, next.owner, next.severity]
-  );
-  if (patch.comment) {
-    await db.query(`INSERT INTO intel_exception_comments (exception_id, author, body) VALUES ($1,$2,$3)`, [id, username, patch.comment]);
-  }
-  await db.query(
-    `INSERT INTO intel_audit (username, action, entity, entity_id, old_value, new_value) VALUES ($1,'EXCEPTION_UPDATE','exception',$2,$3,$4)`,
-    [username, id, current.rows[0], updated.rows[0]]
-  );
-  return updated.rows[0];
+  return db.transaction(async client => {
+    const current = await client.query('SELECT * FROM intel_exceptions WHERE id=$1 FOR UPDATE',[id]);
+    if (!current.rowCount) throw Object.assign(new Error('Exception not found'),{status:404});
+    const updated = (await client.query(`UPDATE intel_exceptions SET status=$2,owner=$3,severity=$4,updated_at=now() WHERE id=$1 RETURNING *`,
+      [id,patch.status || current.rows[0].status,patch.owner===undefined?current.rows[0].owner:patch.owner,patch.severity || current.rows[0].severity])).rows[0];
+    if (patch.comment) await client.query('INSERT INTO intel_exception_comments(exception_id,author,body) VALUES($1,$2,$3)',[id,username,patch.comment]);
+    await client.query(`INSERT INTO intel_audit(username,action,entity,entity_id,old_value,new_value) VALUES($1,'EXCEPTION_UPDATE','exception',$2,$3,$4)`,[username,id,current.rows[0],updated]);
+    return updated;
+  });
 }
 
 async function companies() {
@@ -295,6 +318,7 @@ module.exports = {
   accountDetail,
   dataQuality,
   listExceptions,
+  listExceptionsPage,
   updateException,
   companies,
   sources,

@@ -1,15 +1,16 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { createHash } = require('node:crypto');
+const { createHash, randomUUID } = require('node:crypto');
 const db = require('../db');
 const config = require('../config');
-const { analyzeWorkbook } = require('../excel/parser');
+const { analyzeWorkbook, classifyRow } = require('../excel/parser');
 const { loadMaps, resolveMaps, saveDetectedMaps } = require('../mapping/engine');
-const { transformRow, netOutstanding, ageingEntries, money } = require('../transform/normalize');
+const { netOutstanding, ageingEntries } = require('../transform/normalize');
 const tally = require('../tally/provider');
 const { reconcileAccounts } = require('../reconciliation/engine');
 const audit = require('../audit');
-const sync = require('../sync/service');
+const { stage, shouldPublish } = require('./publication');
+const decimal = require('../transform/decimal');
 
 async function rulesFor() {
   const result = await db.query(`SELECT key, value FROM intel_rules WHERE company_id IS NULL`);
@@ -63,7 +64,7 @@ async function hashBuffer(buffer) {
   return createHash('sha256').update(buffer).digest('hex');
 }
 
-const runningJobs = new Map();
+
 
 async function markProgress(batchId, percent, message) {
   if (!batchId) return;
@@ -195,110 +196,105 @@ async function preview(id) {
   };
 }
 
-async function validateOnly(id) {
-  const file = await getFile(id);
-  const buffer = await fs.readFile(file.stored_path);
-  const analysis = await analyzeWorkbook(buffer);
-  const maps = await loadMaps(db, { sourceSystemId: file.source_system_id, companyId: file.company_id });
+async function prepare(file, database = db) {
+  const analysis = await analyzeWorkbook(await fs.readFile(file.stored_path));
+  const maps = await loadMaps(database, {sourceSystemId:file.source_system_id, companyId:file.company_id});
   const columns = resolveMaps(maps, analysis.columns);
-  const gstRequired = ((await rulesFor()).gst_required || {}).required === true;
-  const required = await requiredFields();
-  const mappedTargets = new Set(columns.map((col) => col.target).filter(Boolean));
-  const missingRequired = required.filter((field) => !mappedTargets.has(field.field_key));
-  let valid = 0;
-  let warnings = 0;
-  let errors = 0;
-  const issues = [];
-  for (const field of missingRequired) {
-    errors += 1;
-    issues.push({
-      row: null,
-      account: null,
-      errors: [{ code: 'UNMAPPED_REQUIRED', field: field.field_key, label: field.label }],
-    });
-  }
-  for (const row of analysis.rows.filter((item) => item.rowType === 'DETAIL')) {
-    const { mapped, errors: rowErrors } = transformRow(row.raw, columns);
-    const extra = [];
-    if (!mapped.account_name) extra.push({ code: 'REQUIRED_FIELD', field: 'account_name' });
-    if (gstRequired && !mapped.gst_number) extra.push({ code: 'MISSING_GST', field: 'gst_number' });
-    const all = [...rowErrors, ...extra];
-    if (all.some((item) => item.code === 'INVALID_DECIMAL' || item.code === 'INVALID_DATE' || item.code === 'INVALID_INTEGER' || item.code === 'REQUIRED_FIELD')) {
-      errors += 1;
-    } else if (all.length || !mapped.pan_number || !mapped.gst_number) {
-      warnings += 1;
-      valid += 1;
-    } else valid += 1;
-    if (all.length) issues.push({ row: row.sourceRowNumber, account: mapped.account_name, errors: all });
-  }
-  const validation = {
-    total: analysis.counts.dataRows,
-    valid,
-    warnings,
-    errors,
-    canProcess: errors === 0 && missingRequired.length === 0,
-    missingRequired,
-    unmappedColumns: columns.filter((col) => col.unmapped).map((col) => col.canonical),
-    issues: issues.slice(0, 100),
-  };
-  const stored = file.analysis || {};
-  stored.columns = columns;
-  stored.validation = validation;
-  await db.query(
-    `UPDATE intel_import_files SET status='VALIDATED', analysis=$2 WHERE id=$1`,
-    [id, stored],
-  );
-  return validation;
+  let categoryPath=[],lastType=null;
+  analysis.rows = analysis.rows.map(row=>{
+    const rowType=classifyRow(row.raw,columns);
+    if (rowType==='GROUP') {
+      const name=String(row.raw[columns.find(column=>column.target==='account_name')?.canonical] || row.raw.Particulars || '').trim();
+      categoryPath=lastType==='GROUP'?[...categoryPath,name]:[name];
+    }
+    if (rowType!=='IGNORED') lastType=rowType;
+    return {...row,rowType,categoryPath:['DETAIL','GROUP'].includes(rowType)?[...categoryPath]:[]};
+  });
+  analysis.counts={...analysis.counts,dataRows:analysis.rows.filter(row=>row.rowType==='DETAIL').length,groupRows:analysis.rows.filter(row=>row.rowType==='GROUP').length};
+  const ruleRows = await database.query('SELECT key,value FROM intel_rules WHERE company_id IS NULL OR company_id=$1 ORDER BY company_id NULLS FIRST', [file.company_id]);
+  const rules = Object.fromEntries(ruleRows.rows.map(row => [row.key,row.value]));
+  const required = (await database.query('SELECT field_key,label FROM intel_field_catalog WHERE required=true')).rows;
+  return {analysis, columns, rules, ...stage(analysis, columns, required, rules)};
 }
 
-async function processFile(id, { username, reprocess = false } = {}) {
-  const file = await getFile(id);
-  const batch = await db.query(
-    `INSERT INTO intel_import_batches (import_file_id, status, total_rows, started_at, progress_percent, progress_message)
-     VALUES ($1,'PROCESSING',0,now(),5,'Reading workbook') RETURNING *`,
-    [id]
-  );
-  const batchId = batch.rows[0].id;
-  try {
-  await db.query(`UPDATE intel_import_files SET status='PROCESSING', mapping_version=mapping_version+CASE WHEN $2 THEN 1 ELSE 0 END WHERE id=$1`, [id, reprocess]);
-  const buffer = await fs.readFile(file.stored_path);
-  await markProgress(batchId, 12, 'Analyzing workbook');
-  const analysis = await analyzeWorkbook(buffer);
-  await db.query(`UPDATE intel_import_batches SET total_rows=$2 WHERE id=$1`, [batchId, analysis.rows.length]);
-  const maps = await loadMaps(db, { sourceSystemId: file.source_system_id, companyId: file.company_id });
-  const columns = resolveMaps(maps, analysis.columns);
-  const rulebook = await rulesFor();
-  await markProgress(batchId, 22, 'Validating rows');
-  if (reprocess) {
-    await db.query(
-      `DELETE FROM intel_exceptions WHERE import_batch_id IN (SELECT id FROM intel_import_batches WHERE import_file_id=$1 AND id<>$2)`,
-      [id, batchId]
-    );
-    await db.query(
-      `DELETE FROM intel_outstanding WHERE import_batch_id IN (SELECT id FROM intel_import_batches WHERE import_file_id=$1 AND id<>$2)`,
-      [id, batchId]
-    );
-  }
-
-  let successful = 0;
-  let warning = 0;
-  let failed = 0;
-  const staged = analysis.rows.map((row) => {
-    const { mapped, errors } = row.rowType === 'DETAIL' ? transformRow(row.raw, columns) : { mapped: {}, errors: [] };
-    let status = 'OK';
-    if (row.rowType === 'DETAIL' && errors.length) {
-      status = errors.some((item) => item.code.startsWith('INVALID') || item.code === 'REQUIRED_FIELD') ? 'ERROR' : 'WARNING';
-    }
-    if (row.rowType === 'DETAIL' && !mapped.account_name) status = 'ERROR';
-    if (status === 'ERROR') failed += 1;
-    else if (status === 'WARNING') {
-      warning += 1;
-      successful += 1;
-    } else if (row.rowType === 'DETAIL') successful += 1;
-    return { row, mapped, errors, status };
+async function validateOnly(id) {
+  return db.transaction(async client => {
+    const file = (await client.query('SELECT * FROM intel_import_files WHERE id=$1 FOR UPDATE',[id])).rows[0];
+    if (!file) throw Object.assign(new Error('Import not found'),{status:404});
+    if (file.status === 'PROCESSING') throw Object.assign(new Error('Import is processing'),{status:409});
+    const prepared = await prepare(file,client);
+    await client.query(`UPDATE intel_import_files SET status=CASE WHEN status='COMPLETED' THEN status ELSE 'VALIDATED' END,analysis=$2 WHERE id=$1`,
+      [id,{...file.analysis,columns:prepared.columns,validation:prepared.validation}]);
+    return prepared.validation;
   });
-  await markProgress(batchId, 38, `Saving ${staged.length} rows`);
-  const insertedRows = await db.query(
+}
+
+async function claim(id, {username,reprocess=false,reference: frozenReference,inputs: frozenInputs}={}, database=db) {
+  return database.transaction(async client => {
+    const owner=(await client.query('SELECT company_id FROM intel_import_files WHERE id=$1',[id])).rows[0];
+    if (!owner) throw Object.assign(new Error('Import not found'),{status:404});
+    await client.query('SELECT pg_advisory_xact_lock(61009,hashtext($1))',[owner.company_id]);
+    const file = (await client.query('SELECT * FROM intel_import_files WHERE id=$1 FOR UPDATE',[id])).rows[0];
+    if (!file) throw Object.assign(new Error('Import not found'),{status:404});
+    const active = (await client.query(`SELECT * FROM intel_import_batches WHERE import_file_id=$1 AND status='PROCESSING' ORDER BY generation DESC LIMIT 1`,[id])).rows[0];
+    if (active && Date.now()-new Date(active.heartbeat_at || active.started_at).getTime()<120000) return {existing:true,batch:active};
+    if (active) await client.query(`UPDATE intel_import_batches SET status='FAILED',error_message='Interrupted import recovered',completed_at=now() WHERE id=$1`,[active.id]);
+    const previous = (await client.query(`SELECT * FROM intel_import_batches WHERE import_file_id=$1 AND status='COMPLETED' ORDER BY generation DESC LIMIT 1`,[id])).rows[0];
+    if (previous && !reprocess) {
+      await client.query(`UPDATE intel_import_files SET selected_batch_id=$2,status='COMPLETED' WHERE id=$1`,[id,previous.id]);
+      return {existing:true,batch:previous};
+    }
+    const prepared = frozenInputs || await prepare(file,client);
+    if (!prepared.validation.canProcess) throw Object.assign(new Error('Validation failed; correct required fields, duplicate accounts and invalid values before processing'),{status:400});
+    const reference = frozenReference || await tally.snapshot((await client.query('SELECT tally_company_id FROM intel_companies WHERE id=$1',[file.company_id])).rows[0]?.tally_company_id,client);
+    const accountMaps = (await client.query('SELECT * FROM intel_account_maps WHERE company_id=$1',[file.company_id])).rows;
+    const token = randomUUID();
+    const frozen = {columns:prepared.columns,rules:prepared.rules,validation:prepared.validation,totals:prepared.totals,
+      staged:prepared.staged,analysis:prepared.analysis,reference,accountMaps,mappingVersion:frozenInputs?.mappingVersion ?? file.mapping_version,username};
+    const batch = (await client.query(`INSERT INTO intel_import_batches(import_file_id,company_id,generation,status,started_at,heartbeat_at,lease_token,reporting_date,tally_batch_id,tally_balance_date,frozen_inputs,progress_percent,progress_message)
+      SELECT $1,$2,COALESCE(max(generation),0)+1,'PROCESSING',now(),now(),$3,$4,$5,$6,$7,5,'Preparing publication'
+      FROM intel_import_batches WHERE import_file_id=$1 RETURNING *`,
+      [id,file.company_id,token,file.reporting_period_to,reference.batchId,reference.balanceDate,frozen])).rows[0];
+    await client.query(`UPDATE intel_import_files SET status='PROCESSING',analysis=$2,selected_batch_id=$3 WHERE id=$1`,[id,{...file.analysis,validation:prepared.validation,columns:prepared.columns},batch.id]);
+    return {file,batch,token};
+  });
+}
+
+async function processFile(id, options = {}) {
+  const reserved = options.reserved || await claim(id,options);
+  if (reserved.existing) return getResults(id);
+  const {file,batch,token} = reserved;
+  const batchId = batch.id;
+  try {
+  await db.transaction(client => publishGeneration(client,reserved));
+  return getResults(id);
+  } catch(error) {
+    await db.transaction(async client => {
+      await client.query('SELECT id FROM intel_import_files WHERE id=$1 FOR UPDATE',[id]);
+      const failed = await client.query(`UPDATE intel_import_batches SET status='FAILED',error_message=$3,progress_message=$3,completed_at=now() WHERE id=$1 AND lease_token=$2 AND status='PROCESSING' RETURNING id`,[batchId,token,error.message]);
+      if (failed.rowCount) await client.query(`UPDATE intel_import_files SET status='FAILED' WHERE id=$1`,[id]);
+    });
+    throw error;
+  }
+}
+
+async function publishGeneration(client,reserved) {
+  const {file,batch,token}=reserved;
+  const id=file.id,batchId=batch.id;
+  await client.query('SELECT pg_advisory_xact_lock(61009,hashtext($1))',[file.company_id]);
+  await client.query('SELECT id FROM intel_import_files WHERE id=$1 FOR UPDATE',[id]);
+  const owned = await client.query(`SELECT id FROM intel_import_batches WHERE id=$1 AND lease_token=$2 AND status='PROCESSING' FOR UPDATE`,[batchId,token]);
+  if (!owned.rowCount) throw Object.assign(new Error('Import claim is no longer active'),{status:409});
+  await client.query('SELECT id FROM intel_companies WHERE id=$1 FOR UPDATE',[file.company_id]);
+  const previousPublication = (await client.query('SELECT * FROM intel_company_publications WHERE company_id=$1',[file.company_id])).rows[0];
+  const publishEligible = !previousPublication || shouldPublish(previousPublication.reporting_date,file.reporting_period_to);
+  const {staged,columns,rules:rulebook,analysis,totals,reference,accountMaps} = batch.frozen_inputs;
+  const successful = staged.filter(item => item.row.rowType==='DETAIL').length;
+  const warning = staged.filter(item => item.status==='WARNING').length;
+  const failed = 0;
+  const username = batch.frozen_inputs.username;
+  const transactionalProgress = async (batchId,percent,message) => client.query('UPDATE intel_import_batches SET progress_percent=$2,progress_message=$3,heartbeat_at=now() WHERE id=$1 AND lease_token=$4',[batchId,percent,message,token]);
+  const insertedRows = await client.query(
     `INSERT INTO intel_import_rows (import_batch_id, source_row_number, worksheet, row_type, raw_data, mapped_data, category_path, validation_status, errors)
      SELECT $1, x.source_row_number, x.worksheet, x.row_type, x.raw_data, x.mapped_data, x.category_path, x.validation_status, x.errors
      FROM jsonb_to_recordset($2::jsonb) AS x(
@@ -324,8 +320,8 @@ async function processFile(id, { username, reprocess = false } = {}) {
   const companyId = file.company_id;
   const reportingDate = file.reporting_period_to;
   if (details.length) {
-    await markProgress(batchId, 52, 'Saving accounts');
-    const accounts = await db.query(
+    await transactionalProgress(batchId, 52, 'Saving accounts');
+    const accounts = await client.query(
       `INSERT INTO intel_accounts (company_id, account_name, account_type, level_1_category, level_2_category, category_path, gst_number, pan_number, msme_number, credit_days)
        SELECT $1, x.account_name, x.account_type, x.level_1_category, x.level_2_category, x.category_path, x.gst_number, x.pan_number, x.msme_number, x.credit_days
        FROM jsonb_to_recordset($2::jsonb) AS x(
@@ -333,13 +329,14 @@ async function processFile(id, { username, reprocess = false } = {}) {
          gst_number text, pan_number text, msme_number text, credit_days numeric
        )
        ON CONFLICT (company_id, account_name) DO UPDATE SET
-         gst_number=COALESCE(EXCLUDED.gst_number, intel_accounts.gst_number),
-         pan_number=COALESCE(EXCLUDED.pan_number, intel_accounts.pan_number),
-         msme_number=COALESCE(EXCLUDED.msme_number, intel_accounts.msme_number),
-         credit_days=COALESCE(EXCLUDED.credit_days, intel_accounts.credit_days),
-         level_1_category=EXCLUDED.level_1_category,
-         level_2_category=EXCLUDED.level_2_category,
-         category_path=EXCLUDED.category_path
+         gst_number=CASE WHEN $3 THEN EXCLUDED.gst_number ELSE intel_accounts.gst_number END,
+         pan_number=CASE WHEN $3 THEN EXCLUDED.pan_number ELSE intel_accounts.pan_number END,
+         msme_number=CASE WHEN $3 THEN EXCLUDED.msme_number ELSE intel_accounts.msme_number END,
+         credit_days=CASE WHEN $3 THEN EXCLUDED.credit_days ELSE intel_accounts.credit_days END,
+         account_type=CASE WHEN $3 THEN EXCLUDED.account_type ELSE intel_accounts.account_type END,
+         level_1_category=CASE WHEN $3 THEN EXCLUDED.level_1_category ELSE intel_accounts.level_1_category END,
+         level_2_category=CASE WHEN $3 THEN EXCLUDED.level_2_category ELSE intel_accounts.level_2_category END,
+         category_path=CASE WHEN $3 THEN EXCLUDED.category_path ELSE intel_accounts.category_path END
        RETURNING *`,
       [companyId, JSON.stringify(Object.values(details.reduce((acc, item) => {
         const pathNames = item.row.categoryPath || [];
@@ -355,11 +352,11 @@ async function processFile(id, { username, reprocess = false } = {}) {
           credit_days: item.mapped.credit_days ?? null,
         };
         return acc;
-      }, {})))]
+      }, {}))), publishEligible]
     );
     const accountByName = new Map(accounts.rows.map((row) => [row.account_name, row]));
-    await markProgress(batchId, 64, 'Saving outstanding balances');
-    const outstandingRows = await db.query(
+    await transactionalProgress(batchId, 64, 'Saving outstanding balances');
+    const outstandingRows = await client.query(
       `INSERT INTO intel_outstanding (
           company_id, account_id, import_batch_id, import_row_id, reporting_date,
           bill_amount, paid_amount, pending_bill_debit, pending_bill_credit,
@@ -397,8 +394,8 @@ async function processFile(id, { username, reprocess = false } = {}) {
       }
     }
     if (ageingPayload.length) {
-      await markProgress(batchId, 74, 'Saving ageing buckets');
-      await db.query(
+      await transactionalProgress(batchId, 74, 'Saving ageing buckets');
+      await client.query(
         `INSERT INTO intel_ageing (outstanding_id, ageing_bucket, bucket_from, bucket_to, bucket_label, debit_amount, credit_amount)
          SELECT x.outstanding_id, x.ageing_bucket, x.bucket_from, x.bucket_to, x.bucket_label, x.debit_amount, x.credit_amount
          FROM jsonb_to_recordset($1::jsonb) AS x(
@@ -409,157 +406,40 @@ async function processFile(id, { username, reprocess = false } = {}) {
     }
   }
 
-  const totalRow = analysis.rows.find((row) => row.rowType === 'TOTAL');
-  const sourceDebit = totalRow ? Number(totalRow.raw[columns.find((col) => col.target === 'pending_bill_debit')?.canonical]) || 0 : null;
-  const sourceCredit = totalRow ? Number(totalRow.raw[columns.find((col) => col.target === 'pending_bill_credit')?.canonical]) || 0 : null;
-  const calcDebit = money(details.reduce((sum, item) => sum + (Number(item.mapped.pending_bill_debit) || 0), 0));
-  const calcCredit = money(details.reduce((sum, item) => sum + (Number(item.mapped.pending_bill_credit) || 0), 0));
-  const totalStatus = sourceDebit == null
-    ? 'SOURCE_TOTAL_ABSENT'
-    : Math.abs(sourceDebit - calcDebit) < 0.05 && Math.abs((sourceCredit || 0) - calcCredit) < 0.05
-      ? 'SOURCE_TOTAL_VALIDATED'
-      : 'SOURCE_TOTAL_MISMATCH';
-  if (totalStatus === 'SOURCE_TOTAL_MISMATCH') {
-    await db.query(
-      `INSERT INTO intel_exceptions (company_id, import_batch_id, type, severity, title, detail)
-       VALUES ($1,$2,'SOURCE_TOTAL_MISMATCH','HIGH','Source total does not match calculated detail totals',$3)`,
-      [companyId, batchId, { sourceDebit, sourceCredit, calcDebit, calcCredit }]
-    );
+  const {sourceDebit,sourceCredit,calcDebit,calcCredit,totalStatus} = totals;
+  if (totalStatus==='SOURCE_TOTAL_MISMATCH') await client.query(`INSERT INTO intel_exceptions(company_id,import_batch_id,type,severity,title,detail) VALUES($1,$2,'SOURCE_TOTAL_MISMATCH','HIGH','Source total does not match detail totals',$3)`,[companyId,batchId,totals]);
+  const reconInput = details.map(item => ({outstanding_id:item.outstandingId,account_id:item.account.id,company_id:companyId,
+    account_name:item.mapped.account_name,pan_number:item.mapped.pan_number,gst_number:item.mapped.gst_number,
+    source_amount:netOutstanding(item.mapped,rulebook.net_outstanding_formula?.expression)}));
+  const context = {reportingDate:file.reporting_period_to,balanceDate:reference.balanceDate,batchId:reference.batchId,maps:accountMaps};
+  const reconciled = reconcileAccounts(reconInput,reference.ledgers,rulebook,context);
+  for (const row of [...reconciled.matched,...reconciled.missingInSource]) {
+    const inserted = (await client.query(`INSERT INTO intel_reconciliations(outstanding_id,company_id,import_batch_id,tally_ledger_id,tally_ledger_name,tally_amount,source_amount,difference,difference_pct,match_method,match_score,matching_fields,status,reporting_date,tally_batch_id,tally_balance_date,comparison_available)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
+      [row.outstandingId,companyId,batchId,row.tallyLedgerId,row.tallyLedgerName,row.tallyAmount,row.sourceAmount,row.difference,row.differencePct,row.matchMethod,row.matchScore,row.matchingFields,row.status,row.reportingDate,row.tallyBatchId,row.balanceDate,row.comparisonAvailable])).rows[0];
+    if (row.status!=='MATCHED') await client.query(`INSERT INTO intel_exceptions(company_id,outstanding_id,reconciliation_id,import_batch_id,type,severity,title,detail)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,[companyId,row.outstandingId,inserted.id,batchId,row.status,
+      row.difference!=null && decimal.abs(row.difference)>=decimal.cents(rulebook.critical_difference?.amount ?? 100000)?'HIGH':'MEDIUM',row.status.replaceAll('_',' '),inserted]);
   }
+  await client.query(`UPDATE intel_import_batches SET status='COMPLETED',total_rows=$13,successful_rows=$2,warning_rows=$3,failed_rows=$4,group_rows=$5,detail_rows=$6,
+    source_total_status=$7,source_total_debit=$8,source_total_credit=$9,calculated_total_debit=$10,calculated_total_credit=$11,
+    progress_percent=100,progress_message='Completed',completed_at=now(),heartbeat_at=now() WHERE id=$1 AND lease_token=$12`,
+    [batchId,successful,warning,failed,analysis.counts.groupRows,analysis.counts.dataRows,totalStatus,sourceDebit,sourceCredit,calcDebit,calcCredit,token,analysis.rows.length]);
+  if (publishEligible) await client.query(`INSERT INTO intel_company_publications(company_id,import_batch_id,reporting_date) VALUES($1,$2,$3)
+    ON CONFLICT(company_id) DO UPDATE SET import_batch_id=EXCLUDED.import_batch_id,reporting_date=EXCLUDED.reporting_date,published_at=now()`,[companyId,batchId,file.reporting_period_to]);
+  await client.query(`UPDATE intel_import_files SET status='COMPLETED' WHERE id=$1`,[id]);
+  await client.query(`INSERT INTO intel_audit(username,action,entity,entity_id,new_value) VALUES($1,'PROCESS','import_file',$2,$3)`,[username,id,{batchId,generation:batch.generation,totalStatus}]);
+}
 
-  await markProgress(batchId, 84, 'Reconciling with Tally ledgers');
-  const company = (await db.query('SELECT * FROM intel_companies WHERE id=$1', [companyId])).rows[0];
-  const ledgers = await tally.listLedgers(company?.tally_company_id);
-  const formula = rulebook.net_outstanding_formula?.expression || 'pending_bill_debit - pending_bill_credit';
-  const reconInput = details.map((item) => ({
-    outstanding_id: item.outstandingId,
-    company_id: companyId,
-    account_name: item.mapped.account_name,
-    pan_number: item.mapped.pan_number,
-    gst_number: item.mapped.gst_number,
-    source_amount: netOutstanding(item.mapped, formula),
-  }));
-  const recon = reconcileAccounts(reconInput, ledgers, rulebook);
-  const accountIdByOutstanding = new Map(details.map((item) => [item.outstandingId, item.account?.id]));
-  recon.matched = await sync.applySavedMaps(recon.matched, {
-    companyId, ledgers, accountIdByOutstanding, rules: rulebook,
+async function recoverAbandoned(id) {
+  return db.transaction(async client=>{
+    // A publishing worker holds this file lock. Polling must never reclaim it.
+    const file=(await client.query('SELECT id FROM intel_import_files WHERE id=$1 AND status=\'PROCESSING\' FOR UPDATE SKIP LOCKED',[id])).rows[0];
+    if (!file) return;
+    const expired=await client.query(`UPDATE intel_import_batches SET status='FAILED',completed_at=now(),error_message='Interrupted import recovered',progress_message='Interrupted import recovered'
+      WHERE import_file_id=$1 AND status='PROCESSING' AND COALESCE(heartbeat_at,started_at)<now()-interval '2 minutes' RETURNING id`,[id]);
+    if (expired.rowCount) await client.query(`UPDATE intel_import_files SET status='FAILED' WHERE id=$1`,[id]);
   });
-  const nameByOutstanding = new Map(reconInput.map((item) => [item.outstanding_id, item.account_name]));
-  if (recon.matched.length) {
-    const inserted = await db.query(
-      `INSERT INTO intel_reconciliations (
-          outstanding_id, company_id, tally_ledger_id, tally_ledger_name, tally_amount, source_amount,
-          difference, difference_pct, match_method, match_score, matching_fields, status
-       )
-       SELECT x.outstanding_id, $1, x.tally_ledger_id, x.tally_ledger_name, x.tally_amount, x.source_amount,
-              x.difference, x.difference_pct, x.match_method, x.match_score, x.matching_fields, x.status
-       FROM jsonb_to_recordset($2::jsonb) AS x(
-         outstanding_id uuid, tally_ledger_id integer, tally_ledger_name text, tally_amount numeric, source_amount numeric,
-         difference numeric, difference_pct numeric, match_method text, match_score numeric, matching_fields text[], status text
-       )
-       RETURNING *`,
-      [companyId, JSON.stringify(recon.matched.map((row) => ({
-        outstanding_id: row.outstandingId,
-        tally_ledger_id: row.tallyLedgerId,
-        tally_ledger_name: row.tallyLedgerName,
-        tally_amount: row.tallyAmount,
-        source_amount: row.sourceAmount,
-        difference: row.difference,
-        difference_pct: row.differencePct,
-        match_method: row.matchMethod,
-        match_score: row.matchScore,
-        matching_fields: row.matchingFields,
-        status: row.status,
-      })))]
-    );
-    const exceptionRows = inserted.rows.filter((row) => row.status !== 'MATCHED').map((row) => {
-      const severity = Math.abs(row.difference || 0) >= Number(rulebook.critical_difference?.amount || 100000) ? 'HIGH' : 'MEDIUM';
-      return {
-        company_id: companyId,
-        outstanding_id: row.outstanding_id,
-        reconciliation_id: row.id,
-        import_batch_id: batchId,
-        type: row.status,
-        severity,
-        title: `${row.status.replace(/_/g, ' ')} for ${nameByOutstanding.get(row.outstanding_id) || 'account'}`,
-        detail: row,
-      };
-    });
-    if (exceptionRows.length) {
-      await db.query(
-        `INSERT INTO intel_exceptions (company_id, outstanding_id, reconciliation_id, import_batch_id, type, severity, title, detail)
-         SELECT x.company_id, x.outstanding_id, x.reconciliation_id, x.import_batch_id, x.type, x.severity, x.title, x.detail
-         FROM jsonb_to_recordset($1::jsonb) AS x(
-           company_id uuid, outstanding_id uuid, reconciliation_id uuid, import_batch_id uuid, type text, severity text, title text, detail jsonb
-         )`,
-        [JSON.stringify(exceptionRows)]
-      );
-    }
-  }
-
-  const usedLedgers = new Set(recon.matched.map((row) => row.tallyLedgerId).filter(Boolean));
-  await db.query(
-    `DELETE FROM intel_reconciliations
-     WHERE company_id=$1 AND outstanding_id IS NULL AND status='MISSING_IN_SOURCE'`,
-    [companyId],
-  );
-  const missingInSource = ledgers
-    .filter((ledger) => !usedLedgers.has(ledger.id) && Math.abs(ledger.balance) > 0)
-    .sort((left, right) => Math.abs(right.balance) - Math.abs(left.balance))
-    .slice(0, 300)
-    .map((ledger) => ({
-      outstanding_id: null,
-      tally_ledger_id: ledger.id,
-      tally_ledger_name: ledger.name,
-      tally_amount: ledger.balance,
-      source_amount: 0,
-      difference: money(0 - ledger.balance),
-      difference_pct: null,
-      match_method: null,
-      match_score: null,
-      matching_fields: [],
-      status: 'MISSING_IN_SOURCE',
-    }));
-  if (missingInSource.length) {
-    await markProgress(batchId, 93, 'Recording Tally-only ledgers');
-    await db.query(
-      `INSERT INTO intel_reconciliations (
-          outstanding_id, company_id, tally_ledger_id, tally_ledger_name, tally_amount, source_amount,
-          difference, difference_pct, match_method, match_score, matching_fields, status
-       )
-       SELECT x.outstanding_id, $1, x.tally_ledger_id, x.tally_ledger_name, x.tally_amount, x.source_amount,
-              x.difference, x.difference_pct, x.match_method, x.match_score, x.matching_fields, x.status
-       FROM jsonb_to_recordset($2::jsonb) AS x(
-         outstanding_id uuid, tally_ledger_id integer, tally_ledger_name text, tally_amount numeric, source_amount numeric,
-         difference numeric, difference_pct numeric, match_method text, match_score numeric, matching_fields text[], status text
-       )`,
-      [companyId, JSON.stringify(missingInSource)]
-    );
-  }
-
-  await db.query(
-    `UPDATE intel_import_batches SET
-        status='COMPLETED', successful_rows=$2, warning_rows=$3, failed_rows=$4, group_rows=$5, detail_rows=$6,
-        source_total_status=$7, source_total_debit=$8, source_total_credit=$9,
-        calculated_total_debit=$10, calculated_total_credit=$11, progress_percent=100,
-        progress_message='Completed', completed_at=now()
-     WHERE id=$1`,
-    [
-      batchId, successful, warning, failed, analysis.counts.groupRows, analysis.counts.dataRows,
-      totalStatus, sourceDebit, sourceCredit, calcDebit, calcCredit,
-    ]
-  );
-  await db.query(`UPDATE intel_import_files SET status='COMPLETED' WHERE id=$1`, [id]);
-  await audit.record({ username, action: reprocess ? 'REPROCESS' : 'PROCESS', entity: 'import_file', entityId: id, newValue: { batchId, successful, failed, totalStatus } });
-  return getResults(id);
-  } catch (error) {
-    await db.query(
-      `UPDATE intel_import_batches SET status='FAILED', error_message=$2, progress_message=$2, completed_at=now() WHERE id=$1`,
-      [batchId, error.message]
-    );
-    await db.query(`UPDATE intel_import_files SET status='FAILED' WHERE id=$1`, [id]);
-    throw error;
-  }
 }
 
 function defaultPercent(status) {
@@ -572,6 +452,11 @@ function defaultPercent(status) {
 }
 
 async function getProgress(id) {
+  await recoverAbandoned(id);
+  return db.readSnapshot(()=>readProgress(id));
+}
+
+async function readProgress(id) {
   const file = await getFile(id);
   const batch = await latestBatch(id);
   const validation = file.analysis?.validation || null;
@@ -587,10 +472,7 @@ async function getProgress(id) {
     const recon = await db.query(
       `SELECT status, count(*)::int AS count, COALESCE(sum(difference),0) AS difference
        FROM intel_reconciliations
-       WHERE company_id=$2 AND (
-         outstanding_id IN (SELECT id FROM intel_outstanding WHERE import_batch_id=$1)
-         OR (outstanding_id IS NULL AND status='MISSING_IN_SOURCE')
-       )
+       WHERE company_id=$2 AND import_batch_id=$1
        GROUP BY status`,
       [activeBatch.id, file.company_id],
     );
@@ -605,7 +487,7 @@ async function getProgress(id) {
     message: activeBatch?.progress_message
       || (processing ? 'Starting import…' : batch?.progress_message || ''),
     error: file.status === 'FAILED' ? (batch?.error_message || null) : null,
-    running: runningJobs.has(id),
+    running: batch?.status === 'PROCESSING' && Date.now()-new Date(batch.heartbeat_at || batch.started_at).getTime()<120000,
     validation,
     canProcess: Boolean(validation?.canProcess),
     batch: activeBatch || (processing ? null : batch),
@@ -614,53 +496,35 @@ async function getProgress(id) {
   };
 }
 
-async function startProcess(id, { username, reprocess = false } = {}) {
-  if (runningJobs.has(id)) return getProgress(id);
-  const file = await getFile(id);
-  let validation = file.analysis?.validation;
-  if (!validation || reprocess) validation = await validateOnly(id);
-  if (!validation.canProcess) {
-    const missing = (validation.missingRequired || []).map((field) => field.label).join(', ');
-    throw Object.assign(new Error(
-      validation.errors
-        ? `Validation found ${validation.errors} error(s)${missing ? ` (map ${missing})` : ''}. Fix these before processing.`
-        : 'Map the required columns before processing.',
-    ), { status: 400 });
-  }
-  await db.query(`UPDATE intel_import_files SET status='PROCESSING' WHERE id=$1`, [id]);
-  runningJobs.set(id, true);
-  setImmediate(() => {
-    processFile(id, { username, reprocess })
-      .catch((error) => console.error('Excel import process failed:', error.code || error.message))
-      .finally(() => runningJobs.delete(id));
-  });
+async function startProcess(id, options = {}) {
+  const reserved = await claim(id,options);
+  if (!reserved.existing) setImmediate(() => processFile(id,{...options,reserved}).catch(error => console.error('Excel import process failed:',error.code || error.message)));
   return getProgress(id);
 }
 
 async function latestBatch(fileId) {
   const result = await db.query(
-    `SELECT * FROM intel_import_batches WHERE import_file_id=$1 ORDER BY started_at DESC NULLS LAST, id DESC LIMIT 1`,
+    `SELECT b.* FROM intel_import_batches b JOIN intel_import_files f ON f.selected_batch_id=b.id WHERE f.id=$1`,
     [fileId]
   );
   return result.rows[0] || null;
 }
 
 async function getResults(id) {
+  return db.readSnapshot(async()=>{
   const file = await getFile(id);
   const batch = await latestBatch(id);
   const recon = batch
     ? await db.query(
       `SELECT status, count(*)::int AS count, COALESCE(sum(difference),0) AS difference
        FROM intel_reconciliations
-       WHERE company_id=$2 AND (
-         outstanding_id IN (SELECT id FROM intel_outstanding WHERE import_batch_id=$1)
-         OR (outstanding_id IS NULL AND status='MISSING_IN_SOURCE')
-       )
+       WHERE company_id=$2 AND import_batch_id=$1
        GROUP BY status`,
       [batch.id, file.company_id]
     )
     : { rows: [] };
   return { file: summaryPayload(file), companyName: file.company_name, batch, reconciliation: recon.rows };
+  });
 }
 
 async function listImports() {
@@ -672,7 +536,7 @@ async function listImports() {
     LEFT JOIN intel_companies c ON c.id=f.company_id
     LEFT JOIN intel_source_systems s ON s.id=f.source_system_id
     LEFT JOIN LATERAL (
-      SELECT * FROM intel_import_batches b WHERE b.import_file_id=f.id ORDER BY b.id DESC LIMIT 1
+      SELECT * FROM intel_import_batches b WHERE b.id=f.selected_batch_id
     ) b ON true
     ORDER BY f.uploaded_at DESC
   `);
@@ -692,23 +556,25 @@ async function rowErrors(id) {
 }
 
 async function updateMapping(id, mappings, username) {
-  const file = await getFile(id);
-  for (const item of mappings) {
-    await db.query(
-      `INSERT INTO intel_column_maps (source_system_id, company_id, source_header, target_field)
-       VALUES ($1,$2,$3,$4)`,
-      [file.source_system_id, file.company_id, item.sourceHeader, item.targetField || null]
-    );
-  }
-  const analysis = file.analysis || {};
-  if (analysis.columns) {
-    analysis.columns = analysis.columns.map((col) => {
-      const next = mappings.find((item) => item.sourceHeader === col.canonical);
-      return next ? { ...col, target: next.targetField, unmapped: !next.targetField } : col;
-    });
-    await db.query('UPDATE intel_import_files SET analysis=$2 WHERE id=$1', [id, analysis]);
-  }
-  await audit.record({ username, action: 'MAPPING_CHANGE', entity: 'import_file', entityId: id, newValue: mappings });
+  await db.transaction(async client => {
+    const owner=(await client.query('SELECT company_id FROM intel_import_files WHERE id=$1',[id])).rows[0];
+    if (!owner) throw Object.assign(new Error('Import not found'),{status:404});
+    await client.query('SELECT pg_advisory_xact_lock(61009,hashtext($1))',[owner.company_id]);
+    const file = (await client.query('SELECT * FROM intel_import_files WHERE id=$1 FOR UPDATE',[id])).rows[0];
+    if (!file) throw Object.assign(new Error('Import not found'),{status:404});
+    if (file.status==='PROCESSING') throw Object.assign(new Error('Mappings are frozen while this import is processing'),{status:409});
+    await client.query('SELECT id FROM intel_companies WHERE id=$1 FOR UPDATE',[file.company_id]);
+    for (const item of mappings) {
+      await client.query(`UPDATE intel_column_maps SET active=false WHERE company_id=$1 AND source_system_id IS NOT DISTINCT FROM $2::uuid AND lower(source_header)=lower($3)`,[file.company_id,file.source_system_id,item.sourceHeader]);
+      await client.query(`INSERT INTO intel_column_maps(source_system_id,company_id,source_header,target_field,version)
+        SELECT $1,$2,$3,$4,COALESCE(max(version),0)+1 FROM intel_column_maps WHERE company_id=$2 AND source_header=$3`,[file.source_system_id,file.company_id,item.sourceHeader,item.targetField || null]);
+    }
+    await client.query(`UPDATE intel_import_files SET mapping_version=mapping_version+1,
+      analysis=COALESCE(analysis,'{}'::jsonb)-'validation',
+      status=CASE WHEN status IN ('VALIDATED','FAILED') THEN 'ANALYZED' ELSE status END
+      WHERE company_id=$1 AND source_system_id IS NOT DISTINCT FROM $2::uuid AND status<>'PROCESSING'`,[file.company_id,file.source_system_id]);
+    await client.query(`INSERT INTO intel_audit(username,action,entity,entity_id,new_value) VALUES($1,'MAPPING_CHANGE','import_file',$2,$3)`,[username,id,JSON.stringify(mappings)]);
+  });
   return preview(id);
 }
 
@@ -726,4 +592,6 @@ module.exports = {
   updateMapping,
   summaryPayload,
   ensureCompany,
+  claim,
+  publishGeneration,
 };

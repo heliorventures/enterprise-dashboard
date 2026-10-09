@@ -1,18 +1,9 @@
 const db = require('../../db');
 const tally = require('../tally/provider');
-const { money } = require('../transform/normalize');
-const audit = require('../audit');
 
 async function rulesFor() {
   const result = await db.query(`SELECT key, value FROM intel_rules WHERE company_id IS NULL`);
   return Object.fromEntries(result.rows.map((row) => [row.key, row.value]));
-}
-
-function amountStatus(sourceAmount, tallyAmount, rules) {
-  const tol = Number(rules.amount_tolerance?.amount) || 1000;
-  const diff = money((Number(sourceAmount) || 0) - (Number(tallyAmount) || 0));
-  if (Math.abs(diff) <= tol) return 'MATCHED';
-  return 'AMOUNT_MISMATCH';
 }
 
 function nameScore(left, right) {
@@ -29,36 +20,8 @@ function nameScore(left, right) {
   return hits / Math.max(aTokens.length, bTokens.length);
 }
 
-async function applySavedMaps(rows, { companyId, ledgers, accountIdByOutstanding, rules }) {
-  const saved = await db.query('SELECT account_id, tally_ledger_id, tally_ledger_name FROM intel_account_maps WHERE company_id=$1', [companyId]);
-  if (!saved.rowCount) return rows;
-  const byAccount = new Map(saved.rows.map((row) => [row.account_id, row]));
-  const ledgerById = new Map(ledgers.map((row) => [row.id, row]));
-  return rows.map((row) => {
-    const accountId = accountIdByOutstanding.get(row.outstandingId);
-    const mapped = accountId ? byAccount.get(accountId) : null;
-    if (!mapped) return row;
-    const ledger = ledgerById.get(Number(mapped.tally_ledger_id));
-    if (!ledger) return row;
-    const sourceAmount = Number(row.sourceAmount) || 0;
-    const tallyAmount = Number(ledger.balance) || 0;
-    const difference = money(sourceAmount - tallyAmount);
-    return {
-      ...row,
-      tallyLedgerId: ledger.id,
-      tallyLedgerName: ledger.name,
-      tallyAmount,
-      difference,
-      differencePct: Math.abs(sourceAmount) >= 1 ? money((difference / Math.abs(sourceAmount)) * 100) : null,
-      matchMethod: 'MANUAL',
-      matchScore: 1,
-      matchingFields: ['manual_map'],
-      status: amountStatus(sourceAmount, tallyAmount, rules),
-    };
-  });
-}
-
 async function listSync({ companyId, status, q, minDifference, mapped, page = 1, pageSize = 50 } = {}) {
+  return db.readSnapshot(async()=>{
   const where = ['1=1'];
   const params = [];
   if (companyId) {
@@ -84,31 +47,32 @@ async function listSync({ companyId, status, q, minDifference, mapped, page = 1,
   if (mapped === 'manual') where.push(`m.id IS NOT NULL`);
   if (mapped === 'unmapped') where.push(`r.tally_ledger_id IS NULL`);
   if (mapped === 'auto') where.push(`m.id IS NULL AND r.tally_ledger_id IS NOT NULL`);
-  params.push(Math.min(Number(pageSize) || 50, 200), (Math.max(Number(page) || 1, 1) - 1) * Math.min(Number(pageSize) || 50, 200));
+  const size=Math.min(Number(pageSize) || 50,500);
+  params.push(size, (Math.max(Number(page) || 1, 1) - 1) * size);
   const result = await db.query(
     `SELECT r.id, r.status, r.match_method, r.match_score, r.matching_fields,
-            r.source_amount, r.tally_amount, r.difference, r.difference_pct,
+            r.source_amount, r.tally_amount, r.difference, r.difference_pct, r.import_batch_id, r.tally_batch_id, r.tally_balance_date, r.comparison_available,
             r.tally_ledger_id, r.tally_ledger_name, r.outstanding_id, r.company_id,
             a.id AS account_id, a.account_name, a.pan_number, a.gst_number, a.category_path,
             a.level_1_category, c.name AS company_name, c.tally_company_id,
-            o.pending_bill_debit, o.pending_bill_credit, o.bill_amount, o.paid_amount, o.reporting_date,
+            o.pending_bill_debit, o.pending_bill_credit, o.bill_amount, o.paid_amount, r.reporting_date,
             m.source AS mapping_source, m.mapped_by, m.mapped_at
-     FROM intel_reconciliations r
+     FROM intel_current_reconciliations r
      JOIN intel_companies c ON c.id=r.company_id
-     LEFT JOIN intel_outstanding o ON o.id=r.outstanding_id
+     LEFT JOIN intel_current_outstanding o ON o.id=r.outstanding_id
      LEFT JOIN intel_accounts a ON a.id=o.account_id
      LEFT JOIN intel_account_maps m ON m.account_id=a.id AND m.company_id=r.company_id
      WHERE ${where.join(' AND ')}
      ORDER BY CASE r.status WHEN 'AMOUNT_MISMATCH' THEN 0 WHEN 'MISSING_IN_TALLY' THEN 1 WHEN 'MISSING_IN_SOURCE' THEN 2 WHEN 'PARTIALLY_MATCHED' THEN 3 ELSE 4 END,
-              abs(COALESCE(r.difference,0)) DESC
+              abs(COALESCE(r.difference,0)) DESC, r.id
      LIMIT $${params.length - 1} OFFSET $${params.length}`,
     params
   );
   const total = await db.query(
     `SELECT count(*)::int AS count
-     FROM intel_reconciliations r
+     FROM intel_current_reconciliations r
      JOIN intel_companies c ON c.id=r.company_id
-     LEFT JOIN intel_outstanding o ON o.id=r.outstanding_id
+     LEFT JOIN intel_current_outstanding o ON o.id=r.outstanding_id
      LEFT JOIN intel_accounts a ON a.id=o.account_id
      LEFT JOIN intel_account_maps m ON m.account_id=a.id AND m.company_id=r.company_id
      WHERE ${where.join(' AND ')}`,
@@ -116,7 +80,7 @@ async function listSync({ companyId, status, q, minDifference, mapped, page = 1,
   );
   const counts = await db.query(
     `SELECT r.status, count(*)::int AS count
-     FROM intel_reconciliations r
+     FROM intel_current_reconciliations r
      WHERE ($1::uuid IS NULL OR r.company_id=$1)
      GROUP BY r.status`,
     [companyId || null]
@@ -125,9 +89,10 @@ async function listSync({ companyId, status, q, minDifference, mapped, page = 1,
     items: result.rows,
     total: total.rows[0].count,
     page: Number(page),
-    pageSize: Number(pageSize),
+    pageSize: size,
     counts: Object.fromEntries(counts.rows.map((row) => [row.status, row.count])),
   };
+  });
 }
 
 async function suggestions(accountName, ledgers, currentId) {
@@ -146,16 +111,18 @@ async function suggestions(accountName, ledgers, currentId) {
 }
 
 async function detail(id) {
+  return db.readSnapshot(async()=>{
   const result = await db.query(
-    `SELECT r.*, a.id AS account_id, a.account_name, a.pan_number, a.gst_number, a.msme_number,
+    `SELECT r.*, b.frozen_inputs, a.id AS account_id, a.account_name, a.pan_number, a.gst_number, a.msme_number,
             a.category_path, a.level_1_category, a.credit_days,
             c.name AS company_name, c.tally_company_id,
             o.pending_bill_debit, o.pending_bill_credit, o.bill_amount, o.paid_amount,
-            o.last_payment_amount, o.last_payment_date, o.reporting_date,
+            o.last_payment_amount, o.last_payment_date, r.reporting_date,
             m.source AS mapping_source, m.mapped_by, m.mapped_at, m.tally_ledger_id AS mapped_ledger_id
-     FROM intel_reconciliations r
+     FROM intel_current_reconciliations r
+     JOIN intel_import_batches b ON b.id=r.import_batch_id
      JOIN intel_companies c ON c.id=r.company_id
-     LEFT JOIN intel_outstanding o ON o.id=r.outstanding_id
+     LEFT JOIN intel_current_outstanding o ON o.id=r.outstanding_id
      LEFT JOIN intel_accounts a ON a.id=o.account_id
      LEFT JOIN intel_account_maps m ON m.account_id=a.id AND m.company_id=r.company_id
      WHERE r.id=$1`,
@@ -164,14 +131,14 @@ async function detail(id) {
   if (!result.rowCount) throw Object.assign(new Error('Reconciliation row not found'), { status: 404 });
   const row = result.rows[0];
   const rules = await rulesFor();
-  const ledgers = await tally.listLedgers(row.tally_company_id);
+  const ledgers = row.frozen_inputs?.reference?.ledgers || await tally.listLedgers(row.tally_company_id);
   const ageing = row.outstanding_id
     ? (await db.query('SELECT * FROM intel_ageing WHERE outstanding_id=$1 ORDER BY ageing_bucket', [row.outstanding_id])).rows
     : [];
-  const sourceAmount = Number(row.source_amount) || 0;
-  const tallyAmount = row.tally_amount == null ? null : Number(row.tally_amount);
-  const difference = Number(row.difference) || 0;
-  const tolerance = Number(rules.amount_tolerance?.amount) || 1000;
+  const sourceAmount = row.source_amount || '0.00';
+  const tallyAmount = row.tally_amount;
+  const difference = row.difference;
+  const tolerance = Number((row.frozen_inputs?.rules || rules).amount_tolerance?.amount ?? 1000);
   return {
     id: row.id,
     status: row.status,
@@ -186,11 +153,11 @@ async function detail(id) {
       creditDays: row.credit_days,
     } : null,
     excel: {
-      bill: Number(row.bill_amount) || 0,
-      paid: Number(row.paid_amount) || 0,
-      pendingDebit: Number(row.pending_bill_debit) || 0,
-      pendingCredit: Number(row.pending_bill_credit) || 0,
-      lastPayment: Number(row.last_payment_amount) || 0,
+      bill: row.bill_amount || '0.00',
+      paid: row.paid_amount || '0.00',
+      pendingDebit: row.pending_bill_debit || '0.00',
+      pendingCredit: row.pending_bill_credit || '0.00',
+      lastPayment: row.last_payment_amount || '0.00',
       lastPaymentDate: row.last_payment_date,
       reportingDate: row.reporting_date,
       pendingNet: sourceAmount,
@@ -211,6 +178,7 @@ async function detail(id) {
       canMap: Boolean(row.account_id),
     },
     comparison: {
+      reportingDate:row.reporting_date, tallyBalanceDate:row.tally_balance_date, tallyBatchId:row.tally_batch_id, comparisonAvailable:row.comparison_available,
       sourceAmount,
       tallyAmount,
       difference,
@@ -222,9 +190,11 @@ async function detail(id) {
     ageing,
     suggestions: await suggestions(row.account_name || '', ledgers, Number(row.tally_ledger_id) || null),
   };
+  });
 }
 
 function explain(status, sourceAmount, tallyAmount, difference, tolerance, ledgerName) {
+  if (status === 'COMPARISON_UNAVAILABLE') return 'The Excel reporting date and archived Tally balance date are unknown or different. A financial comparison is unavailable.';
   if (status === 'MATCHED') {
     return `Excel pending net and Tally balance are within the ₹${tolerance.toLocaleString('en-IN')} tolerance${ledgerName ? ` for ${ledgerName}` : ''}.`;
   }
@@ -244,69 +214,34 @@ function explain(status, sourceAmount, tallyAmount, difference, tolerance, ledge
   return `${side} by ₹${Math.abs(difference).toLocaleString('en-IN')}. Tolerance is ₹${tolerance.toLocaleString('en-IN')}.`;
 }
 
-async function mapRecon(id, tallyLedgerId, username) {
-  const current = await db.query(
-    `SELECT r.id, r.company_id, r.outstanding_id, r.source_amount, a.id AS account_id, a.account_name, c.tally_company_id
-     FROM intel_reconciliations r
-     JOIN intel_companies c ON c.id=r.company_id
-     LEFT JOIN intel_outstanding o ON o.id=r.outstanding_id
-     LEFT JOIN intel_accounts a ON a.id=o.account_id
-     WHERE r.id=$1`,
-    [id]
-  );
-  if (!current.rowCount) throw Object.assign(new Error('Reconciliation row not found'), { status: 404 });
-  const row = current.rows[0];
-  if (!row.account_id) {
-    throw Object.assign(new Error('Tally-only rows cannot be mapped from Excel. They are missing in the upload.'), { status: 400 });
-  }
-  const rules = await rulesFor();
-  if (tallyLedgerId == null || tallyLedgerId === '') {
-    await db.query('DELETE FROM intel_account_maps WHERE company_id=$1 AND account_id=$2', [row.company_id, row.account_id]);
-    await db.query(
-      `UPDATE intel_reconciliations
-       SET tally_ledger_id=NULL, tally_ledger_name=NULL, tally_amount=NULL,
-           difference=$2, difference_pct=NULL, match_method=NULL, match_score=NULL,
-           matching_fields='{}', status='MISSING_IN_TALLY'
-       WHERE id=$1`,
-      [id, Number(row.source_amount) || 0]
-    );
-    await audit.record({ username, action: 'UNMAP_LEDGER', entity: 'account', entityId: row.account_id, newValue: { reconId: id } });
-    return detail(id);
-  }
-  const ledgers = await tally.listLedgers(row.tally_company_id);
-  const ledger = ledgers.find((item) => item.id === Number(tallyLedgerId));
-  if (!ledger) throw Object.assign(new Error('Tally ledger not found for this company'), { status: 400 });
-  await db.query(
-    `INSERT INTO intel_account_maps (company_id, account_id, tally_ledger_id, tally_ledger_name, mapped_by, source)
-     VALUES ($1,$2,$3,$4,$5,'MANUAL')
-     ON CONFLICT (company_id, account_id) DO UPDATE SET
-       tally_ledger_id=EXCLUDED.tally_ledger_id,
-       tally_ledger_name=EXCLUDED.tally_ledger_name,
-       mapped_by=EXCLUDED.mapped_by,
-       mapped_at=now(),
-       source='MANUAL'`,
-    [row.company_id, row.account_id, ledger.id, ledger.name, username]
-  );
-  const sourceAmount = Number(row.source_amount) || 0;
-  const tallyAmount = Number(ledger.balance) || 0;
-  const difference = money(sourceAmount - tallyAmount);
-  const status = amountStatus(sourceAmount, tallyAmount, rules);
-  await db.query(
-    `UPDATE intel_reconciliations
-     SET tally_ledger_id=$2, tally_ledger_name=$3, tally_amount=$4, difference=$5,
-         difference_pct=$6, match_method='MANUAL', match_score=1, matching_fields='{manual_map}', status=$7
-     WHERE id=$1`,
-    [
-      id, ledger.id, ledger.name, tallyAmount, difference,
-      Math.abs(sourceAmount) >= 1 ? money((difference / Math.abs(sourceAmount)) * 100) : null,
-      status,
-    ]
-  );
-  await audit.record({
-    username, action: 'MAP_LEDGER', entity: 'account', entityId: row.account_id,
-    newValue: { reconId: id, tallyLedgerId: ledger.id, tallyLedgerName: ledger.name, status },
+async function mapRecon(id,tallyLedgerId,username) {
+  const imports = require('../imports/service');
+  const nextId = await db.transaction(async client => {
+    const current = (await client.query(`SELECT r.*,o.account_id,b.import_file_id,b.frozen_inputs
+      FROM intel_current_reconciliations r JOIN intel_outstanding o ON o.id=r.outstanding_id
+      JOIN intel_import_batches b ON b.id=r.import_batch_id WHERE r.id=$1`,[id])).rows[0];
+    if (!current) throw Object.assign(new Error('Only a current Excel reconciliation can be mapped'),{status:409});
+    if (!current.frozen_inputs) throw Object.assign(new Error('Reprocess this legacy import before changing its reconciliation'),{status:409});
+    await client.query('SELECT pg_advisory_xact_lock(61009,hashtext($1))',[current.company_id]);
+    await client.query('SELECT id FROM intel_import_files WHERE id=$1 FOR UPDATE',[current.import_file_id]);
+    await client.query('SELECT id FROM intel_companies WHERE id=$1 FOR UPDATE',[current.company_id]);
+    if (!(await client.query('SELECT id FROM intel_current_reconciliations WHERE id=$1',[id])).rowCount) throw Object.assign(new Error('Publication changed; reload this reconciliation'),{status:409});
+    const reference=current.frozen_inputs.reference;
+    const ledger = reference.ledgers.find(row => row.id===Number(tallyLedgerId));
+    if (tallyLedgerId!=null && tallyLedgerId!=='' && !ledger) throw Object.assign(new Error('Ledger is unavailable in this generation Tally snapshot'),{status:400});
+    if (ledger) {
+      if ((await client.query('SELECT id FROM intel_account_maps WHERE company_id=$1 AND tally_ledger_id=$2 AND account_id<>$3',[current.company_id,ledger.id,current.account_id])).rowCount)
+        throw Object.assign(new Error('This ledger is already reserved for another account'),{status:409});
+      await client.query(`INSERT INTO intel_account_maps(company_id,account_id,tally_ledger_id,tally_ledger_name,mapped_by,source) VALUES($1,$2,$3,$4,$5,'MANUAL')
+        ON CONFLICT(company_id,account_id) DO UPDATE SET tally_ledger_id=EXCLUDED.tally_ledger_id,tally_ledger_name=EXCLUDED.tally_ledger_name,mapped_by=EXCLUDED.mapped_by,mapped_at=now(),source='MANUAL'`,[current.company_id,current.account_id,ledger.id,ledger.name,username]);
+    } else await client.query('DELETE FROM intel_account_maps WHERE company_id=$1 AND account_id=$2',[current.company_id,current.account_id]);
+    const reserved = await imports.claim(current.import_file_id,{username,reprocess:true,reference,inputs:current.frozen_inputs},{transaction:work=>work(client)});
+    if (reserved.existing) throw Object.assign(new Error('An import is already processing'),{status:409});
+    await imports.publishGeneration(client,reserved);
+    await client.query(`INSERT INTO intel_audit(username,action,entity,entity_id,old_value,new_value) VALUES($1,$2,'account',$3,$4,$5)`,[username,ledger?'MAP_LEDGER':'UNMAP_LEDGER',current.account_id,{reconId:id,batchId:current.import_batch_id},{batchId:reserved.batch.id,tallyLedgerId:ledger?.id || null}]);
+    return (await client.query('SELECT r.id FROM intel_reconciliations r JOIN intel_outstanding o ON o.id=r.outstanding_id WHERE r.import_batch_id=$1 AND o.account_id=$2',[reserved.batch.id,current.account_id])).rows[0].id;
   });
-  return detail(id);
+  return detail(nextId);
 }
 
 async function listLedgers({ company, q } = {}) {
@@ -322,4 +257,4 @@ async function listLedgers({ company, q } = {}) {
     .slice(0, 80);
 }
 
-module.exports = { listSync, detail, mapRecon, listLedgers, applySavedMaps, rulesFor };
+module.exports = { listSync, detail, mapRecon, listLedgers, rulesFor };

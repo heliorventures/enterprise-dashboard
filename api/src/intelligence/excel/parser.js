@@ -1,4 +1,5 @@
 const ExcelJS = require('exceljs');
+const decimal = require('../transform/decimal');
 
 const AMOUNT_HINT = /(amount|amt|debit|credit|dr\b|cr\b|bill|paid)/i;
 const DATE_HINT = /(date|dt)\b/i;
@@ -65,7 +66,8 @@ function fillMerged(valuesByRow, merges) {
 function parsePeriod(text) {
   if (!text) return { from: null, to: null, raw: null };
   const raw = String(text);
-  const dates = [...raw.matchAll(/(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4})/g)].map((m) => parseDate(m[1]));
+  const dates = [...raw.matchAll(/\b(\d{4}-\d{2}-\d{2}|\d{1,2}[\/.\-]\d{1,2}[\/.\-](?:\d{4}|\d{2}))\b/g)].map((m) => parseDate(m[1]));
+  if (dates[0] && dates[1] && dates[0]>dates[1]) return {from:null,to:null,raw};
   return { from: dates[0] || null, to: dates[1] || null, raw };
 }
 
@@ -80,32 +82,35 @@ function parseDate(value) {
     return date.toISOString().slice(0, 10);
   }
   const text = String(value).trim();
-  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(text);
-  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
-  const dmy = /^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})$/.exec(text);
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (iso) return calendarDate(Number(iso[1]), Number(iso[2]), Number(iso[3]));
+  const dmy = /^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2}|\d{4})$/.exec(text);
   if (dmy) {
     const year = dmy[3].length === 2 ? `20${dmy[3]}` : dmy[3];
-    return `${year}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+    return calendarDate(Number(year), Number(dmy[2]), Number(dmy[1]));
   }
-  const parsed = Date.parse(text);
-  if (!Number.isNaN(parsed)) return new Date(parsed).toISOString().slice(0, 10);
   return null;
+}
+
+function calendarDate(year, month, day) {
+  if (year < 1900 || year > 9999 || month < 1 || month > 12 || day < 1) return null;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+    ? date.toISOString().slice(0, 10) : null;
 }
 
 function parseDecimal(value) {
   if (value == null || value === '') return null;
-  if (typeof value === 'number' && Number.isFinite(value)) return Math.round(value * 100) / 100;
-  const text = String(value).replace(/[,₹\s]/g, '').replace(/^\((.*)\)$/, '-$1');
-  if (!text || text === '-') return null;
-  const n = Number(text);
-  if (!Number.isFinite(n)) return undefined;
-  return Math.round(n * 100) / 100;
+  if (String(value).trim() === '-') return null;
+  try { return decimal.amount(value); } catch { return undefined; }
 }
 
 function parseInteger(value) {
-  const n = parseDecimal(value);
-  if (n == null || n === undefined) return n;
-  return Math.round(n);
+  if (value == null || value === '') return null;
+  const raw = String(value).replace(/,/g, '').trim();
+  if (!/^[+-]?\d+(?:\.0+)?$/.test(raw)) return undefined;
+  const n = Number(raw);
+  return Number.isSafeInteger(n) ? n : undefined;
 }
 
 function normalizeSpace(text) {
@@ -276,15 +281,15 @@ function isTotalName(name) {
 }
 
 function classifyRow(raw, columns) {
-  const name = normalizeSpace(raw.Particulars || raw.particulars || raw[columns[0]?.canonical] || '');
-  if (!name) return 'IGNORED';
+  const nameColumn = columns.find(col=>col.target==='account_name');
+  const name = normalizeSpace(nameColumn ? raw[nameColumn.canonical] : raw.Particulars || raw.particulars || raw[columns[0]?.canonical] || '');
   if (isTotalName(name)) return 'TOTAL';
   const amountCols = columns.filter((col) => col.kind === 'amount' || /amount|debit|credit/i.test(col.target || ''));
   const hasAmount = amountCols.some((col) => {
     const value = raw[col.canonical];
-    return value != null && value !== '' && (typeof value === 'number' || parseDecimal(value) != null);
+    return value != null && value !== '';
   });
-  if (!hasAmount) return 'GROUP';
+  if (!hasAmount) return name ? 'GROUP' : 'IGNORED';
   return 'DETAIL';
 }
 
@@ -300,7 +305,7 @@ async function analyzeWorkbook(source) {
   const worksheet = workbook.worksheets[0];
   if (!worksheet) throw Object.assign(new Error('Workbook has no worksheets'), { status: 400, code: 'NO_SHEET' });
   const colCount = Math.max(worksheet.actualColumnCount || 0, worksheet.columnCount || 0, 1);
-  const rowCount = worksheet.actualRowCount || worksheet.rowCount || 0;
+  const rowCount = worksheet.rowCount || 0;
   const valuesByRow = {};
   for (let r = 1; r <= rowCount; r += 1) valuesByRow[r] = rowValues(worksheet, r, colCount);
   fillMerged(valuesByRow, worksheet.model?.merges);

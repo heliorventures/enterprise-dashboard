@@ -56,14 +56,15 @@ export class ImportWizard {
   readonly currentTitle = computed(() => this.steps[this.step() - 1]?.label || 'Upload Excel');
   readonly accountNameColumn = computed(
     () =>
-      this.result()?.analysis.columns?.find((col) => col.target === 'account_name')?.canonical || '',
+      this.result()?.analysis.columns?.find((col) => col.target === 'account_name')?.canonical ||
+      '',
   );
   readonly sampleNames = computed(() => {
     const analysis = this.result()?.analysis;
     const key = this.accountNameColumn();
-    return (analysis?.preview || []).slice(0, 8).map((row) =>
-      String(row.raw['Particulars'] || (key ? row.raw[key] : '') || '—'),
-    );
+    return (analysis?.preview || [])
+      .slice(0, 8)
+      .map((row) => String((key ? row.raw[key] : '') ?? '—'));
   });
   readonly canImport = computed(() => Boolean(this.accountNameColumn()) && !this.busy());
 
@@ -119,7 +120,9 @@ export class ImportWizard {
   private ensureAccountMapping(data: ExcelUploadResult): ExcelUploadResult {
     const columns = data.analysis?.columns || [];
     if (columns.some((col) => col.target === 'account_name')) return data;
-    const named = columns.find((col) => /particular|ledger|party|account|name/i.test(col.canonical));
+    const named = columns.find((col) =>
+      /particular|ledger|party|account|name/i.test(col.canonical),
+    );
     const pick = named || columns[0];
     if (pick) {
       pick.target = 'account_name';
@@ -141,6 +144,7 @@ export class ImportWizard {
   }
 
   startOver() {
+    if (this.busy()) return;
     this.stopPoll();
     this.step.set(1);
     this.result.set(null);
@@ -151,6 +155,7 @@ export class ImportWizard {
   }
 
   upload() {
+    if (this.busy()) return;
     if (!this.companyId()) {
       this.error.set('Choose the company this Excel belongs to.');
       return;
@@ -194,6 +199,8 @@ export class ImportWizard {
   }
 
   setAccountNameColumn(event: Event) {
+    if (this.busy()) return;
+    this.validation.set(null);
     const canonical = (event.target as HTMLSelectElement).value;
     this.result.update((current) => {
       if (!current?.analysis.columns) return current;
@@ -211,6 +218,8 @@ export class ImportWizard {
   }
 
   setTarget(col: ExcelColumn, event: Event) {
+    if (this.busy()) return;
+    this.validation.set(null);
     const target = (event.target as HTMLSelectElement).value || null;
     this.result.update((current) => {
       if (!current?.analysis.columns) return current;
@@ -228,6 +237,7 @@ export class ImportWizard {
   }
 
   importFile() {
+    if (this.busy() || this.processed()) return;
     const current = this.result();
     if (!current) return;
     if (!this.accountNameColumn()) {
@@ -249,7 +259,12 @@ export class ImportWizard {
       .subscribe({
         next: (value) => {
           this.validation.set(value);
-          if (!value.canProcess) {
+          if (
+            !value.canProcess ||
+            value.errors > 0 ||
+            value.missingRequired?.length ||
+            value.total <= 0
+          ) {
             this.setProgress(0, '', false);
             this.error.set(
               value.errors
@@ -265,7 +280,7 @@ export class ImportWizard {
             .subscribe({
               next: (state) => {
                 this.applyProgress(state);
-                this.watchProcess(current.file.id);
+                if (this.busy()) this.watchProcess(current.file.id);
               },
               error: (err) => {
                 this.setProgress(0, '', false);

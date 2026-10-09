@@ -1,6 +1,7 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute } from '@angular/router';
+import { combineLatest } from 'rxjs';
 import { CompanyDirectory } from '../../services/company-directory';
 import { ManagementReportsService, ReportRow } from '../../services/management-reports';
 import { CompanySelect } from '../../shared/company-select';
@@ -61,6 +62,7 @@ export class ReportView {
   private readonly route = inject(ActivatedRoute);
   private readonly directory = inject(CompanyDirectory);
   private readonly request = new LatestRequest();
+  private readonly summaryRequest = new LatestRequest();
   readonly companies = this.directory.companies;
   readonly kind = signal('daily');
   readonly company = signal('all');
@@ -80,7 +82,9 @@ export class ReportView {
   readonly meta = computed(() => CATALOG[this.kind()] || CATALOG['daily']);
   readonly filterSummary = computed(() =>
     [
-      this.company() === 'all' ? 'All companies' : this.companies().find((row) => row.id === this.company())?.name,
+      this.company() === 'all'
+        ? 'All companies'
+        : this.companies().find((row) => row.id === this.company())?.name,
       this.from() && this.to() ? `${this.from()} to ${this.to()}` : '',
       this.type() || 'All voucher types',
       this.kind() === 'large' ? `≥ ${this.minAmount()}` : '',
@@ -91,14 +95,16 @@ export class ReportView {
   readonly columns = computed(() => this.columnsFor(this.kind()));
 
   constructor() {
-    this.route.queryParamMap.pipe(takeUntilDestroyed()).subscribe((params) => {
-      const company = params.get('company');
-      if (company) this.company.set(company);
-    });
-    this.route.paramMap.pipe(takeUntilDestroyed()).subscribe((params) => {
-      this.kind.set(params.get('kind') || 'daily');
-      this.load();
-    });
+    combineLatest([this.route.paramMap, this.route.queryParamMap])
+      .pipe(takeUntilDestroyed())
+      .subscribe(([params, query]) => {
+        this.company.set(query.get('company') || 'all');
+        this.type.set(query.get('type') || '');
+        if (query.has('from')) this.from.set(query.get('from') || '');
+        if (query.has('to')) this.to.set(query.get('to') || '');
+        this.kind.set(params.get('kind') || 'daily');
+        this.load();
+      });
   }
 
   onCompany(value: string) {
@@ -150,8 +156,19 @@ export class ReportView {
   }
 
   load() {
+    this.summaryRequest.cancel();
+    if (this.from() && this.to() && this.from() > this.to()) {
+      this.request.cancel();
+      this.items.set([]);
+      this.cards.set({});
+      this.loading.set(false);
+      this.error.set('From date must be on or before To date.');
+      return;
+    }
     this.loading.set(true);
     this.error.set('');
+    this.items.set([]);
+    this.cards.set({});
     this.request.run(
       this.api.get(this.kind(), {
         company: this.company(),
@@ -178,19 +195,20 @@ export class ReportView {
   }
 
   private loadSummary() {
-    this.api
-      .get('summary', {
+    this.summaryRequest.run(
+      this.api.get('summary', {
         company: this.company(),
         type: this.type(),
         from: this.from(),
         to: this.to(),
-      })
-      .subscribe({
+      }),
+      {
         next: (result) => {
           this.cards.set(result.cards || {});
           if (result.types) this.types.set(result.types);
         },
-      });
+      },
+    );
   }
 
   exportCsv() {
@@ -206,13 +224,29 @@ export class ReportView {
   }
 
   rowId(row: ReportRow, index = 0) {
-    return String(row['id'] || row['date'] || row['week_label'] || row['month_key'] || row['voucher_type'] || row['party'] || row['company_id'] || index);
+    return String(
+      row['id'] ||
+        row['date'] ||
+        row['week_label'] ||
+        row['month_key'] ||
+        row['voucher_type'] ||
+        row['party'] ||
+        row['company_id'] ||
+        index,
+    );
   }
 
   private columnsFor(kind: string): DataColumn<ReportRow>[] {
     const amount = (key: string): DataColumn<ReportRow> => ({
       key,
-      label: key === 'turnover' ? 'Turnover' : key === 'inflow' ? 'Receipts / sales' : key === 'outflow' ? 'Payments / purchases' : 'Net',
+      label:
+        key === 'turnover'
+          ? 'Turnover'
+          : key === 'inflow'
+            ? 'Receipts / sales'
+            : key === 'outflow'
+              ? 'Payments / purchases'
+              : 'Net',
       value: (row) => fullInr(Number(row[key] || 0)),
       numeric: true,
       primary: true,
@@ -225,11 +259,21 @@ export class ReportView {
           value: (row) => String(row['date'] || '—'),
           link: (row) => ({
             path: '/transactions',
-            query: { company: this.company(), from: String(row['date']), to: String(row['date']) },
+            query: {
+              company: this.company(),
+              type: this.type(),
+              from: String(row['date']),
+              to: String(row['date']),
+            },
           }),
           primary: true,
         },
-        { key: 'vouchers', label: 'Vouchers', value: (row) => String(row.vouchers || 0), primary: true },
+        {
+          key: 'vouchers',
+          label: 'Vouchers',
+          value: (row) => String(row.vouchers || 0),
+          primary: true,
+        },
         amount('inflow'),
         amount('outflow'),
         amount('net'),
@@ -238,9 +282,23 @@ export class ReportView {
     }
     if (kind === 'weekly') {
       return [
-        { key: 'week', label: 'Week', value: (row) => String(row['week_label'] || '—'), primary: true },
-        { key: 'range', label: 'From / to', value: (row) => `${row['week_start'] || ''} – ${row['week_end'] || ''}` },
-        { key: 'vouchers', label: 'Vouchers', value: (row) => String(row.vouchers || 0), primary: true },
+        {
+          key: 'week',
+          label: 'Week',
+          value: (row) => String(row['week_label'] || '—'),
+          primary: true,
+        },
+        {
+          key: 'range',
+          label: 'From / to',
+          value: (row) => `${row['week_start'] || ''} – ${row['week_end'] || ''}`,
+        },
+        {
+          key: 'vouchers',
+          label: 'Vouchers',
+          value: (row) => String(row.vouchers || 0),
+          primary: true,
+        },
         amount('inflow'),
         amount('outflow'),
         amount('net'),
@@ -248,8 +306,18 @@ export class ReportView {
     }
     if (kind === 'monthly') {
       return [
-        { key: 'month', label: 'Month', value: (row) => String(row['month_label'] || row['month_key'] || '—'), primary: true },
-        { key: 'vouchers', label: 'Vouchers', value: (row) => String(row.vouchers || 0), primary: true },
+        {
+          key: 'month',
+          label: 'Month',
+          value: (row) => String(row['month_label'] || row['month_key'] || '—'),
+          primary: true,
+        },
+        {
+          key: 'vouchers',
+          label: 'Vouchers',
+          value: (row) => String(row.vouchers || 0),
+          primary: true,
+        },
         amount('inflow'),
         amount('outflow'),
         amount('net'),
@@ -258,9 +326,19 @@ export class ReportView {
     }
     if (kind === 'types') {
       return [
-        { key: 'type', label: 'Voucher type', value: (row) => String(row['voucher_type'] || '—'), primary: true },
+        {
+          key: 'type',
+          label: 'Voucher type',
+          value: (row) => String(row['voucher_type'] || '—'),
+          primary: true,
+        },
         { key: 'flow', label: 'Class', value: (row) => String(row['flow'] || 'other') },
-        { key: 'vouchers', label: 'Vouchers', value: (row) => String(row.vouchers || 0), primary: true },
+        {
+          key: 'vouchers',
+          label: 'Vouchers',
+          value: (row) => String(row.vouchers || 0),
+          primary: true,
+        },
         amount('turnover'),
         amount('net'),
       ];
@@ -271,10 +349,24 @@ export class ReportView {
           key: 'party',
           label: 'Party',
           value: (row) => String(row['party'] || '—'),
-          link: (row) => ({ path: '/transactions', query: { company: this.company(), q: String(row['party'] || ''), from: this.from(), to: this.to() } }),
+          link: (row) => ({
+            path: '/transactions',
+            query: {
+              company: this.company(),
+              type: this.type(),
+              q: String(row['party'] || ''),
+              from: this.from(),
+              to: this.to(),
+            },
+          }),
           primary: true,
         },
-        { key: 'vouchers', label: 'Vouchers', value: (row) => String(row.vouchers || 0), primary: true },
+        {
+          key: 'vouchers',
+          label: 'Vouchers',
+          value: (row) => String(row.vouchers || 0),
+          primary: true,
+        },
         amount('inflow'),
         amount('outflow'),
         amount('turnover'),
@@ -286,10 +378,23 @@ export class ReportView {
           key: 'company',
           label: 'Company',
           value: (row) => String(row['company_name'] || '—'),
-          link: (row) => ({ path: '/management-reports/daily', query: { company: String(row['companyId'] || row['company_id']) } }),
+          link: (row) => ({
+            path: '/management-reports/daily',
+            query: {
+              company: String(row['companyId'] || row['company_id']),
+              type: this.type(),
+              from: this.from(),
+              to: this.to(),
+            },
+          }),
           primary: true,
         },
-        { key: 'vouchers', label: 'Vouchers', value: (row) => String(row.vouchers || 0), primary: true },
+        {
+          key: 'vouchers',
+          label: 'Vouchers',
+          value: (row) => String(row.vouchers || 0),
+          primary: true,
+        },
         amount('inflow'),
         amount('outflow'),
         amount('net'),
@@ -299,7 +404,12 @@ export class ReportView {
     return [
       { key: 'date', label: 'Date', value: (row) => String(row['date'] || '—'), primary: true },
       { key: 'company', label: 'Company', value: (row) => String(row['company_name'] || '—') },
-      { key: 'type', label: 'Type', value: (row) => String(row['voucher_type'] || '—'), primary: true },
+      {
+        key: 'type',
+        label: 'Type',
+        value: (row) => String(row['voucher_type'] || '—'),
+        primary: true,
+      },
       { key: 'party', label: 'Party', value: (row) => String(row['party'] || '—'), primary: true },
       { key: 'number', label: 'Number', value: (row) => String(row['voucher_number'] || '—') },
       {

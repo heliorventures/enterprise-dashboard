@@ -270,6 +270,67 @@ header .btn {
   margin-top: 16px;
 }
 
+.import-filter-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 16px;
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.exception-list {
+  display: grid;
+  gap: 12px;
+  padding: 0 24px 20px;
+}
+.exception-item {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: start;
+  gap: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+}
+.exception-decision {
+  width: 100%;
+}
+.exception-item h3 {
+  margin: 0 0 8px;
+}
+.exception-item p {
+  margin: 6px 0;
+  overflow-wrap: anywhere;
+}
+.audit-values {
+  border-bottom: 1px solid var(--line);
+  padding: 12px 0;
+}
+.audit-values summary {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.audit-values pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font: inherit;
+}
+
 @media (max-width: 900px) {
   .compare-grid {
     grid-template-columns: minmax(0, 1fr);

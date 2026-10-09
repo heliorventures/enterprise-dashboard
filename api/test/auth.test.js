@@ -26,3 +26,33 @@ test('session gate rejects requests without a signed cookie', () => {
   assert.equal(nextCalled, false);
   assert.equal(res.code, 401);
 });
+
+test('the configured dashboard bcrypt hash authenticates without a plaintext password', async () => {
+  const bcrypt = require('bcryptjs');
+  const previous = { password: config.dashboardPassword, hash: config.dashboardPasswordHash };
+  try {
+    config.dashboardPassword = '';
+    config.dashboardPasswordHash = await bcrypt.hash('hash-only-secret', 4);
+    assert.equal(await auth.credentialsOk('admin', 'hash-only-secret'), true);
+    assert.equal(await auth.credentialsOk('admin', 'wrong'), false);
+    assert.equal(await auth.credentialsOk('other', 'hash-only-secret'), false);
+    // bcrypt truncates at 72 bytes; a longer input must not authenticate by its prefix.
+    config.dashboardPasswordHash = await bcrypt.hash('a'.repeat(72), 4);
+    assert.equal(await auth.credentialsOk('admin', 'a'.repeat(73)), false);
+  } finally {
+    config.dashboardPassword = previous.password;
+    config.dashboardPasswordHash = previous.hash;
+  }
+});
+
+test('production hash authentication requires an independent session secret', () => {
+  const previous = { production: config.production, secret: config.sessionSecret };
+  try {
+    config.production = true;
+    config.sessionSecret = '';
+    assert.throws(() => auth.sign('admin'), /DASHBOARD_SESSION_SECRET/);
+  } finally {
+    config.production = previous.production;
+    config.sessionSecret = previous.secret;
+  }
+});

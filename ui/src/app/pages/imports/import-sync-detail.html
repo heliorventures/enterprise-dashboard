@@ -1,6 +1,10 @@
 <section class="grid-page">
   <app-page-header
-    [title]="account()?.['name'] ? text(account()?.['name']) : text(tally()['ledgerName'] || 'Mapping detail')"
+    [title]="
+      account()?.['name']
+        ? text(account()?.['name'])
+        : text(tally()['ledgerName'] || 'Mapping detail')
+    "
     [eyebrow]="text(company()['name'])"
     [description]="text(comparison()['explanation'])"
   >
@@ -14,6 +18,23 @@
   @if (loading()) {
     <p class="empty" role="status">Loading mapping detail…</p>
   } @else if (detail()) {
+    <article class="grid-card">
+      <div class="grid-toolbar"><h2>Comparison dates</h2></div>
+      <dl class="detail-list">
+        <div>
+          <dt>Excel reporting date</dt>
+          <dd>{{ date(comparison()['reportingDate']) }}</dd>
+        </div>
+        <div>
+          <dt>Tally balance date</dt>
+          <dd>{{ date(comparison()['tallyBalanceDate']) }}</dd>
+        </div>
+        <div>
+          <dt>Tally archive batch</dt>
+          <dd>{{ text(comparison()['tallyBatchId']) }}</dd>
+        </div>
+      </dl>
+    </article>
     <section class="kpi-grid">
       <app-kpi-card
         label="Excel pending net"
@@ -25,20 +46,20 @@
         label="Tally balance"
         [value]="tally()['balance'] == null ? 'Not mapped' : money(tally()['balance'])"
         icon="ledgers"
-        hint="CurrentBalance on the mapped ledger"
+        hint="Balance from the archived Tally reference"
       />
       <app-kpi-card
         label="Difference"
-        [value]="money(comparison()['difference'])"
+        [value]="comparisonMoney(comparison()['difference'])"
         icon="warning"
-        [tone]="inSync() ? 'positive' : 'negative'"
+        [tone]="!comparisonAvailable() ? 'neutral' : inSync() ? 'positive' : 'negative'"
         [hint]="inSync() ? 'Within tolerance' : text(status())"
       />
       <app-kpi-card
         label="Sync"
-        [value]="inSync() ? 'In sync' : 'Out of sync'"
+        [value]="!comparisonAvailable() ? 'Unavailable' : inSync() ? 'In sync' : 'Out of sync'"
         icon="check"
-        [tone]="inSync() ? 'positive' : 'negative'"
+        [tone]="!comparisonAvailable() ? 'neutral' : inSync() ? 'positive' : 'negative'"
       />
     </section>
 
@@ -51,12 +72,30 @@
           </div>
         </div>
         <dl class="detail-list">
-          <div><dt>Bill</dt><dd>{{ money(excel()['bill']) }}</dd></div>
-          <div><dt>Paid</dt><dd>{{ money(excel()['paid']) }}</dd></div>
-          <div><dt>Pending Dr</dt><dd>{{ money(excel()['pendingDebit']) }}</dd></div>
-          <div><dt>Pending Cr</dt><dd>{{ money(excel()['pendingCredit']) }}</dd></div>
-          <div><dt>Last payment</dt><dd>{{ money(excel()['lastPayment']) }} on {{ text(excel()['lastPaymentDate']) }}</dd></div>
-          <div><dt>PAN / GST</dt><dd>{{ text(account()?.['pan']) }} · {{ text(account()?.['gst']) }}</dd></div>
+          <div>
+            <dt>Bill</dt>
+            <dd>{{ money(excel()['bill']) }}</dd>
+          </div>
+          <div>
+            <dt>Paid</dt>
+            <dd>{{ money(excel()['paid']) }}</dd>
+          </div>
+          <div>
+            <dt>Pending Dr</dt>
+            <dd>{{ money(excel()['pendingDebit']) }}</dd>
+          </div>
+          <div>
+            <dt>Pending Cr</dt>
+            <dd>{{ money(excel()['pendingCredit']) }}</dd>
+          </div>
+          <div>
+            <dt>Last payment</dt>
+            <dd>{{ money(excel()['lastPayment']) }} on {{ text(excel()['lastPaymentDate']) }}</dd>
+          </div>
+          <div>
+            <dt>PAN / GST</dt>
+            <dd>{{ text(account()?.['pan']) }} · {{ text(account()?.['gst']) }}</dd>
+          </div>
         </dl>
       </article>
       <article class="grid-card">
@@ -67,12 +106,30 @@
           </div>
         </div>
         <dl class="detail-list">
-          <div><dt>Ledger</dt><dd>{{ text(tally()['ledgerName']) }}</dd></div>
-          <div><dt>Group</dt><dd>{{ text(tally()['groupName']) }}</dd></div>
-          <div><dt>Balance</dt><dd>{{ tally()['balance'] == null ? '—' : money(tally()['balance']) }}</dd></div>
-          <div><dt>Match method</dt><dd>{{ methodLabel() }}</dd></div>
-          <div><dt>Mapped by</dt><dd>{{ text(mapping()['mappedBy']) }}</dd></div>
-          <div><dt>Tolerance</dt><dd>{{ money(comparison()['tolerance']) }}</dd></div>
+          <div>
+            <dt>Ledger</dt>
+            <dd>{{ text(tally()['ledgerName']) }}</dd>
+          </div>
+          <div>
+            <dt>Group</dt>
+            <dd>{{ text(tally()['groupName']) }}</dd>
+          </div>
+          <div>
+            <dt>Balance</dt>
+            <dd>{{ tally()['balance'] == null ? '—' : money(tally()['balance']) }}</dd>
+          </div>
+          <div>
+            <dt>Match method</dt>
+            <dd>{{ methodLabel() }}</dd>
+          </div>
+          <div>
+            <dt>Mapped by</dt>
+            <dd>{{ text(mapping()['mappedBy']) }}</dd>
+          </div>
+          <div>
+            <dt>Tolerance</dt>
+            <dd>{{ money(comparison()['tolerance']) }}</dd>
+          </div>
         </dl>
       </article>
     </div>
@@ -82,7 +139,10 @@
         <div class="grid-toolbar">
           <div>
             <h2><app-icon name="sync" /> Map to Tally</h2>
-            <p>Choose the Tally ledger for this Excel account, then save. Amounts are compared again immediately.</p>
+            <p>
+              Choose the Tally ledger for this Excel account, then save. Amounts are compared again
+              immediately.
+            </p>
           </div>
         </div>
         <div class="section-copy">
@@ -101,7 +161,12 @@
             <span>Search all Tally ledgers for this company</span>
             <span class="search-box">
               <app-icon name="search" />
-              <input type="search" [value]="ledgerQuery()" (input)="searchLedgers($event)" placeholder="Ledger name" />
+              <input
+                type="search"
+                [value]="ledgerQuery()"
+                (input)="searchLedgers($event)"
+                placeholder="Ledger name"
+              />
             </span>
           </label>
           @if (ledgerHits().length) {
@@ -118,14 +183,21 @@
             <button class="btn primary" type="button" [disabled]="saving()" (click)="save()">
               {{ saving() ? 'Saving…' : 'Save mapping and compare' }}
             </button>
-            <button class="btn ghost" type="button" [disabled]="saving() || !selectedLedgerId()" (click)="clearMap()">
+            <button
+              class="btn ghost"
+              type="button"
+              [disabled]="saving() || !selectedLedgerId()"
+              (click)="clearMap()"
+            >
               Clear mapping
             </button>
           </div>
         </div>
       </article>
     } @else {
-      <p class="banner info">This Tally ledger is not in the uploaded Excel file, so it cannot be mapped from Excel.</p>
+      <p class="banner info">
+        This Tally ledger is not in the uploaded Excel file, so it cannot be mapped from Excel.
+      </p>
     }
 
     <article class="grid-card">

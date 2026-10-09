@@ -9,22 +9,19 @@ function resolveMaps(dbMaps, columns) {
   const byHeader = new Map();
   for (const row of dbMaps || []) {
     for (const alias of [row.source_header, ...(row.source_aliases || [])]) {
-      byHeader.set(normalizeSpace(alias).toLowerCase(), row.target_field);
+      const key = normalizeSpace(alias).toLowerCase();
+      if (!byHeader.has(key)) byHeader.set(key, row.target_field);
     }
   }
   const resolved = columns.map((col) => {
     const key = normalizeSpace(col.canonical).toLowerCase();
     const parentKey = normalizeSpace(col.parent || '').toLowerCase();
-    let mapped = byHeader.get(key) || byHeader.get(parentKey) || col.target || guessTarget(col.canonical, col.parent, col.child);
+    const explicit = byHeader.has(key) || byHeader.has(parentKey);
+    let mapped = byHeader.has(key) ? byHeader.get(key) : byHeader.has(parentKey) ? byHeader.get(parentKey) : col.target || guessTarget(col.canonical, col.parent, col.child);
     if (mapped === 'particulars') mapped = 'account_name';
-    return { ...col, target: mapped || null, unmapped: !mapped };
+    return { ...col, target: mapped || null, unmapped: !mapped, ignored: explicit && mapped == null };
   });
-  if (resolved.some((col) => col.target === 'account_name')) return resolved;
-  const fallback = resolved.find((col) => col.index === 1) || resolved[0];
-  if (!fallback) return resolved;
-  return resolved.map((col) => (
-    col.index === fallback.index ? { ...col, target: 'account_name', unmapped: false } : col
-  ));
+  return resolved;
 }
 
 async function loadMaps(db, { sourceSystemId, companyId } = {}) {
@@ -34,7 +31,7 @@ async function loadMaps(db, { sourceSystemId, companyId } = {}) {
      WHERE active = true
        AND ($1::uuid IS NULL OR source_system_id = $1 OR source_system_id IS NULL)
        AND ($2::uuid IS NULL OR company_id = $2 OR company_id IS NULL)
-     ORDER BY company_id NULLS LAST, source_system_id NULLS LAST, version DESC`,
+     ORDER BY (company_id IS NOT NULL) DESC, (source_system_id IS NOT NULL) DESC, version DESC, id DESC`,
     [sourceSystemId || null, companyId || null]
   );
   return result.rows;

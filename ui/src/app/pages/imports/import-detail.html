@@ -31,11 +31,47 @@
   }
 
   @if (batch(); as run) {
+    <article class="grid-card">
+      <div class="grid-toolbar">
+        <div>
+          <h2>Snapshot provenance</h2>
+          <p>Retained import generation and the archived Tally reference used for comparison.</p>
+        </div>
+      </div>
+      <dl class="detail-list">
+        <div>
+          <dt>Generation</dt>
+          <dd>{{ provenanceText(run['generation']) }}</dd>
+        </div>
+        <div>
+          <dt>Excel reporting date</dt>
+          <dd>{{ date(run['reporting_date']) }}</dd>
+        </div>
+        <div>
+          <dt>Tally balance date</dt>
+          <dd>{{ date(run['tally_balance_date']) }}</dd>
+        </div>
+        <div>
+          <dt>Tally archive batch</dt>
+          <dd>{{ provenanceText(run['tally_batch_id']) }}</dd>
+        </div>
+      </dl>
+    </article>
     <section class="kpi-grid">
       <app-kpi-card label="Detail rows" [value]="text(run['detail_rows'])" icon="upload" />
-      <app-kpi-card label="Successful" [value]="text(run['successful_rows'])" icon="check" tone="positive" />
+      <app-kpi-card
+        label="Successful"
+        [value]="text(run['successful_rows'])"
+        icon="check"
+        tone="positive"
+      />
       <app-kpi-card label="Warnings" [value]="text(run['warning_rows'])" icon="warning" />
-      <app-kpi-card label="Errors" [value]="text(run['failed_rows'])" icon="warning" tone="negative" />
+      <app-kpi-card
+        label="Errors"
+        [value]="text(run['failed_rows'])"
+        icon="warning"
+        tone="negative"
+      />
     </section>
     <article class="grid-card">
       <div class="grid-toolbar">

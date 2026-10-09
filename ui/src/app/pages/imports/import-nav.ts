@@ -11,9 +11,14 @@ import { RouterLink, RouterLinkActive } from '@angular/router';
     </p>
     <nav class="import-nav" aria-label="Excel import">
       <a routerLink="/imports/new" routerLinkActive="active">1. Upload Excel</a>
-      <a routerLink="/imports" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">2. Uploaded files</a>
+      <a routerLink="/imports" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }"
+        >2. Uploaded files</a
+      >
       <a routerLink="/imports/sync" routerLinkActive="active">3. Compare with Tally</a>
       <a routerLink="/imports/results" routerLinkActive="active">Excel outstanding</a>
+      <a routerLink="/imports/exceptions" routerLinkActive="active">Exceptions</a>
+      <a routerLink="/imports/quality" routerLinkActive="active">Data quality</a>
+      <a routerLink="/imports/audit" routerLinkActive="active">Audit</a>
     </nav>
   `,
   styles: `

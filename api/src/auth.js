@@ -1,5 +1,6 @@
 const { createHash, createHmac, timingSafeEqual } = require('node:crypto');
 const config = require('./config');
+const bcrypt = require('bcryptjs');
 
 const COOKIE = 'helior_session';
 const MAX_AGE_MS = 12 * 60 * 60 * 1000;
@@ -7,6 +8,7 @@ const failures = new Map();
 
 function secret() {
   if (config.sessionSecret.length >= 32) return config.sessionSecret;
+  if (config.production) throw new Error('DASHBOARD_SESSION_SECRET must contain at least 32 characters');
   return createHash('sha256').update(`helior:${config.dashboardUser}:${config.dashboardPassword}`).digest('hex');
 }
 
@@ -90,6 +92,11 @@ function clearFailures(ip) {
 }
 
 function credentialsOk(username, password) {
+  if (!same(username, config.dashboardUser)) return false;
+  if (config.dashboardPasswordHash) {
+    if (Buffer.byteLength(String(password), 'utf8') > 72) return false;
+    return bcrypt.compare(String(password), config.dashboardPasswordHash);
+  }
   if (!config.dashboardPassword) return false;
   return same(username, config.dashboardUser) && same(password, config.dashboardPassword);
 }
@@ -101,7 +108,7 @@ function requireSession(req, res, next) {
   next();
 }
 
-function login(req, res) {
+async function login(req, res) {
   if (limited(req.ip)) return res.status(429).json({ error: 'Too many sign-in attempts. Wait and try again.' });
   const username = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
@@ -109,13 +116,25 @@ function login(req, res) {
     fail(req.ip);
     return res.status(400).json({ error: 'Enter a username and password' });
   }
-  if (!credentialsOk(username, password)) {
+  if (!await credentialsOk(username, password)) {
     fail(req.ip);
     return res.status(401).json({ error: 'Invalid username or password' });
   }
   clearFailures(req.ip);
   res.setHeader('Set-Cookie', cookieHeader(sign(config.dashboardUser)));
   res.json({ user: { name: config.dashboardUser } });
+}
+
+function validateConfiguration() {
+  if (!config.production) return;
+  if (config.dashboardPasswordHash) {
+    if (!/^\$2[aby]\$(?:0[4-9]|[12][0-9]|3[01])\$[./A-Za-z0-9]{53}$/.test(config.dashboardPasswordHash)) {
+      throw new Error('DASHBOARD_PASSWORD_HASH must be a valid bcrypt hash; run configure-ui.ps1');
+    }
+  } else if (config.dashboardPassword.length < 8) {
+    throw new Error('Configure dashboard login with configure-ui.ps1 or DASHBOARD_PASSWORD (at least 8 characters)');
+  }
+  secret();
 }
 
 function logout(_req, res) {
@@ -136,4 +155,5 @@ module.exports = {
   logout,
   session,
   credentialsOk,
+  validateConfiguration,
 };

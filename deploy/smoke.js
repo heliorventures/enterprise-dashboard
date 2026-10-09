@@ -6,19 +6,14 @@ const assert = require('node:assert/strict');
   assert.equal(health.status, 200);
   assert.equal((await health.json()).ok, true);
   assert.equal((await fetch(origin + '/api/companies')).status, 401);
-  const login = await fetch(origin + '/api/auth/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      username: process.env.DASHBOARD_USER || 'admin',
-      password: process.env.DASHBOARD_PASSWORD || '',
-    }),
-  });
-  assert.equal(login.status, 200, 'Dashboard login must succeed for smoke checks');
-  const cookie = (login.headers.get('set-cookie') || '').split(';')[0];
+  // Runs inside the trusted container. Read-only smoke requests use a signed
+  // session without retaining or recovering the administrator's plaintext password.
+  const auth = require('./src/auth');
+  auth.validateConfiguration();
+  const cookie = `${auth.COOKIE}=${auth.sign(process.env.DASHBOARD_USER || 'admin')}`;
   assert.match(cookie, /helior_session=/);
   const headers = { Cookie: cookie };
-  for (const path of ['/api/companies', '/api/dashboard', '/api/ledgers', '/api/vouchers']) {
+  for (const path of ['/api/companies', '/api/dashboard', '/api/ledgers', '/api/vouchers', '/api/imports']) {
     const response = await fetch(origin + path, { headers, signal: AbortSignal.timeout(10000) });
     assert.equal(response.status, 200, path);
     const data = await response.json();

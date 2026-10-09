@@ -21,6 +21,16 @@ for file in api.env ui.env; do
   chmod 600 "$APP_SHARED_DIR/$file"
 done
 
+# Existing installations already have a bcrypt login in ui.env. Supply a separate
+# random signing key when adopting API authentication; never derive it from hash.
+if ! grep -Eq '^DASHBOARD_SESSION_SECRET=[A-Za-z0-9+/=_-]{32,}$' "$APP_SHARED_DIR/ui.env"; then
+  auth_temporary=$(mktemp "$APP_SHARED_DIR/.ui.env.XXXXXX")
+  sed '/^DASHBOARD_SESSION_SECRET=/d' "$APP_SHARED_DIR/ui.env" > "$auth_temporary"
+  printf '\nDASHBOARD_SESSION_SECRET=%s\n' "$(head -c 48 /dev/urandom | base64 -w 0)" >> "$auth_temporary"
+  chmod 600 "$auth_temporary"
+  mv -fT -- "$auth_temporary" "$APP_SHARED_DIR/ui.env"
+fi
+
 target="$app/releases/$tag"
 if [[ -n "$stage" ]]; then
   [[ "$stage" == "$app/incoming/$tag."* && "$stage" =~ ^[a-zA-Z0-9/_.-]+$ ]] || exit 1

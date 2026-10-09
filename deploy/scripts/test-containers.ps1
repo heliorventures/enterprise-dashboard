@@ -18,7 +18,7 @@ $hash = & docker run --rm enterprise-dashboard-ui:local-test caddy hash-password
 if ($LASTEXITCODE -ne 0) { throw 'Unable to generate test hash' }
 $utf8 = New-Object Text.UTF8Encoding($false)
 [IO.File]::WriteAllText((Join-Path $shared 'api.env'), "DB_HOST=enterprise-dashboard-pg-test`nDB_PORT=5432`nDB_NAME=enterprise_dashboard_test`nDB_USER=dashboard_test`nDB_PASSWORD=local-test-only`nTALLY_INGEST_TOKEN=local-ingest-token-with-at-least-32-characters`n", $utf8)
-[IO.File]::WriteAllText((Join-Path $shared 'ui.env'), "DASHBOARD_USER=tester`nDASHBOARD_PASSWORD_HASH=$($hash.Trim())`n", $utf8)
+[IO.File]::WriteAllText((Join-Path $shared 'ui.env'), "DASHBOARD_USER=tester`nDASHBOARD_PASSWORD_HASH=$($hash.Trim())`nDASHBOARD_SESSION_SECRET=local-test-session-key-at-least-32-characters`n", $utf8)
 $env:APP_SHARED_DIR = $shared
 $env:IMAGE_TAG = 'local-test'
 $env:DOCKER_NETWORK = 'enterprise-dashboard-test-network'
@@ -52,7 +52,11 @@ const assert = require('node:assert/strict');
     assert.equal(response.status, 200);
     assert.equal((await response.json()).duplicate, duplicate);
   }
-  const dashboard = await (await fetch(origin + '/api/dashboard', { headers: { Authorization: basic } })).json();
+  const login = await fetch(origin + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: 'tester', password: 'local-test-password' }) });
+  assert.equal(login.status, 200);
+  const cookie = login.headers.get('set-cookie').split(';')[0];
+  const dashboard = await (await fetch(origin + '/api/dashboard', { headers: { Cookie: cookie } })).json();
   assert.equal(dashboard.kpis.revenue, 123.45);
   console.log('Container routing, browser authentication, ingestion and retry checks passed.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

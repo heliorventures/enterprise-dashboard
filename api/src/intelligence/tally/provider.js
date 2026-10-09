@@ -20,10 +20,10 @@ async function listCompanies() {
   }
 }
 
-async function listLedgers(tallyCompanyId) {
+async function listLedgers(tallyCompanyId, database=db) {
   if (!tallyCompanyId) return [];
   try {
-    const result = await db.query(
+    const result = await database.query(
       `
         SELECT l."LedgerID" AS id, l."CompanyID" AS company_id, l."LedgerName" AS name,
                l."GroupCategory" AS group_name, l."CurrentBalance" AS balance
@@ -38,7 +38,7 @@ async function listLedgers(tallyCompanyId) {
       name: row.name,
       normalized: normalizeName(row.name),
       groupName: row.group_name,
-      balance: Number(row.balance) || 0,
+      balance: String(row.balance ?? '0'),
     }));
   } catch (error) {
     if (error.code === '42P01') return [];
@@ -55,4 +55,23 @@ async function matchCompanyName(name) {
     || null;
 }
 
-module.exports = { listCompanies, listLedgers, matchCompanyName, normalizeName };
+async function snapshot(tallyCompanyId, database=db) {
+  const read = async () => {
+    const reference = await database.query(`SELECT f.batch_id, s.manifest
+      FROM finance_snapshots f JOIN tally_source_snapshots s ON s.batch_id=f.batch_id
+      WHERE f.company_id=$1`, [tallyCompanyId]);
+    const row = reference.rows[0];
+    if (!row) return { ledgers:await listLedgers(tallyCompanyId,database),batchId:null,balanceDate:null };
+    const facts = await database.query(`SELECT l."LedgerID" AS id,f.name,f.group_name,f.closing_balance AS balance
+      FROM finance_ledger_facts f LEFT JOIN "Ledgers" l ON l."CompanyID"=f.company_id AND l."LedgerName"=f.name
+      WHERE f.company_id=$1 AND f.batch_id=$2`,[tallyCompanyId,row.batch_id]);
+    const coherent = facts.rows.length>0 && facts.rows.every(ledger=>ledger.id!=null)
+      && new Set(facts.rows.map(ledger=>ledger.name)).size===facts.rows.length;
+    return { ledgers:coherent ? facts.rows.map(ledger=>({id:Number(ledger.id),companyId:tallyCompanyId,name:ledger.name,
+        normalized:normalizeName(ledger.name),groupName:ledger.group_name,balance:String(ledger.balance)})) : await listLedgers(tallyCompanyId,database),
+      batchId:row.batch_id, balanceDate:coherent ? require('../excel/parser').parseDate(row.manifest?.dateContext?.ledgers?.to) : null };
+  };
+  return database===db ? db.readSnapshot(read) : read();
+}
+
+module.exports = { listCompanies, listLedgers, matchCompanyName, normalizeName, snapshot };

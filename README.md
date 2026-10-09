@@ -2,6 +2,10 @@
 
 Multi-company finance dashboard, ledger browser and transaction day book. Built with Angular 21 / TypeScript, Node.js / Express 5 and PostgreSQL.
 
+Excel Intelligence is part of this application: one API in `api`, one Angular UI in `ui`, and one PostgreSQL database. Open **Excel imports** for workbook validation, import history, current outstanding/ageing, Tally reconciliation, exception decisions, data quality and audit history. All database changes live in `api/migrations` and run with `npm run migrate` from `api`.
+
+Outstanding workbooks represent full company snapshots. A successful newer report replaces the company's current view while preserving earlier generations; retries do not add the same balances again. Reconciliation requires a proven matching Excel/Tally balance date. See [Intelligence workflow and data rules](docs/intelligence/README.md).
+
 A separate service on the Tally server sends complete company snapshots to the authenticated ingestion API. The application stores and displays those snapshots; it does not require the VPS to contact Tally.
 
 - [Technology, business review and deployment runbook](deploy/README.md)

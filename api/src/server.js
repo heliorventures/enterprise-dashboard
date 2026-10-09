@@ -10,7 +10,7 @@ const { registerTallyRoutes } = require('./tallyRoutes');
 const reports = require('./reports');
 const managementReports = require('./managementReports');
 const auth = require('./auth');
-const { registerExcelImportRoutes, migrate: migrateExcelImports } = require('./intelligence/routes');
+const { registerExcelImportRoutes } = require('./intelligence/routes');
 
 const app = express();
 
@@ -258,11 +258,8 @@ app.use(async(error, req, res, _next) => {
 
 async function start() {
   if (config.production && config.ingestToken.length < 32) throw new Error('TALLY_INGEST_TOKEN must contain at least 32 characters');
-  if (config.production && config.dashboardPassword.length < 8) {
-    throw new Error('DASHBOARD_PASSWORD must contain at least 8 characters');
-  }
+  auth.validateConfiguration();
   await db.migrate();
-  await migrateExcelImports();
   const server = app.listen(config.port, config.host, () => console.log('API listening on port ' + config.port));
   for (const signal of ['SIGTERM', 'SIGINT']) process.once(signal, () => {
     server.close(() => db.close().then(() => process.exit(0)));

@@ -38,7 +38,12 @@ export interface ExcelUploadResult {
     period?: { from?: string; to?: string };
     counts?: { dataRows?: number; groupRows?: number; totalRows?: number };
     columns?: ExcelColumn[];
-    preview?: { sourceRowNumber: number; raw: Record<string, unknown>; categoryPath?: string[]; rowType: string }[];
+    preview?: {
+      sourceRowNumber: number;
+      raw: Record<string, unknown>;
+      categoryPath?: string[];
+      rowType: string;
+    }[];
   };
 }
 
@@ -78,6 +83,24 @@ export interface ExcelImportProgress {
   canProcess?: boolean;
   batch?: Record<string, unknown> | null;
   reconciliation?: { status: string; count: number; difference: number }[];
+}
+
+export type ImportRecord = Record<string, unknown>;
+export type ImportReportType = 'outstanding' | 'reconciliation' | 'exceptions' | 'quality';
+export interface ImportReportFilters {
+  company?: string;
+  status?: string;
+  q?: string;
+}
+export interface ImportAccountDetail {
+  account: ImportRecord;
+  outstanding: ImportRecord[];
+  ageing: ImportRecord[];
+  exceptions: ImportRecord[];
+  audit: ImportRecord[];
+}
+export interface ImportQuality extends ImportRecord {
+  issues: { type: string; count: number }[];
 }
 
 export interface ExcelUploadProgress {
@@ -124,7 +147,10 @@ export class ExcelImportService {
               result: event.body as ExcelUploadResult,
             };
           }
-          if (event.type === HttpEventType.ResponseHeader || event.type === HttpEventType.DownloadProgress) {
+          if (
+            event.type === HttpEventType.ResponseHeader ||
+            event.type === HttpEventType.DownloadProgress
+          ) {
             return { phase: 'analyze' as const, percent: 88, message: 'Analyzing workbook…' };
           }
           return { phase: 'upload' as const, percent: 8, message: 'Uploading file…' };
@@ -134,9 +160,11 @@ export class ExcelImportService {
   }
 
   preview(id: string) {
-    return this.http.get<{ preview: ExcelUploadResult['analysis']['preview']; columns: ExcelColumn[]; counts: ExcelUploadResult['analysis']['counts'] }>(
-      `/api/imports/${id}/preview`,
-    );
+    return this.http.get<{
+      preview: ExcelUploadResult['analysis']['preview'];
+      columns: ExcelColumn[];
+      counts: ExcelUploadResult['analysis']['counts'];
+    }>(`/api/imports/${id}/preview`);
   }
 
   mapping(id: string, mappings: { sourceHeader: string; targetField: string | null }[]) {
@@ -165,9 +193,9 @@ export class ExcelImportService {
   }
 
   errors(id: string) {
-    return this.http.get<{ source_row_number: number; validation_status: string; errors: unknown }[]>(
-      `/api/imports/${id}/errors`,
-    );
+    return this.http.get<
+      { source_row_number: number; validation_status: string; errors: unknown }[]
+    >(`/api/imports/${id}/errors`);
   }
 
   summary(company = 'all') {
@@ -180,9 +208,12 @@ export class ExcelImportService {
   }
 
   outstanding(filters: { company?: string; q?: string; page?: number; pageSize?: number }) {
-    return this.http.get<{ items: Record<string, unknown>[]; total: number }>('/api/imports/outstanding', {
-      params: this.params(filters),
-    });
+    return this.http.get<{ items: Record<string, unknown>[]; total: number }>(
+      '/api/imports/outstanding',
+      {
+        params: this.params(filters),
+      },
+    );
   }
 
   ageing(company = 'all') {
@@ -228,6 +259,45 @@ export class ExcelImportService {
       '/api/imports/tally-ledgers',
       { params: this.params({ company, q }) },
     );
+  }
+
+  account(id: string) {
+    return this.http.get<ImportAccountDetail>(`/api/imports/accounts/${encodeURIComponent(id)}`);
+  }
+
+  exceptions(filters: ImportReportFilters & { page?: number; pageSize?: number }) {
+    return this.http.get<{ items: ImportRecord[]; total: number; page: number; pageSize: number }>(
+      '/api/imports/exceptions',
+      {
+        params: this.params({ ...filters }),
+      },
+    );
+  }
+
+  decideException(id: string, status: 'RESOLVED' | 'REJECTED', comment: string) {
+    return this.http.put<ImportRecord>(`/api/imports/exceptions/${encodeURIComponent(id)}`, {
+      status,
+      comment,
+    });
+  }
+
+  quality(company = 'all') {
+    return this.http.get<ImportQuality>('/api/imports/quality', {
+      params: this.params({ company }),
+    });
+  }
+
+  audit(entity = '', limit = 100) {
+    return this.http.get<ImportRecord[]>('/api/imports/audit', {
+      params: this.params({ entity, limit }),
+    });
+  }
+
+  reportCsv(type: ImportReportType, filters: ImportReportFilters) {
+    return this.http.get(`/api/imports/reports/${type}.csv`, {
+      params: this.params({ ...filters }),
+      responseType: 'blob',
+    });
   }
 
   private params(filters: Record<string, string | number | undefined>) {

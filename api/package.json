@@ -12,7 +12,7 @@
     "unpack:force": "node src/sourceUnpack.js --force",
     "promote": "node src/sourceUnpack.js",
     "promote:force": "node src/sourceUnpack.js --force",
-    "test": "node --test --test-concurrency=1 test/*.test.js",
+    "test": "node --test --test-concurrency=1 test/*.test.js test/intelligence/*.test.js",
     "archive:audit": "node scripts/archive-storage-audit.js",
     "benchmark:reporting": "node scripts/benchmark-reporting.js --synthetic"
   },
@@ -21,6 +21,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "exceljs": "^4.4.0",
