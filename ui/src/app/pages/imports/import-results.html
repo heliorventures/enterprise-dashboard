@@ -1,0 +1,79 @@
+<section class="grid-page">
+  <app-page-header
+    title="Excel outstanding"
+    eyebrow="Excel vs Tally"
+    description="Balances from your uploaded Excel files. Use Compare with Tally to see differences. This is not the Overview."
+  >
+    <app-company-select [companies]="companies()" [value]="company()" (companyChange)="onCompany($event)" />
+  </app-page-header>
+  <app-import-nav />
+
+  @if (error()) {
+    <p class="banner" role="alert">{{ error() }}</p>
+  }
+
+  <section class="kpi-grid">
+    <app-kpi-card label="Outstanding" [value]="money(cards()['totalOutstanding'])" icon="receivables" />
+    <app-kpi-card label="Paid" [value]="money(cards()['totalPaid'])" icon="cash" />
+    <app-kpi-card
+      label="Financial gap"
+      [value]="money(cards()['totalFinancialGap'])"
+      icon="warning"
+      [tone]="cards()['totalFinancialGap'] ? 'negative' : 'positive'"
+    />
+    <app-kpi-card label="Matched" [value]="text(cards()['matched'])" icon="check" tone="positive" />
+    <app-kpi-card label="Unmatched" [value]="text(cards()['unmatched'])" icon="warning" />
+    <app-kpi-card label="Accounts" [value]="text(cards()['records'])" icon="ledgers" />
+  </section>
+
+  <article class="grid-card">
+    <div class="grid-toolbar">
+      <div>
+        <h2><app-icon name="receivables" /> Outstanding</h2>
+        <p>From uploaded Excel, scoped to the company on each file.</p>
+      </div>
+    </div>
+    <app-data-table
+      label="Excel outstanding"
+      [rows]="outstanding()"
+      [columns]="outstandingColumns"
+      [rowKey]="rowId"
+      [loading]="loading()"
+      empty="No Excel outstanding for this company."
+    />
+  </article>
+
+  <article class="grid-card">
+    <div class="grid-toolbar">
+      <div>
+        <h2><app-icon name="calendar" /> Ageing</h2>
+        <p>Buckets come from the Excel report headers.</p>
+      </div>
+    </div>
+    <app-data-table
+      label="Excel ageing"
+      [rows]="ageing()"
+      [columns]="ageingColumns"
+      [rowKey]="rowId"
+      [loading]="loading()"
+      empty="No ageing buckets yet."
+    />
+  </article>
+
+  <article class="grid-card">
+    <div class="grid-toolbar">
+      <div>
+        <h2><app-icon name="ledgers" /> Reconciliation</h2>
+        <p>Each file is matched only to that company’s existing Tally ledgers.</p>
+      </div>
+    </div>
+    <app-data-table
+      label="Excel reconciliation"
+      [rows]="gaps()"
+      [columns]="gapColumns"
+      [rowKey]="rowId"
+      [loading]="loading()"
+      empty="No reconciliation rows yet."
+    />
+  </article>
+</section>

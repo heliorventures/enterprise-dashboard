@@ -1,0 +1,16 @@
+<section class="grid-page">
+  <app-page-header
+    title="Management reports"
+    eyebrow="VP briefing"
+    description="Date-wise and week-wise books activity, plus the reviews a VP typically asks for. Expenses & projects is unchanged."
+  />
+  <app-report-nav />
+  <div class="report-menu">
+    @for (card of cards; track card.path) {
+      <a class="report-card" [routerLink]="card.path">
+        <h2><app-icon [name]="card.icon" />{{ card.title }}</h2>
+        <p>{{ card.text }}</p>
+      </a>
+    }
+  </div>
+</section>

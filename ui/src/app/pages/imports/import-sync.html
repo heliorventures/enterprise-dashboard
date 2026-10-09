@@ -1,0 +1,108 @@
+<section class="grid-page">
+  <app-page-header
+    title="Compare with Tally"
+    eyebrow="Excel vs Tally"
+    description="Each row is one Excel party next to a Tally ledger. Open a row to confirm or fix the match."
+  />
+  <app-import-nav />
+
+  @if (error()) {
+    <p class="banner" role="alert">{{ error() }}</p>
+  }
+
+  <section class="kpi-grid">
+    <app-kpi-card label="In sync" [value]="textCount('MATCHED')" icon="check" tone="positive" />
+    <app-kpi-card
+      label="Differences"
+      [value]="textCount('differences')"
+      icon="warning"
+      [tone]="count('differences') ? 'negative' : 'positive'"
+    />
+    <app-kpi-card label="Missing in Tally" [value]="textCount('MISSING_IN_TALLY')" icon="ledgers" />
+    <app-kpi-card label="Missing in Excel" [value]="textCount('MISSING_IN_SOURCE')" icon="upload" />
+  </section>
+
+  <article class="grid-card">
+    <div class="grid-toolbar">
+      <div>
+        <h2><app-icon name="ledgers" /> Excel next to Tally</h2>
+        <p>Open a row to see Excel pending vs Tally balance, then confirm or change the match.</p>
+      </div>
+    </div>
+
+    <div class="status-chips">
+      @for (item of statuses; track item.id) {
+        <button
+          type="button"
+          class="chip-btn"
+          [class.on]="status() === item.id"
+          (click)="onStatus(item.id)"
+        >
+          {{ item.label }} · {{ count(item.id) }}
+        </button>
+      }
+    </div>
+
+    <app-filter-panel [summary]="filterSummary()">
+      <form class="filter-bar filters-6" (submit)="apply($event)">
+        <label class="field search">
+          <span>Search</span>
+          <span class="search-box">
+            <app-icon name="search" />
+            <input
+              type="search"
+              [value]="search()"
+              (input)="onQuery($event)"
+              placeholder="Excel account, Tally ledger, PAN or GST"
+            />
+          </span>
+        </label>
+        <app-company-select
+          [companies]="companies()"
+          [value]="company()"
+          (companyChange)="onCompany($event)"
+        />
+        <label class="field">
+          <span>Mapping</span>
+          <select [value]="mapped()" (change)="onMapped($event)">
+            <option value="">All mappings</option>
+            <option value="unmapped">Unmapped</option>
+            <option value="manual">Mapped by user</option>
+            <option value="auto">Auto matched</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Minimum difference</span>
+          <input type="number" min="0" [value]="minDifference()" (input)="onMin($event)" placeholder="0" />
+        </label>
+        <div class="filter-actions">
+          <button type="submit" class="btn ghost" [disabled]="loading()">Search</button>
+          <button type="button" class="btn ghost" (click)="clear()">
+            <app-icon name="close" />
+            Clear
+          </button>
+        </div>
+      </form>
+    </app-filter-panel>
+
+    <app-data-table
+      label="Excel to Tally mapping"
+      [rows]="items()"
+      [columns]="columns"
+      [rowKey]="rowId"
+      [loading]="loading()"
+      [error]="error()"
+      empty="No mapping rows match the current filters. Upload and process an Excel file first."
+    />
+    @if (!loading() && !error()) {
+      <app-pager
+        [busy]="loading()"
+        [total]="total()"
+        [page]="page()"
+        [pageSize]="pageSize()"
+        (pageChange)="onPage($event)"
+        (pageSizeChange)="onPageSize($event)"
+      />
+    }
+  </article>
+</section>

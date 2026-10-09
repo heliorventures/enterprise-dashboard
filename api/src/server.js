@@ -8,7 +8,9 @@ const { timingSafeEqual, createHash } = require('node:crypto');
 const { ingestSnapshot } = require('./ingest');
 const { registerTallyRoutes } = require('./tallyRoutes');
 const reports = require('./reports');
+const managementReports = require('./managementReports');
 const auth = require('./auth');
+const { registerExcelImportRoutes, migrate: migrateExcelImports } = require('./intelligence/routes');
 
 const app = express();
 
@@ -186,6 +188,14 @@ app.get('/api/reports/projects', async (req, res) => {
   }
 });
 
+app.get('/api/management-reports/:kind', async (req, res) => {
+  try {
+    res.json(await managementReports.run(req.params.kind, req.query));
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.status ? error.message : 'Unable to complete request' });
+  }
+});
+
 app.get('/api/vouchers', async (req, res) => {
   try {
     const result = await books.listVouchers({
@@ -203,6 +213,7 @@ app.get('/api/vouchers', async (req, res) => {
   }
 });
 
+registerExcelImportRoutes(app);
 if (config.tallyMode === 'pull' && !config.production) registerTallyRoutes(app);
 app.get('/api/tally/sync', async (_req, res) => {
   try { res.json(await sourceSync.history()); }
@@ -250,7 +261,8 @@ async function start() {
   if (config.production && config.dashboardPassword.length < 8) {
     throw new Error('DASHBOARD_PASSWORD must contain at least 8 characters');
   }
-  await db.query('SELECT version FROM schema_migrations LIMIT 1');
+  await db.migrate();
+  await migrateExcelImports();
   const server = app.listen(config.port, config.host, () => console.log('API listening on port ' + config.port));
   for (const signal of ['SIGTERM', 'SIGINT']) process.once(signal, () => {
     server.close(() => db.close().then(() => process.exit(0)));

@@ -1,0 +1,243 @@
+<section class="grid-page">
+  <app-page-header
+    title="Upload Excel"
+    eyebrow="Compare with Tally"
+    description="Three steps: choose the company and file, check we read it, then import. Tally is not overwritten."
+  />
+  <app-import-nav />
+
+  @if (directory.error()) {
+    <p class="banner" role="alert">{{ directory.error() }} Reload to load companies before uploading.</p>
+  }
+  @if (error()) {
+    <p class="banner" role="alert">{{ error() }}</p>
+  }
+
+  <article class="grid-card">
+    <div class="grid-toolbar">
+      <div>
+        <h2><app-icon name="upload" /> {{ currentTitle() }}</h2>
+        <p class="steps" aria-label="Import steps">
+          @for (item of steps; track item.id) {
+            <span [class.on]="step() === item.id" [class.done]="step() > item.id">{{ item.id }}. {{ item.label }}</span>
+          }
+        </p>
+      </div>
+    </div>
+
+    @if (progressActive() || progressPercent()) {
+      <div class="import-progress" role="status" [attr.aria-busy]="progressActive()">
+        <div class="import-progress-copy">
+          <strong>{{ progressLabel() || 'Working…' }}</strong>
+          <span>{{ progressPercent() }}%</span>
+        </div>
+        <div
+          class="import-progress-track"
+          role="progressbar"
+          [attr.aria-valuenow]="progressPercent()"
+          aria-valuemin="0"
+          aria-valuemax="100"
+        >
+          <span
+            class="import-progress-fill"
+            [class.active]="progressActive()"
+            [style.width.%]="progressPercent()"
+          ></span>
+        </div>
+      </div>
+    }
+
+    @if (step() === 1) {
+      <div class="wizard-copy">
+        <p class="lead">
+          Use the ageing / outstanding Excel for <strong>one company</strong>. We will store those
+          balances and later show how they compare with that company’s Tally ledgers.
+        </p>
+        <label class="field">
+          <span>Which company is this file for?</span>
+          <select [value]="companyId()" (change)="onCompany($event)" [disabled]="!!busy()">
+            <option value="">Select company</option>
+            @for (company of companies(); track company.id) {
+              <option [value]="company.id">{{ company.name }}</option>
+            }
+          </select>
+        </label>
+      </div>
+      <div class="drop">
+        <label class="field">
+          <span>Excel file (.xlsx)</span>
+          <input type="file" accept=".xlsx,.xls" (change)="onFile($event)" [disabled]="!!busy()" />
+        </label>
+        @if (fileName()) {
+          <p>{{ fileName() }}</p>
+        } @else {
+          <p class="muted">Typical file: ageing outstanding report from Tally.</p>
+        }
+      </div>
+      <div class="section-copy">
+        <button class="btn primary" type="button" [disabled]="!!busy()" (click)="upload()">
+          Read file
+        </button>
+      </div>
+    }
+
+    @if (step() === 2 && analysis(); as found) {
+      <div class="wizard-copy">
+        <p class="lead">Does this look like the right file? If yes, import it. If the names look wrong, change the column below.</p>
+        <dl class="fact-list">
+          <div>
+            <dt>Company</dt>
+            <dd>{{ result()?.selectedCompany?.name }}</dd>
+          </div>
+          <div>
+            <dt>File header</dt>
+            <dd>{{ found.company?.company || '—' }}</dd>
+          </div>
+          <div>
+            <dt>Period</dt>
+            <dd>{{ found.period?.from || '—' }} to {{ found.period?.to || '—' }}</dd>
+          </div>
+          <div>
+            <dt>Rows we will import</dt>
+            <dd>{{ found.counts?.dataRows || 0 }} parties / ledgers</dd>
+          </div>
+        </dl>
+        <label class="field">
+          <span>Which column has the party or ledger names?</span>
+          <select [value]="accountNameColumn()" [disabled]="!!busy()" (change)="setAccountNameColumn($event)">
+            <option value="">Select column</option>
+            @for (col of found.columns || []; track col.index) {
+              <option [value]="col.canonical">{{ col.canonical }}</option>
+            }
+          </select>
+        </label>
+        <p class="muted">Usually this is <strong>Particulars</strong>. It does not need to be called Name.</p>
+      </div>
+
+      <div class="sample-block">
+        <h3>Names we found</h3>
+        <ul>
+          @for (name of sampleNames(); track $index) {
+            <li>{{ name }}</li>
+          }
+        </ul>
+        @if (!sampleNames().length) {
+          <p class="muted">No party rows were found. Check that this is an outstanding report.</p>
+        }
+      </div>
+
+      @if (validation()?.issues?.length) {
+        <div class="section-copy">
+          <p>These rows need a look before import:</p>
+        </div>
+        <div class="desktop-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Row</th>
+                <th>Account</th>
+                <th>Issue</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (issue of validation()?.issues || []; track $index) {
+                <tr>
+                  <td>{{ issue.row ?? 'Column' }}</td>
+                  <td>{{ issue.account || '—' }}</td>
+                  <td>
+                    @for (item of issue.errors; track $index) {
+                      <span>{{ issueText(item.code, item.field, item.label) }}</span>
+                    }
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+
+      <details class="advanced">
+        <summary>Optional: change other Excel columns</summary>
+        <p class="muted">Leave this closed unless a balance column was read wrongly.</p>
+        <div class="desktop-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Excel column</th>
+                <th>We will treat it as</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (col of found.columns || []; track col.index) {
+                <tr>
+                  <td>{{ col.canonical }}</td>
+                  <td>
+                    <select
+                      class="mapping-select"
+                      [value]="col.target || ''"
+                      [disabled]="!!busy()"
+                      (change)="setTarget(col, $event)"
+                    >
+                      <option value="">Ignore</option>
+                      @for (field of fields(); track field.field_key) {
+                        <option [value]="field.field_key">{{ field.label }}</option>
+                      }
+                    </select>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </details>
+
+      <div class="section-copy">
+        <button class="btn ghost" type="button" [disabled]="!!busy()" (click)="startOver()">Choose another file</button>
+        <button class="btn primary" type="button" [disabled]="!canImport()" (click)="importFile()">
+          Import and compare with Tally
+        </button>
+      </div>
+    }
+
+    @if (step() === 3 && processed(); as done) {
+      <div class="wizard-copy">
+        <p class="lead">The Excel is stored for this company. Tally was not changed.</p>
+        <p>{{ totalLabel(done.batch['source_total_status']) }}</p>
+        <p>
+          {{ done.batch['successful_rows'] || 0 }} rows imported
+          @if (done.batch['warning_rows']) {
+            · {{ done.batch['warning_rows'] }} warnings
+          }
+          @if (done.batch['failed_rows']) {
+            · {{ done.batch['failed_rows'] }} skipped
+          }
+        </p>
+      </div>
+      <div class="desktop-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Compared with Tally</th>
+              <th>Count</th>
+              <th>Difference</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (row of done.reconciliation || []; track row.status) {
+              <tr>
+                <td>{{ reconLabel(row.status) }}</td>
+                <td>{{ row.count }}</td>
+                <td>{{ fullInr(row.difference) }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+      <div class="section-copy">
+        <a class="btn primary" routerLink="/imports/sync">Review differences</a>
+        <button class="btn ghost" type="button" (click)="openImport()">This file’s detail</button>
+        <button class="btn ghost" type="button" (click)="startOver()">Upload another file</button>
+      </div>
+    }
+  </article>
+</section>

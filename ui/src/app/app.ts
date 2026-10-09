@@ -23,9 +23,11 @@ export class App {
   readonly links = [
     { path: '/dashboard', label: 'Overview', icon: 'overview' },
     { path: '/reports', label: 'Expenses & projects', icon: 'reports' },
+    { path: '/management-reports', label: 'Management reports', icon: 'forecast' },
     { path: '/ledgers', label: 'Ledgers', icon: 'ledgers' },
     { path: '/transactions', label: 'Transactions', icon: 'transactions' },
     { path: '/operations', label: 'Data operations', icon: 'operations' },
+    { path: '/imports', label: 'Excel vs Tally', icon: 'upload' },
   ];
 
   constructor() {

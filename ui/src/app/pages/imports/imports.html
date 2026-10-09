@@ -1,0 +1,33 @@
+<section class="grid-page">
+  <app-page-header
+    title="Uploaded files"
+    eyebrow="Excel vs Tally"
+    description="Files you have already imported. Open one to see whether it matched Tally."
+  >
+    <a class="btn primary" routerLink="/imports/new"><app-icon name="upload" />Upload Excel</a>
+  </app-page-header>
+  <app-import-nav />
+
+  @if (error()) {
+    <p class="banner" role="alert">{{ error() }}</p>
+  }
+
+  <article class="grid-card">
+    <div class="grid-toolbar">
+      <div>
+        <h2><app-icon name="upload" /> Imported files</h2>
+        <p>Each file belongs to the company you chose when you uploaded it.</p>
+      </div>
+      <button type="button" class="btn ghost" (click)="load()" [disabled]="loading()">Refresh</button>
+    </div>
+    <app-data-table
+      label="Excel imports"
+      [rows]="items()"
+      [columns]="columns"
+      [rowKey]="recordKey"
+      [loading]="loading()"
+      [error]="error()"
+      empty="No Excel files have been imported yet."
+    />
+  </article>
+</section>

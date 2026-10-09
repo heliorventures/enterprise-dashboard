@@ -1,0 +1,147 @@
+<section class="grid-page">
+  <app-page-header
+    [title]="account()?.['name'] ? text(account()?.['name']) : text(tally()['ledgerName'] || 'Mapping detail')"
+    [eyebrow]="text(company()['name'])"
+    [description]="text(comparison()['explanation'])"
+  >
+    <a class="btn ghost" routerLink="/imports/sync">Back to comparison</a>
+  </app-page-header>
+  <app-import-nav />
+
+  @if (error()) {
+    <p class="banner" role="alert">{{ error() }}</p>
+  }
+  @if (loading()) {
+    <p class="empty" role="status">Loading mapping detail…</p>
+  } @else if (detail()) {
+    <section class="kpi-grid">
+      <app-kpi-card
+        label="Excel pending net"
+        [value]="money(excel()['pendingNet'])"
+        icon="upload"
+        hint="Debit less credit from the uploaded file"
+      />
+      <app-kpi-card
+        label="Tally balance"
+        [value]="tally()['balance'] == null ? 'Not mapped' : money(tally()['balance'])"
+        icon="ledgers"
+        hint="CurrentBalance on the mapped ledger"
+      />
+      <app-kpi-card
+        label="Difference"
+        [value]="money(comparison()['difference'])"
+        icon="warning"
+        [tone]="inSync() ? 'positive' : 'negative'"
+        [hint]="inSync() ? 'Within tolerance' : text(status())"
+      />
+      <app-kpi-card
+        label="Sync"
+        [value]="inSync() ? 'In sync' : 'Out of sync'"
+        icon="check"
+        [tone]="inSync() ? 'positive' : 'negative'"
+      />
+    </section>
+
+    <div class="compare-grid">
+      <article class="grid-card">
+        <div class="grid-toolbar">
+          <div>
+            <h2><app-icon name="upload" /> Excel upload</h2>
+            <p>Amounts from the operational file for this company.</p>
+          </div>
+        </div>
+        <dl class="detail-list">
+          <div><dt>Bill</dt><dd>{{ money(excel()['bill']) }}</dd></div>
+          <div><dt>Paid</dt><dd>{{ money(excel()['paid']) }}</dd></div>
+          <div><dt>Pending Dr</dt><dd>{{ money(excel()['pendingDebit']) }}</dd></div>
+          <div><dt>Pending Cr</dt><dd>{{ money(excel()['pendingCredit']) }}</dd></div>
+          <div><dt>Last payment</dt><dd>{{ money(excel()['lastPayment']) }} on {{ text(excel()['lastPaymentDate']) }}</dd></div>
+          <div><dt>PAN / GST</dt><dd>{{ text(account()?.['pan']) }} · {{ text(account()?.['gst']) }}</dd></div>
+        </dl>
+      </article>
+      <article class="grid-card">
+        <div class="grid-toolbar">
+          <div>
+            <h2><app-icon name="ledgers" /> Tally ledger</h2>
+            <p>Read-only Tally books. Mapping does not write to Tally.</p>
+          </div>
+        </div>
+        <dl class="detail-list">
+          <div><dt>Ledger</dt><dd>{{ text(tally()['ledgerName']) }}</dd></div>
+          <div><dt>Group</dt><dd>{{ text(tally()['groupName']) }}</dd></div>
+          <div><dt>Balance</dt><dd>{{ tally()['balance'] == null ? '—' : money(tally()['balance']) }}</dd></div>
+          <div><dt>Match method</dt><dd>{{ methodLabel() }}</dd></div>
+          <div><dt>Mapped by</dt><dd>{{ text(mapping()['mappedBy']) }}</dd></div>
+          <div><dt>Tolerance</dt><dd>{{ money(comparison()['tolerance']) }}</dd></div>
+        </dl>
+      </article>
+    </div>
+
+    @if (canMap()) {
+      <article class="grid-card">
+        <div class="grid-toolbar">
+          <div>
+            <h2><app-icon name="sync" /> Map to Tally</h2>
+            <p>Choose the Tally ledger for this Excel account, then save. Amounts are compared again immediately.</p>
+          </div>
+        </div>
+        <div class="section-copy">
+          <label class="field">
+            <span>Suggested ledgers</span>
+            <select [value]="selectedLedgerId()" (change)="onLedger($event)">
+              <option value="">Not mapped</option>
+              @for (row of suggestions(); track row.id) {
+                <option [value]="row.id">
+                  {{ row.name }} · {{ money(row.balance) }}{{ row.current ? ' · current' : '' }}
+                </option>
+              }
+            </select>
+          </label>
+          <label class="field">
+            <span>Search all Tally ledgers for this company</span>
+            <span class="search-box">
+              <app-icon name="search" />
+              <input type="search" [value]="ledgerQuery()" (input)="searchLedgers($event)" placeholder="Ledger name" />
+            </span>
+          </label>
+          @if (ledgerHits().length) {
+            <div class="suggestion-list">
+              @for (row of ledgerHits(); track row.id) {
+                <button type="button" class="suggestion" (click)="pick(row.id)">
+                  <strong>{{ row.name }}</strong>
+                  <span>{{ row.groupName }} · {{ money(row.balance) }}</span>
+                </button>
+              }
+            </div>
+          }
+          <div class="row-actions">
+            <button class="btn primary" type="button" [disabled]="saving()" (click)="save()">
+              {{ saving() ? 'Saving…' : 'Save mapping and compare' }}
+            </button>
+            <button class="btn ghost" type="button" [disabled]="saving() || !selectedLedgerId()" (click)="clearMap()">
+              Clear mapping
+            </button>
+          </div>
+        </div>
+      </article>
+    } @else {
+      <p class="banner info">This Tally ledger is not in the uploaded Excel file, so it cannot be mapped from Excel.</p>
+    }
+
+    <article class="grid-card">
+      <div class="grid-toolbar">
+        <div>
+          <h2><app-icon name="calendar" /> Excel ageing</h2>
+          <p>Buckets from the uploaded report for this account.</p>
+        </div>
+      </div>
+      <app-data-table
+        label="Ageing"
+        [rows]="ageing()"
+        [columns]="ageingColumns"
+        [rowKey]="ageingKey"
+        empty="No ageing rows for this account."
+      />
+    </article>
+  }
+</section>

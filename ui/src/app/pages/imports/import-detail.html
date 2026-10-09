@@ -1,0 +1,86 @@
+<section class="grid-page">
+  <app-page-header [title]="title()" [eyebrow]="companyName()" [description]="description()" />
+  <app-import-nav />
+
+  @if (error()) {
+    <p class="banner" role="alert">{{ error() }}</p>
+  }
+  @if (loading()) {
+    <p class="empty" role="status">Loading import…</p>
+  }
+  @if (progressLabel()) {
+    <div class="import-progress" role="status" [attr.aria-busy]="progressActive()">
+      <div class="import-progress-copy">
+        <strong>{{ progressLabel() }}</strong>
+        <span>{{ progressPercent() }}%</span>
+      </div>
+      <div
+        class="import-progress-track"
+        role="progressbar"
+        [attr.aria-valuenow]="progressPercent()"
+        aria-valuemin="0"
+        aria-valuemax="100"
+      >
+        <span
+          class="import-progress-fill"
+          [class.active]="progressActive()"
+          [style.width.%]="progressPercent()"
+        ></span>
+      </div>
+    </div>
+  }
+
+  @if (batch(); as run) {
+    <section class="kpi-grid">
+      <app-kpi-card label="Detail rows" [value]="text(run['detail_rows'])" icon="upload" />
+      <app-kpi-card label="Successful" [value]="text(run['successful_rows'])" icon="check" tone="positive" />
+      <app-kpi-card label="Warnings" [value]="text(run['warning_rows'])" icon="warning" />
+      <app-kpi-card label="Errors" [value]="text(run['failed_rows'])" icon="warning" tone="negative" />
+    </section>
+    <article class="grid-card">
+      <div class="grid-toolbar">
+        <div>
+          <h2><app-icon name="check" /> Source total check</h2>
+          <p>{{ text(run['source_total_status'] || '—').replaceAll('_', ' ') }}</p>
+        </div>
+      </div>
+      <p class="section-copy">
+        Source Dr {{ fullInr(number(run['source_total_debit'])) }} vs calculated
+        {{ fullInr(number(run['calculated_total_debit'])) }}
+      </p>
+    </article>
+  }
+
+  <article class="grid-card">
+    <div class="grid-toolbar">
+      <div>
+        <h2><app-icon name="ledgers" /> Reconciliation</h2>
+        <p>Matched only to this company’s existing Tally ledgers.</p>
+      </div>
+    </div>
+    <app-data-table
+      label="Reconciliation summary"
+      [rows]="reconciliation()"
+      [columns]="reconColumns"
+      [rowKey]="(row) => row.status"
+      [loading]="loading()"
+      empty="Process the file to reconcile against Tally."
+    />
+  </article>
+
+  <article class="grid-card">
+    <div class="grid-toolbar">
+      <div>
+        <h2><app-icon name="warning" /> Row issues</h2>
+        <p>Validation warnings and errors from this workbook.</p>
+      </div>
+    </div>
+    <app-data-table
+      label="Row issues"
+      [rows]="issues()"
+      [columns]="issueColumns"
+      [rowKey]="recordKey"
+      empty="No row issues."
+    />
+  </article>
+</section>
