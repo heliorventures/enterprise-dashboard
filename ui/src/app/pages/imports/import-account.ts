@@ -4,7 +4,7 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import { ExcelImportService, ImportAccountDetail, ImportRecord } from '../../services/excel-import';
 import { DataColumn, DataTable } from '../../shared/data-table';
 import { LatestRequest } from '../../shared/latest-request';
-import { fullInr } from '../../shared/money';
+import { importMoney as fullInr } from './import-money';
 import { PageHeader } from '../../shared/page-header';
 import {
   auditColumns,
@@ -146,20 +146,20 @@ export class ImportAccount {
     {
       key: 'dr',
       label: 'Pending Dr',
-      value: (row) => fullInr(Number(row['pending_bill_debit'] || 0)),
+      value: (row) => fullInr(row['pending_bill_debit'],row['source_currency']),
       numeric: true,
       primary: true,
     },
     {
       key: 'cr',
       label: 'Pending Cr',
-      value: (row) => fullInr(Number(row['pending_bill_credit'] || 0)),
+      value: (row) => fullInr(row['pending_bill_credit'],row['source_currency']),
       numeric: true,
     },
     {
       key: 'difference',
       label: 'Difference',
-      value: (row) => comparisonMoney(row['difference']),
+      value: (row) => comparisonMoney(row['difference'],row['currency']),
       numeric: true,
     },
     {
@@ -189,14 +189,14 @@ export class ImportAccount {
     {
       key: 'dr',
       label: 'Debit',
-      value: (row) => fullInr(Number(row['debit_amount'] || 0)),
+      value: (row) => fullInr(row['debit_amount'],row['source_currency']),
       numeric: true,
       primary: true,
     },
     {
       key: 'cr',
       label: 'Credit',
-      value: (row) => fullInr(Number(row['credit_amount'] || 0)),
+      value: (row) => fullInr(row['credit_amount'],row['source_currency']),
       numeric: true,
     },
   ];

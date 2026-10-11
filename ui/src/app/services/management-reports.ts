@@ -20,6 +20,9 @@ export interface ReportRow {
 }
 
 export interface ReportResult {
+  currency?: string | null;
+  total?: number;
+  limit?: number;
   period: { from: string; to: string };
   types?: string[];
   cards?: ReportRow;

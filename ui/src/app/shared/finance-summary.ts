@@ -4,6 +4,7 @@ import { DataColumn } from './data-table';
 import { compactInr, fullInr } from './money';
 
 export interface ProjectActivity {
+  currency?: string | null;
   id: string | number;
   name: string;
   companyId: string;
@@ -14,8 +15,8 @@ export interface ProjectActivity {
   earned?: number;
   net?: number;
 }
-export function reportedMoney(value: number | undefined | null) {
-  return typeof value === 'number' && Number.isFinite(value) ? fullInr(value) : 'Not available';
+export function reportedMoney(value: number | undefined | null, currency: string | null = 'INR') {
+  return typeof value === 'number' && Number.isFinite(value) ? fullInr(value, currency) : 'Not available';
 }
 export const projectActivityColumns: DataColumn<ProjectActivity>[] = [
   {
@@ -34,7 +35,7 @@ export const projectActivityColumns: DataColumn<ProjectActivity>[] = [
   {
     key: 'net',
     label: 'Model net',
-    value: (r) => (r.withAmount === 0 ? 'Not available' : reportedMoney(r.net)),
+    value: (r) => (r.withAmount === 0 ? 'Not available' : reportedMoney(r.net, r.currency ?? null)),
     tone: (r) => ((r.net ?? 0) < 0 ? 'negative' : 'neutral'),
     primary: true,
     numeric: true,
@@ -42,13 +43,13 @@ export const projectActivityColumns: DataColumn<ProjectActivity>[] = [
   {
     key: 'invested',
     label: 'Invested (voucher activity)',
-    value: (r) => (r.withAmount === 0 ? 'Not available' : reportedMoney(r.invested)),
+    value: (r) => (r.withAmount === 0 ? 'Not available' : reportedMoney(r.invested, r.currency ?? null)),
     numeric: true,
   },
   {
     key: 'earned',
     label: 'Earned (voucher activity)',
-    value: (r) => (r.withAmount === 0 ? 'Not available' : reportedMoney(r.earned)),
+    value: (r) => (r.withAmount === 0 ? 'Not available' : reportedMoney(r.earned, r.currency ?? null)),
     numeric: true,
   },
   {
@@ -84,6 +85,7 @@ export const projectActivityColumns: DataColumn<ProjectActivity>[] = [
   </section>`,
 })
 export class ProjectSummary {
+  readonly currency = input<string | null>(null);
   readonly count = input<number>();
   readonly vouchers = input<number>();
   readonly totals = input.required<{ invested?: number; earned?: number; net?: number }>();
@@ -94,9 +96,9 @@ export class ProjectSummary {
   ];
   amount(key: 'invested' | 'earned' | 'net') {
     const value = this.totals()[key];
-    return value == null || !Number.isFinite(value) ? 'Not available' : compactInr(value);
+    return value == null || !Number.isFinite(value) ? 'Not available' : compactInr(value, this.currency());
   }
   exact(key: 'invested' | 'earned' | 'net') {
-    return reportedMoney(this.totals()[key]);
+    return reportedMoney(this.totals()[key], this.currency());
   }
 }

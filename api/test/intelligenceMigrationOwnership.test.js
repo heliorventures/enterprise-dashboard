@@ -42,7 +42,8 @@ test('legacy database adoption preserves financial rows, tracker identities and 
     assert.deepEqual((await pool.query('SELECT version,checksum,applied_at FROM schema_migrations ORDER BY version')).rows, before);
     assert.equal((await pool.query('SELECT count(*)::int n FROM intel_schema_migrations')).rows[0].n, 4);
     assert.equal((await pool.query('SELECT pending_bill_debit::text amount FROM intel_outstanding')).rows[0].amount, '123.45');
-    assert.equal((await pool.query('SELECT count(*)::int n FROM application_migrations')).rows[0].n, files.length);
+    assert.equal((await pool.query('SELECT count(*)::int n FROM application_migrations')).rows[0].n, 19);
+    assert.equal((await pool.query('SELECT count(*)::int n FROM application_schema_history')).rows[0].n, files.length - 19);
     await migrate(pool);
     await pool.query("UPDATE application_migrations SET checksum='changed' WHERE version='015_intelligence.sql'");
     await assert.rejects(migrate(pool), /Migration changed after application: 015_intelligence.sql/);

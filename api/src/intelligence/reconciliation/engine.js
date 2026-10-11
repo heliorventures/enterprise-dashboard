@@ -17,7 +17,10 @@ function scoreMatch(account, ledger, sourceAmount, tallyAmount, rules) {
 function comparison(row, ledger, match, rules, context) {
   const sourceAmount = decimal.amount(row.source_amount || 0);
   const tallyAmount = ledger ? decimal.amount(ledger.balance) : null;
-  const available = Boolean(context.reportingDate && context.balanceDate && context.reportingDate === context.balanceDate);
+  const currency = require('../../reportCurrency').currencyCode(context.sourceCurrency);
+  const tallyCurrency = require('../../reportCurrency').currencyCode(ledger?.currency || context.tallyCurrency);
+  const available = Boolean(context.reportingDate && context.balanceDate && context.reportingDate === context.balanceDate
+    && currency && currency===tallyCurrency && currency===require('../../reportCurrency').currencyCode(context.tallyCurrency));
   const difference = available ? decimal.subtract(sourceAmount, tallyAmount || 0) : null;
   const status = available ? !ledger ? 'MISSING_IN_TALLY' : decimal.abs(difference) <= decimal.cents(rules.amount_tolerance?.amount ?? 1000)
     ? 'MATCHED' : (match?.score || 0) < 0.8 ? 'PARTIALLY_MATCHED' : 'AMOUNT_MISMATCH' : 'COMPARISON_UNAVAILABLE';
@@ -29,24 +32,28 @@ function comparison(row, ledger, match, rules, context) {
     matchMethod:match?.method || null, matchScore:match?.score || null, matchingFields:match?.fields || [], status,
     reportingDate:context.reportingDate || null, balanceDate:context.balanceDate || null,
     tallyBatchId:context.batchId || null, comparisonAvailable:available,
+    sourceCurrency:currency,tallyCurrency,currency:currency===tallyCurrency ? currency : null,
   };
 }
 
 function reconcileAccounts(sourceRows, ledgers, rules = {}, context = {}) {
-  const ledgerById = new Map(ledgers.map(row => [Number(row.id),row]));
+  const {resolveManualLedger} = require('./identity');
+  const manualLedgers = new Map();
   const mapsByAccount = new Map((context.maps || []).map(row => [row.account_id,row]));
   const reservations = new Map();
   for (const row of sourceRows) {
     const map = mapsByAccount.get(row.account_id);
     if (!map) continue;
-    const id = Number(map.tally_ledger_id);
+    const ledger = resolveManualLedger(map,ledgers);
+    manualLedgers.set(row.account_id,ledger);
+    const id = Number(ledger.id);
     if (reservations.has(id)) throw Object.assign(new Error('Manual ledger conflict: multiple accounts reserve one ledger'), {status:409});
     reservations.set(id,row.account_id);
   }
   const used = new Set(reservations.keys());
   const matched = sourceRows.map(row => {
     const manual = mapsByAccount.get(row.account_id);
-    if (manual) return comparison(row,ledgerById.get(Number(manual.tally_ledger_id)),{method:'MANUAL',score:1,fields:['manual_map']},rules,context);
+    if (manual) return comparison(row,manualLedgers.get(row.account_id),{method:'MANUAL',score:1,fields:['manual_map']},rules,context);
     const account = {...row,normalized:normalizeName(row.account_name),pan:row.pan_number,gst:row.gst_number};
     let best = null;
     for (const ledger of ledgers) {

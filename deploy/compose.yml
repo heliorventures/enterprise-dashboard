@@ -13,6 +13,7 @@ services:
       PORT: "3000"
       TALLY_MODE: push
       EXCEL_IMPORT_STORAGE: /app/storage
+      TRUSTED_PROXY_HOSTS: enterprise-dashboard-ui,${EDGE_PROXY_HOST:-caddy}
     init: true
     restart: unless-stopped
     read_only: true

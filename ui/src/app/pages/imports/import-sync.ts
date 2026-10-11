@@ -7,7 +7,7 @@ import { FilterPanel } from '../../shared/filter-panel';
 import { Icon } from '../../shared/icon';
 import { KpiCard } from '../../shared/kpi-card';
 import { LatestRequest } from '../../shared/latest-request';
-import { fullInr } from '../../shared/money';
+import { importMoney as fullInr } from './import-money';
 import { PageHeader } from '../../shared/page-header';
 import { Pager } from '../../shared/pager';
 import { ImportNav } from './import-nav';
@@ -58,20 +58,20 @@ export class ImportSync {
     {
       key: 'excelAmt',
       label: 'Excel pending',
-      value: (row) => fullInr(Number(row['source_amount'] || 0)),
+      value: (row) => fullInr(row['source_amount'],row['source_currency']),
       numeric: true,
     },
     {
       key: 'tallyAmt',
       label: 'Tally balance',
-      value: (row) => (row['tally_amount'] == null ? '—' : fullInr(Number(row['tally_amount']))),
+      value: (row) => (row['tally_amount'] == null ? '—' : fullInr(row['tally_amount'],row['tally_currency'])),
       numeric: true,
       primary: true,
     },
     {
       key: 'diff',
       label: 'Difference',
-      value: (row) => comparisonMoney(row['difference']),
+      value: (row) => comparisonMoney(row['difference'],row['currency']),
       numeric: true,
       primary: true,
       tone: (row) => (Math.abs(Number(row['difference'] || 0)) > 1000 ? 'negative' : 'neutral'),

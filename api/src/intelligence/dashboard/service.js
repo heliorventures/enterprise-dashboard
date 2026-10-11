@@ -1,6 +1,7 @@
 const db = require('../db');
 const { money } = require('../transform/normalize');
 const decimal = require('../transform/decimal');
+const {currentBasis,rowsWithCurrency} = require('../currency');
 
 function inr(value) {
   return decimal.amount(value);
@@ -10,6 +11,7 @@ async function summary({ companyId } = {}) {
   return db.readSnapshot(async()=>{
   const filter = companyId ? 'AND o.company_id=$1' : '';
   const params = companyId ? [companyId] : [];
+  const currencyBasis = await currentBasis(db,companyId);
   const outstanding = await db.query(
     `SELECT
         count(*)::int AS records,
@@ -51,7 +53,8 @@ async function summary({ companyId } = {}) {
     `SELECT c.id, c.name,
             COALESCE(sum(o.pending_bill_debit),0) AS debit,
             COALESCE(sum(o.pending_bill_credit),0) AS credit,
-            COALESCE((SELECT sum(abs(r.difference)) FROM intel_current_reconciliations r WHERE r.company_id=c.id),0) AS gap
+            COALESCE((SELECT sum(abs(r.difference)) FROM intel_current_reconciliations r WHERE r.company_id=c.id),0) AS gap,
+            EXISTS(SELECT 1 FROM intel_current_reconciliations r WHERE r.company_id=c.id AND NOT r.comparison_available) AS comparison_unavailable
      FROM intel_companies c
      LEFT JOIN intel_current_outstanding o ON o.company_id=c.id
      WHERE c.active=true ${companyId ? 'AND c.id=$1' : ''}
@@ -60,7 +63,7 @@ async function summary({ companyId } = {}) {
     params
   );
   const topAccounts = await db.query(
-    `SELECT a.id, a.account_name, c.name AS company_name,
+    `SELECT a.id, a.account_name, c.name AS company_name,o.import_batch_id,
             o.pending_bill_debit, o.pending_bill_credit, o.bill_amount, o.paid_amount,
             r.status, r.difference, r.tally_amount, r.source_amount
      FROM intel_current_outstanding o
@@ -77,7 +80,8 @@ async function summary({ companyId } = {}) {
   const matched = reconMap.MATCHED?.count || 0;
   const unmatched = recon.rows.filter((item) => item.status !== 'MATCHED').reduce((sum, item) => sum + item.count, 0);
   const gap = decimal.sum(recon.rows.map(item => item.gap));
-  return {
+  const result = {
+    currency:currencyBasis.currency,monetaryAvailable:currencyBasis.monetaryAvailable,currencyMessage:currencyBasis.currencyMessage,
     cards: {
       totalOutstanding: decimal.subtract(row.debit,row.credit),
       totalPaid: inr(row.paid),
@@ -104,10 +108,24 @@ async function summary({ companyId } = {}) {
       outstanding: decimal.subtract(item.debit,item.credit),
       debit: inr(item.debit),
       credit: inr(item.credit),
-      gap: inr(item.gap),
+      gap: item.comparison_unavailable ? null : inr(item.gap),
     })),
-    topAccounts: topAccounts.rows,
+    topAccounts: await rowsWithCurrency(db,topAccounts.rows),
   };
+  if (!currencyBasis.currency) {
+    for (const key of ['totalOutstanding','totalPaid','totalPending','totalBill','totalFinancialGap']) result.cards[key]=null;
+    result.ageing=result.ageing.map(item=>({...item,debit:null,credit:null,net:null}));
+    result.reconciliation=result.reconciliation.map(item=>({...item,gap:null}));
+  }
+  if (reconMap.COMPARISON_UNAVAILABLE?.count) result.cards.totalFinancialGap=null;
+  result.reconciliation=result.reconciliation.map(item=>({...item,currency:currencyBasis.currency,
+    gap:item.status==='COMPARISON_UNAVAILABLE' ? null : item.gap}));
+  result.byCompany=result.byCompany.map(item=>{
+    const currency=currencyBasis.companies.get(item.id)?.source_currency || null;
+    return {...item,currency,...(!currency ? {outstanding:null,debit:null,credit:null} : {}),
+      gap:currencyBasis.companies.get(item.id)?.currency ? item.gap : null};
+  });
+  return result;
   });
 }
 
@@ -145,11 +163,13 @@ async function outstanding({ companyId, q, status, page = 1, pageSize = 50 } = {
     `SELECT count(*)::int AS count FROM intel_current_outstanding o JOIN intel_accounts a ON a.id=o.account_id LEFT JOIN intel_current_reconciliations r ON r.outstanding_id=o.id WHERE ${where.join(' AND ')}`,
     params.slice(0, params.length - 2)
   );
-  return { items: result.rows, total: total.rows[0].count, page: Number(page), pageSize: Number(pageSize) };
+  return { items: await rowsWithCurrency(db,result.rows), total: total.rows[0].count, page: Number(page), pageSize: Number(pageSize) };
   });
 }
 
 async function ageing({ companyId } = {}) {
+  return db.readSnapshot(async()=>{
+  const currencyBasis=await currentBasis(db,companyId);
   const summary = await db.query(
     `SELECT a.ageing_bucket, a.bucket_label, a.bucket_from, a.bucket_to,
             COALESCE(sum(a.debit_amount),0) AS debit, COALESCE(sum(a.credit_amount),0) AS credit
@@ -162,11 +182,14 @@ async function ageing({ companyId } = {}) {
   );
   const totalNet = decimal.sum(summary.rows.map(row => decimal.subtract(row.debit,row.credit)));
   return {
+    currency:currencyBasis.currency,currencyMessage:currencyBasis.currencyMessage,
     buckets: summary.rows.map((row) => {
       const net = decimal.subtract(row.debit,row.credit);
-      return { ...row, debit: inr(row.debit), credit: inr(row.credit), net, pct: decimal.cents(totalNet)!==0n ? money((Number(net) / Number(totalNet)) * 100) : 0 };
+      return currencyBasis.currency ? { ...row,currency:currencyBasis.currency, debit: inr(row.debit), credit: inr(row.credit), net, pct: decimal.cents(totalNet)!==0n ? money((Number(net) / Number(totalNet)) * 100) : 0 }
+        : {...row,currency:null,debit:null,credit:null,net:null,pct:null};
     }),
   };
+  });
 }
 
 async function gaps({ companyId, status, q, limit = 500 } = {}) {
@@ -183,7 +206,7 @@ async function gaps({ companyId, status, q, limit = 500 } = {}) {
      LIMIT $4`,
     [companyId || null, status && status!=='all' ? status : null, q ? `%${q}%` : null, limit]
   );
-  return result.rows;
+  return rowsWithCurrency(db,result.rows);
 }
 
 async function accountDetail(id) {
@@ -212,14 +235,16 @@ async function accountDetail(id) {
     ? await db.query(`SELECT * FROM intel_ageing WHERE outstanding_id=$1 ORDER BY ageing_bucket`, [outstanding.rows[0].id])
     : { rows: [] };
   const exceptions = await db.query(
-    `SELECT * FROM intel_exceptions WHERE outstanding_id = ANY($1::uuid[]) ORDER BY created_at DESC`,
+    `SELECT e.*, COALESCE((SELECT jsonb_agg(c ORDER BY c.created_at,c.id) FROM intel_exception_comments c WHERE c.exception_id=e.id),'[]'::jsonb) AS comments
+     FROM intel_exceptions e WHERE outstanding_id = ANY($1::uuid[]) ORDER BY created_at DESC`,
     [outstanding.rows.map((row) => row.id)]
   );
   const audit = await db.query(
     `SELECT * FROM intel_audit WHERE entity IN ('account','exception','import_file') AND entity_id=ANY($1::text[]) ORDER BY id DESC LIMIT 50`,
     [[id, ...exceptions.rows.map((row) => String(row.id))]]
   );
-  return { account: account.rows[0], outstanding: outstanding.rows, ageing: ageingRows.rows, exceptions: exceptions.rows, audit: audit.rows };
+  const balances=await rowsWithCurrency(db,outstanding.rows);
+  return { account: account.rows[0], outstanding: balances, ageing: ageingRows.rows.map(row=>({...row,source_currency:balances[0]?.source_currency || null})), exceptions: exceptions.rows, audit: audit.rows };
   });
 }
 
@@ -252,7 +277,9 @@ async function dataQuality({ companyId } = {}) {
 
 async function listExceptions({ companyId, status = 'OPEN', owner, q, limit = 500, offset=0 } = {}) {
   const result = await db.query(
-    `SELECT e.*, a.account_name, c.name AS company_name
+    `SELECT e.*, a.account_name, c.name AS company_name,
+       COALESCE((SELECT jsonb_agg(comment ORDER BY comment.created_at,comment.id)
+         FROM intel_exception_comments comment WHERE comment.exception_id=e.id),'[]'::jsonb) AS comments
      FROM intel_current_exceptions e
      LEFT JOIN intel_current_outstanding o ON o.id=e.outstanding_id
      LEFT JOIN intel_accounts a ON a.id=o.account_id
@@ -285,9 +312,13 @@ async function updateException(id, patch, username) {
     if (!current.rowCount) throw Object.assign(new Error('Exception not found'),{status:404});
     const updated = (await client.query(`UPDATE intel_exceptions SET status=$2,owner=$3,severity=$4,updated_at=now() WHERE id=$1 RETURNING *`,
       [id,patch.status || current.rows[0].status,patch.owner===undefined?current.rows[0].owner:patch.owner,patch.severity || current.rows[0].severity])).rows[0];
-    if (patch.comment) await client.query('INSERT INTO intel_exception_comments(exception_id,author,body) VALUES($1,$2,$3)',[id,username,patch.comment]);
+    if (patch.comment) {
+      const comment = (await client.query('INSERT INTO intel_exception_comments(exception_id,author,body) VALUES($1,$2,$3) RETURNING *',[id,username,patch.comment])).rows[0];
+      await client.query(`INSERT INTO intel_audit(username,action,entity,entity_id,new_value) VALUES($1,'EXCEPTION_COMMENT','exception',$2,$3)`,[username,id,comment]);
+    }
     await client.query(`INSERT INTO intel_audit(username,action,entity,entity_id,old_value,new_value) VALUES($1,'EXCEPTION_UPDATE','exception',$2,$3,$4)`,[username,id,current.rows[0],updated]);
-    return updated;
+    const comments = (await client.query('SELECT * FROM intel_exception_comments WHERE exception_id=$1 ORDER BY created_at,id',[id])).rows;
+    return {...updated,comments};
   });
 }
 
@@ -296,8 +327,8 @@ async function companies() {
   for (const company of tallyCompanies) {
     await db.query(
       `INSERT INTO intel_companies (name, tally_company_id, active)
-       SELECT $1, $2, true
-       WHERE NOT EXISTS (SELECT 1 FROM intel_companies WHERE tally_company_id=$2)`,
+       VALUES ($1, $2, true)
+       ON CONFLICT (tally_company_id) DO UPDATE SET name=EXCLUDED.name, active=true`,
       [company.name, company.id]
     );
   }

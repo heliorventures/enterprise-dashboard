@@ -171,7 +171,8 @@ function registerExcelImportRoutes(app) {
     res.json(await imports.rowErrors(reports.uuid(req.params.id)));
   }));
   app.put('/api/imports/:id/mapping', wrap(async (req, res) => {
-    reports.keys(req.body, ['mappings']);
+    reports.keys(req.body, ['mappings','currency']);
+    if (req.body.currency !== undefined && req.body.currency !== null && !require('../reportCurrency').currencyCode(req.body.currency)) throw reports.bad('currency must be a supported ISO code or null');
     const mappings = req.body.mappings;
     if (!Array.isArray(mappings) || mappings.length > 1000) throw reports.bad('mappings must be an array of at most 1000 columns');
     for (const mapping of mappings) {
@@ -181,7 +182,7 @@ function registerExcelImportRoutes(app) {
         throw reports.bad('targetField must be explicit text or null to ignore the column');
       }
     }
-    res.json(await imports.updateMapping(reports.uuid(req.params.id), mappings, actor(req)));
+    res.json(await imports.updateMapping(reports.uuid(req.params.id), mappings, actor(req),req.body.currency));
   }));
   app.get('/api/imports/:id', wrap(async (req, res) => {
     res.json(await imports.getResults(reports.uuid(req.params.id)));

@@ -1,4 +1,5 @@
 const db = require('./db');
+const { currencyCode } = require('./reportCurrency');
 
 function toNumber(value) {
   return Number(value) || 0;
@@ -37,7 +38,8 @@ async function listLedgers({ company = 'all', q = '', group = '', page = 1, page
     db.query(
       `
         SELECT
-          l."LedgerID", l."CompanyID", c."CompanyName", l."LedgerName", l."GroupCategory", l."CurrentBalance"
+          l."LedgerID", l."CompanyID", c."CompanyName", l."LedgerName", l."GroupCategory", l."CurrentBalance",
+          (SELECT CASE WHEN s.coverage->>'uniformCurrency' = 'true' THEN s.currency END FROM finance_snapshots s WHERE s.company_id=l."CompanyID") AS currency
         FROM "Ledgers" l
         INNER JOIN "Companies" c ON c."CompanyID" = l."CompanyID"
         WHERE ${where}
@@ -67,6 +69,7 @@ async function listLedgers({ company = 'all', q = '', group = '', page = 1, page
       id: row.LedgerID,
       companyId: String(row.CompanyID),
       companyName: row.CompanyName,
+      currency: currencyCode(row.currency),
       name: row.LedgerName,
       group: row.GroupCategory,
       balance: toNumber(row.CurrentBalance),
@@ -124,7 +127,8 @@ async function listVouchers({
       `
         SELECT
           v."VoucherID", v."CompanyID", c."CompanyName", v."VoucherDate", v."VoucherType",
-          v."Amount", v."Narration", v."ProjectID", p."ProjectName", v."VoucherNumber", v."PartyLedgerName"
+          v."Amount", v."Narration", v."ProjectID", p."ProjectName", v."VoucherNumber", v."PartyLedgerName",
+          (SELECT CASE WHEN s.coverage->>'uniformCurrency' = 'true' THEN s.currency END FROM finance_snapshots s WHERE s.company_id=v."CompanyID") AS currency
         FROM "Vouchers" v
         INNER JOIN "Companies" c ON c."CompanyID" = v."CompanyID"
         LEFT JOIN "Projects" p ON p."ProjectID" = v."ProjectID"
@@ -155,6 +159,7 @@ async function listVouchers({
       id: row.VoucherID,
       companyId: String(row.CompanyID),
       companyName: row.CompanyName,
+      currency: currencyCode(row.currency),
       date: row.VoucherDate,
       type: row.VoucherType,
       number: row.VoucherNumber,
@@ -167,6 +172,16 @@ async function listVouchers({
 }
 
 module.exports = {
-  listLedgers,
-  listVouchers,
+  listLedgers: (query = {}) => {
+    companyFilter(query.company);
+    paging(query.page, query.pageSize);
+    return db.readSnapshot(() => listLedgers(query));
+  },
+  listVouchers: (query = {}) => {
+    companyFilter(query.company);
+    paging(query.page, query.pageSize);
+    optionalDate(query.from);
+    optionalDate(query.to);
+    return db.readSnapshot(() => listVouchers(query));
+  },
 };

@@ -5,7 +5,7 @@ import { CompanySelect } from '../../shared/company-select';
 import { LatestRequest } from '../../shared/latest-request';
 import { PageHeader } from '../../shared/page-header';
 import { Pager } from '../../shared/pager';
-import { importText } from './import-columns';
+import { importText, importDetail } from './import-columns';
 import { ImportExport } from './import-export';
 import { ImportNav } from './import-nav';
 
@@ -76,7 +76,11 @@ import { ImportNav } from './import-nav';
               <div>
                 <h3>{{ text(row['title'] || row['type']).replaceAll('_', ' ') }}</h3>
                 <p>{{ text(row['account_name']) }} · {{ text(row['company_name']) }}</p>
-                <p>{{ text(row['detail']) }}</p>
+                <p>{{ detail(row['detail']) }}</p>
+                @for (comment of comments(row); track comment['id']) {
+                  <p class="muted">{{ text(comment['author']) }} · {{ text(comment['created_at']) }}</p>
+                  <p>{{ text(comment['body']) }}</p>
+                }
                 <p class="muted">
                   {{ text(row['severity']) }} · {{ text(row['status']) }} · Owner:
                   {{ text(row['owner']) }}
@@ -164,6 +168,10 @@ export class ImportExceptions {
   readonly error = signal('');
   readonly notice = signal('');
   readonly text = importText;
+  readonly detail = importDetail;
+  comments(row: ImportRecord): ImportRecord[] {
+    return Array.isArray(row['comments']) ? row['comments'] as ImportRecord[] : [];
+  }
 
   constructor() {
     this.load();

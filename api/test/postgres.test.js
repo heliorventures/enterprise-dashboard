@@ -30,9 +30,18 @@ test('schema is repeatable, empty by default, and queries preserve API types', {
   const vouchers = await books.listVouchers({ from: '2026-09-10', to: '2026-09-10' });
   assert.equal(vouchers.items[0].date, '2026-09-10');
   assert.equal((await books.listVouchers({ from: '2026-09-11' })).total, 0);
+  assert.equal(ledgers.items[0].currency, null);
+  await assert.rejects(dashboard.getDashboard(), error => error.status === 422);
+  await db.query(`INSERT INTO tally_source_snapshots
+    (batch_id,company_external_id,company_name,captured_at,schema_version,coverage_status,manifest)
+    VALUES ('postgres-report-currency','postgres-report-company',$1,'2026-09-10',1,'complete','{}')`, [company.CompanyName]);
+  await db.query(`INSERT INTO finance_snapshots(company_id,batch_id,captured_at,currency,coverage)
+    VALUES ($1,'postgres-report-currency','2026-09-10','INR','{"uniformCurrency":true}')`, [company.CompanyID]);
   const snapshot = await dashboard.getDashboard();
+  assert.equal(snapshot.currency, 'INR');
   assert.equal(snapshot.kpis.profit, 100);
   await db.query('TRUNCATE tally_ingestions, "Vouchers", "Projects", "Ledgers", "Companies", "SyncLog" RESTART IDENTITY CASCADE');
+  await db.query("DELETE FROM tally_source_snapshots WHERE batch_id='postgres-report-currency'");
 });
 
 test('report reads stay on one database snapshot and prohibit accidental writes', {skip:!enabled}, async()=>{

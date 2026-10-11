@@ -170,12 +170,12 @@ export class Ledgers {
           }
           downloadCsv(
             'ledgers.csv',
-            ['Company', 'Ledger', 'Group', 'Closing balance', 'Dr/Cr'],
+            ['Company', 'Ledger', 'Group', 'Closing balance', 'Currency', 'Dr/Cr'],
             result.items.map((row) => [
               row.companyName,
               row.name,
               row.group,
-              row.balance,
+              row.balance, row.currency || 'Unknown',
               this.drCr(row.balance),
             ]),
           );

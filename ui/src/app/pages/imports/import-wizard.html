@@ -82,6 +82,16 @@
     }
 
     @if (step() === 2 && analysis(); as found) {
+      <div class="section-copy">
+        <label class="field">
+          <span>Workbook currency — confirm from the source report</span>
+          <select [value]="declaredCurrency()" [disabled]="!!busy()" (change)="onCurrency($event)">
+            <option value="">Unspecified</option>
+            @for (currency of currencies; track currency) { <option [value]="currency">{{ currency }}</option> }
+          </select>
+        </label>
+        <p class="muted">This declaration applies to every amount in this workbook and is recorded with the import. Comparisons require the same confirmed Tally currency. Unspecified amounts remain visible; monetary totals and comparisons are unavailable.</p>
+      </div>
       <div class="wizard-copy">
         <p class="lead">Does this look like the right file? If yes, import it. If the names look wrong, change the column below.</p>
         <dl class="fact-list">
@@ -227,7 +237,7 @@
               <tr>
                 <td>{{ reconLabel(row.status) }}</td>
                 <td>{{ row.count }}</td>
-                <td>{{ fullInr(row.difference) }}</td>
+                <td>{{ fullInr(row.difference,row.currency) }}</td>
               </tr>
             }
           </tbody>

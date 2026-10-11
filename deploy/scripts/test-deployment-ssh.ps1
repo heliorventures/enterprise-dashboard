@@ -3,6 +3,7 @@ $ErrorActionPreference = 'Stop'
 $global:DeploymentSshTestCalls = @()
 function global:ssh {
     $global:DeploymentSshTestCalls += ,@($args)
+    $global:DeploymentSshTestInput = @($input) -join "`n"
     $global:LASTEXITCODE = 0
 }
 function global:scp {
@@ -30,11 +31,17 @@ try {
         }
         & "$PSScriptRoot/deploy-on-vps.ps1" -Tag $tag @options
         if ($global:DeploymentSshTestCalls[-1] -notcontains $expected) { throw 'Standalone deployment authentication differs' }
+        $staging = "/opt/apps/enterprise-dashboard/incoming/$tag.0123456789abcdef0123456789abcdef"
+        & "$PSScriptRoot/migrate-database.ps1" -Tag $tag -StagingDir $staging @options
+        if ($global:DeploymentSshTestCalls[-1] -notcontains $expected) { throw 'Migration authentication differs' }
+        if ($global:DeploymentSshTestInput -notmatch [regex]::Escape($staging)) { throw 'Migration staging directory was not forwarded' }
+        if ($global:DeploymentSshTestInput -notmatch 'sha256sum --strict -c SHA256SUMS') { throw 'Migration release validation was not streamed' }
     }
     Write-Host 'Offline deployment SSH tests passed: interactive defaults, unattended mode, forwarding, and no rebuild.'
 } finally {
     Remove-Item Function:\ssh,Function:\scp,Function:\docker
     Remove-Variable DeploymentSshTestCalls -Scope Global
+    Remove-Variable DeploymentSshTestInput -Scope Global -ErrorAction SilentlyContinue
     $allowedRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot 'dist-images')) + '\'
     if (-not $fixture.StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe fixture cleanup path' }
     if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force }

@@ -42,7 +42,6 @@ async function chunk(input) {
   return locked(async client => {
     const upload = (await client.query('SELECT * FROM tally_uploads WHERE batch_id=$1 FOR UPDATE', [input.batchId])).rows[0];
     if (!upload) fail('Begin upload first', 409);
-    if (upload.result) return { ok: true, completed: true, batchId: input.batchId };
     if (input.index >= upload.manifest.chunkCount) fail('Chunk index outside manifest');
     if (!Array.isArray(input.ledgers) || !Array.isArray(input.vouchers) || input.ledgers.length + input.vouchers.length > 2000) fail('Chunk allows at most 2000 rows');
     const validated = validateSnapshot({ ...upload.manifest, ledgers: input.ledgers, vouchers: input.vouchers });
@@ -51,10 +50,13 @@ async function chunk(input) {
     const bytes = Buffer.byteLength(JSON.stringify(payload));
     if (bytes > 1024 * 1024) fail('Chunk exceeds 1 MiB', 413);
     const prior = (await client.query('SELECT checksum FROM tally_upload_chunks WHERE batch_id=$1 AND chunk_index=$2', [input.batchId, input.index])).rows[0];
-    if (prior) {
-      if (prior.checksum !== checksum) fail('Chunk content conflict', 409);
-      return { ok: true, duplicate: true, batchId: input.batchId, index: input.index };
+    // Retain only bounded per-index hashes after deleting bulky staging payloads.
+    const oldHash = prior?.checksum || upload.result?.chunkChecksums?.[input.index];
+    if (oldHash) {
+      if (oldHash !== checksum) fail('Chunk content conflict', 409);
+      return { ok: true, duplicate: true, batchId: input.batchId, index: input.index, ...(upload.result ? { completed: true } : {}) };
     }
+    if (upload.result) fail('Completed receipt missing chunk checksum; matching replay cannot be verified', 409);
     if (Number(upload.bytes) + bytes > 512 * 1024 * 1024) fail('Company snapshot exceeds 512 MiB', 413);
     const total = (await client.query('SELECT coalesce(sum(bytes),0) AS bytes FROM tally_uploads WHERE result IS NULL')).rows[0].bytes;
     if (Number(total) + bytes > 2 * 1024 ** 3) fail('Staging storage limit reached', 429);
@@ -68,7 +70,10 @@ async function complete(input) {
   return locked(async client => {
     const upload = (await client.query('SELECT * FROM tally_uploads WHERE batch_id=$1 FOR UPDATE', [input.batchId])).rows[0];
     if (!upload) fail('Upload not found; begin and resend retained chunks', 409);
-    if (upload.result) return { ...upload.result, duplicate: true };
+    if (upload.result) {
+      const { chunkChecksums, ...receipt } = upload.result;
+      return { ...receipt, duplicate: true };
+    }
     const chunks = (await client.query('SELECT chunk_index, checksum FROM tally_upload_chunks WHERE batch_id=$1 ORDER BY chunk_index', [input.batchId])).rows;
     if (chunks.length !== upload.manifest.chunkCount || chunks.some((row, index) => row.chunk_index !== index)) fail('Upload is incomplete', 409);
     const checksum = digest({ manifest: validateManifest(upload.manifest), chunks });
@@ -91,7 +96,7 @@ async function complete(input) {
       if (ledgerCount !== upload.manifest.ledgerCount || voucherCount !== upload.manifest.voucherCount) fail('Manifest record counts do not match chunks', 409);
       return { ledgerCount, voucherCount };
     });
-    await client.query('UPDATE tally_uploads SET result=$2, bytes=0, updated_at=now() WHERE batch_id=$1', [input.batchId, JSON.stringify(result)]);
+    await client.query('UPDATE tally_uploads SET result=$2, bytes=0, updated_at=now() WHERE batch_id=$1', [input.batchId, JSON.stringify({ ...result, chunkChecksums: chunks.map(row => row.checksum) })]);
     await client.query('DELETE FROM tally_upload_chunks WHERE batch_id=$1', [input.batchId]);
     return result;
   });

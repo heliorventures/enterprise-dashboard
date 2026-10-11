@@ -93,4 +93,29 @@ describe('Management report drilldown and request scope', () => {
     component.onCompany('2');
     expect(summary.cancelled).toBe(true);
   });
+  it('keeps same-name voucher mix rows distinct when companies resolve different roots', () => {
+    const component = TestBed.createComponent(ReportView).componentInstance;
+    expect(component.rowId({ voucher_type: 'Adjustment', resolved_type: 'Payment' }))
+      .not.toBe(component.rowId({ voucher_type: 'Adjustment', resolved_type: 'Receipt' }));
+  });
+  it('shows summary failure as unavailable and allows retry while keeping detail rows', () => {
+    const fixture = TestBed.createComponent(ReportView);
+    const component = fixture.componentInstance;
+    const http = TestBed.inject(HttpTestingController);
+    http.expectOne(request => request.url === '/api/management-reports/daily')
+      .flush({ currency: 'USD', items: [{ date: '2026-01-01', inflow: 10 }], period: { from: '2026-01-01', to: '2026-01-31' } });
+    http.expectOne(request => request.url === '/api/management-reports/summary')
+      .flush({ error: 'Summary unavailable' }, { status: 503, statusText: 'Unavailable' });
+    expect(component.money(component.cards()['inflow'])).toBe('Not available');
+    expect(component.text(component.cards()['vouchers'])).toBe('Not available');
+    expect(component.items().length).toBe(1);
+    fixture.detectChanges();
+    const alert = fixture.nativeElement.querySelector('[role="alert"]');
+    expect(alert.textContent).toContain('Summary unavailable');
+    alert.querySelector('button').click();
+    http.expectOne(request => request.url === '/api/management-reports/summary')
+      .flush({ currency: 'USD', cards: { vouchers: 0, inflow: 0, outflow: 0, net: 0 }, period: { from: '2026-01-01', to: '2026-01-31' } });
+    expect(component.money(component.cards()['inflow'])).toContain('$0.00');
+    expect(component.text(component.cards()['vouchers'])).toBe('0');
+  });
 });

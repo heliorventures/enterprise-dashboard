@@ -31,7 +31,7 @@ test('expense rows nest into company, group, and ledger drill-down', () => {
   ]);
   assert.equal(companies.length, 1);
   assert.equal(companies[0].name, 'Buildcon');
-  assert.equal(companies[0].total, 5000);
+  assert.equal(companies[0].total, 3000);
   assert.equal(companies[0].groups.length, 2);
   assert.equal(companies[0].groups[0].name, 'Indirect Expenses');
   assert.equal(companies[0].groups[0].ledgers[0].name, 'Rent');

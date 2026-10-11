@@ -10,6 +10,15 @@
   @if (error()) {
     <p class="banner" role="alert">{{ error() }}</p>
   }
+  @if (summaryError()) {
+    <p class="banner" role="alert">
+      {{ summaryError() }}
+      <button type="button" class="btn ghost" (click)="loadSummary()" [disabled]="summaryLoading()">Retry summary</button>
+    </p>
+  }
+  @if (summaryLoading()) {
+    <p role="status">Loading summary…</p>
+  }
 
   <section class="kpi-grid">
     <app-kpi-card label="Vouchers" [value]="text(cards()['vouchers'])" icon="transactions" [hint]="period().from ? period().from + ' to ' + period().to : ''" />

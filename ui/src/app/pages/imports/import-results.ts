@@ -6,7 +6,7 @@ import { CompanySelect } from '../../shared/company-select';
 import { DataColumn, DataTable } from '../../shared/data-table';
 import { Icon } from '../../shared/icon';
 import { KpiCard } from '../../shared/kpi-card';
-import { fullInr } from '../../shared/money';
+import { importMoney as fullInr } from './import-money';
 import { PageHeader } from '../../shared/page-header';
 import { recordKey } from '../../shared/record-columns';
 import { LatestRequest } from '../../shared/latest-request';
@@ -40,7 +40,9 @@ export class ImportResults {
   private readonly reportsError = signal('');
   private readonly outstandingError = signal('');
   readonly error = computed(() => this.reportsError() || this.outstandingError());
-  readonly cards = signal<Record<string, number>>({});
+  readonly cards = signal<Record<string, number | null>>({});
+  readonly currency = signal<string | null>(null);
+  readonly currencyMessage = signal('');
   readonly outstanding = signal<Record<string, unknown>[]>([]);
   readonly ageing = signal<Record<string, unknown>[]>([]);
   readonly gaps = signal<Record<string, unknown>[]>([]);
@@ -63,26 +65,26 @@ export class ImportResults {
     {
       key: 'bill',
       label: 'Bill',
-      value: (row) => fullInr(Number(row['bill_amount'] || 0)),
+      value: (row) => fullInr(row['bill_amount'],row['source_currency']),
       numeric: true,
     },
     {
       key: 'paid',
       label: 'Paid',
-      value: (row) => fullInr(Number(row['paid_amount'] || 0)),
+      value: (row) => fullInr(row['paid_amount'],row['source_currency']),
       numeric: true,
     },
     {
       key: 'dr',
       label: 'Pending Dr',
-      value: (row) => fullInr(Number(row['pending_bill_debit'] || 0)),
+      value: (row) => fullInr(row['pending_bill_debit'],row['source_currency']),
       numeric: true,
       primary: true,
     },
     {
       key: 'cr',
       label: 'Pending Cr',
-      value: (row) => fullInr(Number(row['pending_bill_credit'] || 0)),
+      value: (row) => fullInr(row['pending_bill_credit'],row['source_currency']),
       numeric: true,
     },
     {
@@ -102,20 +104,20 @@ export class ImportResults {
     {
       key: 'debit',
       label: 'Debit',
-      value: (row) => fullInr(Number(row['debit'] || 0)),
+      value: (row) => fullInr(row['debit'],row['currency']),
       numeric: true,
       primary: true,
     },
     {
       key: 'credit',
       label: 'Credit',
-      value: (row) => fullInr(Number(row['credit'] || 0)),
+      value: (row) => fullInr(row['credit'],row['currency']),
       numeric: true,
     },
     {
       key: 'net',
       label: 'Net',
-      value: (row) => fullInr(Number(row['net'] || 0)),
+      value: (row) => fullInr(row['net'],row['currency']),
       numeric: true,
       primary: true,
     },
@@ -131,13 +133,13 @@ export class ImportResults {
     {
       key: 'source',
       label: 'Source',
-      value: (row) => fullInr(Number(row['source_amount'] || 0)),
+      value: (row) => fullInr(row['source_amount'],row['source_currency']),
       numeric: true,
     },
     {
       key: 'tally',
       label: 'Tally',
-      value: (row) => fullInr(Number(row['tally_amount'] || 0)),
+      value: (row) => fullInr(row['tally_amount'],row['tally_currency']),
       numeric: true,
       primary: true,
     },
@@ -145,7 +147,7 @@ export class ImportResults {
       key: 'diff',
       label: 'Difference',
       value: (row) =>
-        row['difference'] == null ? 'Unavailable' : fullInr(Number(row['difference'])),
+        row['difference'] == null ? 'Unavailable' : fullInr(row['difference'],row['currency']),
       numeric: true,
       primary: true,
     },
@@ -188,7 +190,7 @@ export class ImportResults {
 
   money(value: unknown) {
     if (this.reportsLoading() || this.reportsError()) return '—';
-    return fullInr(Number(value || 0));
+    return this.currency() ? fullInr(value,this.currency()) : 'Unavailable';
   }
 
   text(value: unknown) {
@@ -216,6 +218,8 @@ export class ImportResults {
       {
         next: (data) => {
           this.cards.set(data.summary.cards || {});
+          this.currency.set(data.summary.currency || null);
+          this.currencyMessage.set(data.summary.currencyMessage || '');
           this.ageing.set(data.ageing.buckets || []);
           this.gaps.set(data.gaps || []);
           this.reportsLoading.set(false);

@@ -33,6 +33,7 @@ export interface ExcelUploadResult {
   companyMismatch?: boolean;
   duplicate?: { uploaded_at: string } | null;
   analysis: {
+    currency?: string | null;
     title?: string;
     company?: { company?: string };
     period?: { from?: string; to?: string };
@@ -82,7 +83,14 @@ export interface ExcelImportProgress {
   validation?: ExcelValidation | null;
   canProcess?: boolean;
   batch?: Record<string, unknown> | null;
-  reconciliation?: { status: string; count: number; difference: number }[];
+  reconciliation?: ImportReconciliationSummary[];
+}
+
+export interface ImportReconciliationSummary {
+  status: string;
+  count: number;
+  difference: number | string | null;
+  currency?: string | null;
 }
 
 export type ImportRecord = Record<string, unknown>;
@@ -167,8 +175,8 @@ export class ExcelImportService {
     }>(`/api/imports/${id}/preview`);
   }
 
-  mapping(id: string, mappings: { sourceHeader: string; targetField: string | null }[]) {
-    return this.http.put(`/api/imports/${id}/mapping`, { mappings });
+  mapping(id: string, mappings: { sourceHeader: string; targetField: string | null }[], currency?: string | null) {
+    return this.http.put(`/api/imports/${id}/mapping`, { mappings,...(currency!==undefined ? {currency} : {}) });
   }
 
   validate(id: string) {
@@ -187,8 +195,9 @@ export class ExcelImportService {
     return this.http.get<{
       file: Record<string, unknown>;
       companyName?: string;
+      currency?: string | null;
       batch?: Record<string, unknown>;
-      reconciliation?: { status: string; count: number; difference: number }[];
+      reconciliation?: ImportReconciliationSummary[];
     }>('/api/imports/' + id);
   }
 
@@ -200,7 +209,9 @@ export class ExcelImportService {
 
   summary(company = 'all') {
     return this.http.get<{
-      cards: Record<string, number>;
+      cards: Record<string, number | null>;
+      currency?: string | null;
+      currencyMessage?: string | null;
       ageing: { bucket: string; label: string; net: number; pct?: number }[];
       byCompany: { id: string; name: string; outstanding: number; gap: number }[];
       topAccounts: Record<string, unknown>[];

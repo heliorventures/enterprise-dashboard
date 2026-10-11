@@ -74,7 +74,7 @@ To apply database changes first from an already uploaded release, run from local
 .\deploy\scripts\migrate-database.ps1 -Tag finance-024
 ```
 
-Use the tag you have actually built and uploaded; `finance-024` is an example for the consolidated release, not an already uploaded image. This updates the live database through the single `api/migrations` runner, using that image and the credentials on the VPS. It does not build or upload images, restart services, or promote the release. Take a database backup before applying changes. Wait for `All database migrations completed.` before deploying the application. Older uploaded images contain only the migrations available when they were built.
+Use the tag you have actually built and uploaded; `finance-024` is an example for the consolidated release, not an already uploaded image. This updates the live database through the single `api/migrations` runner, using that image and the credentials on the VPS. The command verifies the uploaded checksums, prepares the release directory and storage, and loads the API image before running migrations. It does not build or upload images, restart application services, or change the active `current` release. Take a database backup before applying changes. Wait for `Database migrations applied for <tag>.` before deploying the application. Older uploaded images contain only the migrations available when they were built.
 
 To keep database deployment first, build/upload the new release without starting it, then apply migrations and deploy:
 
@@ -84,7 +84,13 @@ To keep database deployment first, build/upload the new release without starting
 .\deploy\scripts\deploy-on-vps.ps1 -Tag finance-024 -PublicBaseUrl https://finance.heliorsoft.com
 ```
 
-The consolidated runner adopts existing core/Intel migration evidence into `application_migrations` without changing the legacy identities that older images recognise. All new migration files live in `api/migrations`; there is no separate Intelligence migration folder or service. See [Intelligence data and publication rules](../docs/intelligence/README.md).
+When the tag has not yet been prepared, the migration command finds its single uploaded `incoming/<tag>.<upload-id>` directory automatically. If you uploaded that tag more than once, pass `-StagingDir` with the exact directory printed by the upload command. A prepared or archived tag is checksum-verified and reused; use a new tag for changed images. A failed migration leaves the active application unchanged and can be retried after resolving the reported error.
+
+Login throttling trusts only the Docker addresses resolved for `enterprise-dashboard-ui` and the shared edge proxy `caddy`. If the edge service uses another Docker DNS name, set `EDGE_PROXY_HOST` for Compose accordingly. The UI preserves the proxy chain, and the API walks it from the nearest proxy to the first untrusted address. Do not expose the API/UI container ports publicly or replace this with blanket forwarded-header trust. See the [Express proxy guidance](https://expressjs.com/en/guide/behind-proxies/) and [Caddy trusted proxy settings](https://caddyserver.com/docs/caddyfile/options#trusted-proxies).
+
+The consolidated runner preserves existing core/Intel migration evidence and keeps compatible history through 019 in `application_migrations`. Migrations 020 onward use `application_schema_history` under the same runner, database lock and transaction, so the previous 019 image can restart after compatible changes. Each new migration declares its minimum compatible application schema; incompatible readers stop before serving requests. All migration files remain in `api/migrations`; there is no separate Intelligence migration folder or service. See [Intelligence data and publication rules](../docs/intelligence/README.md).
+
+Migration 021 stops if two Intelligence records own the same Tally company and prints the conflicting IDs. Resolve those owners with a reviewed data reconciliation plan; do not delete financial history or bypass the uniqueness guard. Migration failure rolls back the migration transaction and leaves application containers untouched.
 
 For the first consolidated migration, finish any Excel processing and prevent new uploads until the new API is running. After migration 019, older Excel processors are unsupported: their writes lack the generation ownership required to preserve history. Legacy tracker compatibility allows older Tally/reporting containers to start, but does not make old Excel import behavior safe. Use a consolidated image for uploads, reprocessing and reconciliation corrections. Application rollback does not undo the database migration or restore workbook files; future schema changes must be reviewed for compatibility with the intended rollback image.
 
@@ -97,7 +103,7 @@ From this repository in PowerShell, after setup (the scripts default to the conf
 This builds both images locally, saves tarballs, computes SHA-256 hashes, uploads to a unique staging directory, verifies checksums on the VPS, loads images, validates UI configuration, applies database migrations, starts the containers, runs API checks and verifies public health/access protection. It archives the previous release only after validation succeeds. Repeat with a new immutable tag:
 
 ```powershell
-.\deploy\scripts\build-save-upload-images.ps1 -Tag finance-0018 -PublicBaseUrl https://finance.heliorsoft.com -DeployAfterUpload
+.\deploy\scripts\build-save-upload-images.ps1 -Tag finance-027 -PublicBaseUrl https://finance.heliorsoft.com -DeployAfterUpload
 ```
 
 Useful variations:

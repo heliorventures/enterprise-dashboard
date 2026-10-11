@@ -20,15 +20,17 @@ test('durable imports publish exact immutable company snapshots with atomic corr
   const company=(await db.query('INSERT INTO intel_companies(name,tally_company_id) VALUES($1,$2) RETURNING id',[name,tallyId])).rows[0].id;
   const batchRef=`test-${randomUUID()}`;
   const ledgers=(await db.query('INSERT INTO "Ledgers"("CompanyID","LedgerName","GroupCategory","CurrentBalance") VALUES($1,\'Alpha\',\'Debtors\',\'90071992547409.91\'),($1,\'Other\',\'Debtors\',\'7.00\') RETURNING "LedgerID" AS id',[tallyId])).rows;
+  await db.query('UPDATE "Ledgers" SET "SourceKey"=\'ledger:\'||lower("LedgerName") WHERE "CompanyID"=$1',[tallyId]);
   await db.query('INSERT INTO tally_source_snapshots(batch_id,company_external_id,company_name,captured_at,schema_version,coverage_status,manifest) VALUES($1,$2,$3,\'2026-10-08\',1,\'complete\',$4)',[batchRef,String(tallyId),name,{dateContext:{ledgers:{from:'2026-01-01',to:'2026-09-30'}}}]);
   await db.query('INSERT INTO finance_snapshots(company_id,batch_id,captured_at) VALUES($1,$2,\'2026-10-08\')',[tallyId,batchRef]);
+  await db.query('UPDATE finance_snapshots SET currency=\'INR\',coverage=\'{"uniformCurrency":true}\' WHERE company_id=$1',[tallyId]);
   await db.query('INSERT INTO finance_ledger_facts(company_id,name,group_name,closing_balance,batch_id,ordinal) VALUES($1,\'Alpha\',\'Debtors\',\'90071992547409.91\',$2,0),($1,\'Other\',\'Debtors\',\'7.00\',$2,1)',[tallyId,batchRef]);
   await db.query('INSERT INTO intel_rules(company_id,key,value) VALUES($1,\'amount_tolerance\',\'{"amount":0}\')',[company]);
   const fileIds=[];
   async function file(date='2026-09-30',rows=[['Alpha','90071992547409.91'],['Beta','20.00']]) {
     const book=new ExcelJS.Workbook(),sheet=book.addWorksheet('Outstanding');
-    sheet.getRow(1).values=['Outstanding Report'];sheet.getRow(2).values=['From: 01/01/2026 To: 30/09/2026'];sheet.getRow(3).values=[name];
-    sheet.getRow(4).values=['Particulars','Pending Bill'];sheet.getRow(5).values=[null,'Dr Amt'];
+    sheet.getRow(1).values=['Outstanding Report'];sheet.getRow(2).values=['From: 01/01/2026 To: 30/09/2026'];sheet.getRow(3).values=[name,'Currency: INR'];
+    sheet.getRow(4).values=['Particulars','Pending Bill','Pending Bill'];sheet.getRow(5).values=[null,'Dr Amt','Cr Amt'];
     rows.forEach((row,index)=>{sheet.getRow(index+6).values=row;});
     const storedPath=path.join(temp,`${randomUUID()}.xlsx`);await fs.writeFile(storedPath,await book.xlsx.writeBuffer());
     const id=(await db.query('INSERT INTO intel_import_files(company_id,source_system_id,file_name,stored_path,file_hash,file_size,status,reporting_period_to,analysis) VALUES($1,$2,\'test.xlsx\',$3,$4,1,\'ANALYZED\',$5,\'{}\') RETURNING id',[company,source,storedPath,randomUUID(),date])).rows[0].id;
@@ -37,6 +39,17 @@ test('durable imports publish exact immutable company snapshots with atomic corr
   const current=async()=> (await db.query('SELECT import_batch_id FROM intel_company_publications WHERE company_id=$1',[company])).rows[0]?.import_batch_id;
   const id=await file();let firstBatch;
   try {
+    await t.test('concurrent company resolution retains one financial owner',async()=>{
+      const initialId=(await db.query('INSERT INTO "Companies"("CompanyName") VALUES($1) RETURNING "CompanyID" AS id',[`Concurrent ${randomUUID()}`])).rows[0].id;
+      try {
+        const companies=await Promise.all(Array.from({length:6},()=>imports.ensureCompany({companyId:initialId})));
+        assert.ok(companies.every(row=>row.id===companies[0].id));
+        assert.equal((await db.query('SELECT count(*)::int AS count FROM intel_companies WHERE tally_company_id=$1',[initialId])).rows[0].count,1);
+      } finally {
+        await db.query('DELETE FROM intel_companies WHERE tally_company_id=$1',[initialId]);
+        await db.query('DELETE FROM "Companies" WHERE "CompanyID"=$1',[initialId]);
+      }
+    });
     await t.test('six concurrent workers create one generation without exhausting the five-client pool',async()=>{
       await Promise.all(Array.from({length:6},()=>imports.processFile(id,{username:'test'})));
       firstBatch=await current();assert.ok(firstBatch);
@@ -89,6 +102,30 @@ test('durable imports publish exact immutable company snapshots with atomic corr
       const alpha=(await sync.listSync({companyId:company,q:'Alpha'})).items[0];
       const pointer=await current();await assert.rejects(sync.mapRecon(alpha.id,ledgers[1].id,'test'),/already reserved/);assert.equal(await current(),pointer);
     });
+    await t.test('legacy map writer cannot retain stale durable identity after retargeting',async()=>{
+      const map=(await db.query('SELECT * FROM intel_account_maps WHERE company_id=$1',[company])).rows[0];
+      await db.query('UPDATE intel_account_maps SET tally_ledger_id=$2,tally_ledger_name=\'Alpha\' WHERE id=$1',[map.id,ledgers[0].id]);
+      const legacy=(await db.query('SELECT * FROM intel_account_maps WHERE id=$1',[map.id])).rows[0];
+      assert.equal(legacy.tally_source_key,null);assert.equal(legacy.tally_ledger_guid,null);
+      await db.query('UPDATE intel_account_maps SET tally_ledger_id=$2,tally_ledger_name=$3,tally_source_key=$4,tally_ledger_guid=$5 WHERE id=$1',[map.id,map.tally_ledger_id,map.tally_ledger_name,map.tally_source_key,map.tally_ledger_guid]);
+      assert.equal((await db.query('SELECT tally_source_key FROM intel_account_maps WHERE id=$1',[map.id])).rows[0].tally_source_key,'ledger:other');
+    });
+    await t.test('manual mappings survive recreated source ledger IDs without changing history',async()=>{
+      const before=(await sync.listSync({companyId:company,q:'Beta'})).items[0];
+      await db.query('DELETE FROM "Ledgers" WHERE "LedgerID"=$1',[ledgers[1].id]);
+      const replacement=(await db.query('INSERT INTO "Ledgers"("CompanyID","LedgerName","GroupCategory","CurrentBalance","SourceKey") VALUES($1,\'Other\',\'Debtors\',7,\'ledger:other\') RETURNING "LedgerID" AS id',[tallyId])).rows[0].id;
+      const map=(await db.query('SELECT * FROM intel_account_maps WHERE company_id=$1',[company])).rows[0];
+      await db.query('UPDATE intel_account_maps SET tally_ledger_id=$2,tally_source_key=$3,tally_ledger_guid=$4 WHERE id=$1',[map.id,replacement,map.tally_source_key,map.tally_ledger_guid]);
+      assert.equal((await db.query('SELECT tally_source_key FROM intel_account_maps WHERE id=$1',[map.id])).rows[0].tally_source_key,'ledger:other');
+      // Restore the original historical ID using explicit current-writer fields
+      // so publication itself must prove resolution across numeric-ID churn.
+      await db.query('UPDATE intel_account_maps SET tally_ledger_id=$2,tally_source_key=$3,tally_ledger_guid=$4 WHERE id=$1',[map.id,map.tally_ledger_id,map.tally_source_key,map.tally_ledger_guid]);
+      const nextFile=await file('2026-08-15',[['Beta','20.00']]);
+      await imports.processFile(nextFile);
+      const next=(await db.query('SELECT r.* FROM intel_reconciliations r JOIN intel_import_batches b ON b.id=r.import_batch_id WHERE b.import_file_id=$1 AND r.match_method=\'MANUAL\'',[nextFile])).rows[0];
+      assert.equal(next.tally_ledger_id,replacement);
+      assert.equal((await db.query('SELECT tally_ledger_id FROM intel_reconciliations WHERE id=$1',[before.id])).rows[0].tally_ledger_id,ledgers[1].id);
+    });
     await t.test('abandoned durable claim recovers; complete validation rejects duplicates',async()=>{
       const recoveryFile=await file('2026-08-01',[['Gamma','1.00']]);const abandoned=await imports.claim(recoveryFile);
       await db.query("UPDATE intel_import_batches SET heartbeat_at=now()-interval '3 minutes' WHERE id=$1",[abandoned.batch.id]);
@@ -112,6 +149,13 @@ test('durable imports publish exact immutable company snapshots with atomic corr
       const page=await dashboard.listExceptionsPage({companyId:company,q:'Test paging',page:4,pageSize:200});
       assert.equal(page.total,601);assert.equal(page.items.length,1);assert.equal(page.page,4);
       assert.equal((await dashboard.listExceptions({companyId:company,q:'Test paging',limit:10001})).length,601);
+      const exception=page.items[0];
+      const decision=await dashboard.updateException(exception.id,{status:'RESOLVED',comment:'Confirmed against source ledger'},'test-auditor');
+      assert.equal(decision.comments[0].body,'Confirmed against source ledger');
+      const saved=(await dashboard.listExceptions({companyId:company,status:'RESOLVED',q:'Test paging'})).find(row=>row.id===exception.id);
+      assert.equal(saved.comments[0].author,'test-auditor');
+      const audit=(await db.query("SELECT * FROM intel_audit WHERE entity_id=$1 AND action='EXCEPTION_COMMENT'",[exception.id])).rows[0];
+      assert.equal(audit.username,'test-auditor');assert.equal(audit.new_value.body,'Confirmed against source ledger');
       await db.query("DELETE FROM intel_exceptions WHERE company_id=$1 AND type='TEST_PAGE'",[company]);
     });
     await t.test('unknown legacy provenance cannot certify current matching or financial gaps',async()=>{
@@ -148,6 +192,17 @@ test('durable imports publish exact immutable company snapshots with atomic corr
       await imports.updateMapping(mappingFile,[{sourceHeader:'Particulars',targetField:null}],'test');
       assert.equal((await imports.getFile(mappingFile)).analysis.validation,undefined);
       assert.equal((await imports.validateOnly(mappingFile)).canProcess,false);
+    });
+    await t.test('file currency declaration is audited and frozen only into a fresh generation',async()=>{
+      const declared=await file('2026-07-31',[['Fresh currency account','1.00']]);
+      await imports.updateMapping(declared,[{sourceHeader:'Particulars',targetField:'account_name'}],'test','USD');
+      assert.equal((await imports.validateOnly(declared)).canProcess,true);
+      await imports.processFile(declared);
+      const run=(await imports.getResults(declared)).batch;
+      assert.equal(run.frozen_inputs.analysis.currency,'USD');
+      assert.equal(run.frozen_inputs.reference.currency,'INR');
+      assert.equal((await db.query('SELECT status,difference FROM intel_reconciliations WHERE import_batch_id=$1 LIMIT 1',[run.id])).rows[0].status,'COMPARISON_UNAVAILABLE');
+      assert.equal((await db.query("SELECT new_value FROM intel_audit WHERE entity_id=$1 AND action='CURRENCY_DECLARATION'",[declared])).rows[0].new_value.currency,'USD');
     });
   } finally {
     await db.query('DELETE FROM intel_company_publications WHERE company_id=$1',[company]);

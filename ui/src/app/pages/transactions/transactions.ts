@@ -212,6 +212,7 @@ export class Transactions {
               'Project',
               'Narration',
               'Amount',
+              'Currency',
             ],
             result.items.map((row) => [
               String(row.date || '').slice(0, 10),
@@ -222,6 +223,7 @@ export class Transactions {
               row.project,
               row.narration,
               row.amount,
+              row.currency || 'Unknown',
             ]),
           );
           this.exporting.set(false);

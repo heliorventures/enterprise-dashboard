@@ -9,6 +9,7 @@ module.exports = {
   dashboardPassword: process.env.DASHBOARD_PASSWORD || (process.env.NODE_ENV === 'production' ? '' : 'admin'),
   dashboardPasswordHash: process.env.DASHBOARD_PASSWORD_HASH || '',
   sessionSecret: process.env.DASHBOARD_SESSION_SECRET || '',
+  trustedProxyHosts: (process.env.TRUSTED_PROXY_HOSTS || '').split(',').map(value => value.trim()).filter(Boolean),
   db: {
     user: process.env.DB_USER || 'enterprise_dashboard',
     password: process.env.DB_PASSWORD,

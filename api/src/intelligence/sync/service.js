@@ -1,5 +1,6 @@
 const db = require('../../db');
 const tally = require('../tally/provider');
+const {basis,rowsWithCurrency} = require('../currency');
 
 async function rulesFor() {
   const result = await db.query(`SELECT key, value FROM intel_rules WHERE company_id IS NULL`);
@@ -86,7 +87,7 @@ async function listSync({ companyId, status, q, minDifference, mapped, page = 1,
     [companyId || null]
   );
   return {
-    items: result.rows,
+    items: await rowsWithCurrency(db,result.rows),
     total: total.rows[0].count,
     page: Number(page),
     pageSize: size,
@@ -102,6 +103,7 @@ async function suggestions(accountName, ledgers, currentId) {
       name: ledger.name,
       groupName: ledger.groupName,
       balance: ledger.balance,
+      currency:ledger.currency || null,
       score: nameScore(accountName, ledger.name),
       current: ledger.id === currentId,
     }))
@@ -130,6 +132,7 @@ async function detail(id) {
   );
   if (!result.rowCount) throw Object.assign(new Error('Reconciliation row not found'), { status: 404 });
   const row = result.rows[0];
+  const currencies=basis(row.frozen_inputs);
   const rules = await rulesFor();
   const ledgers = row.frozen_inputs?.reference?.ledgers || await tally.listLedgers(row.tally_company_id);
   const ageing = row.outstanding_id
@@ -153,6 +156,7 @@ async function detail(id) {
       creditDays: row.credit_days,
     } : null,
     excel: {
+      currency:currencies.source_currency,
       bill: row.bill_amount || '0.00',
       paid: row.paid_amount || '0.00',
       pendingDebit: row.pending_bill_debit || '0.00',
@@ -163,6 +167,7 @@ async function detail(id) {
       pendingNet: sourceAmount,
     },
     tally: {
+      currency:ledgers.find(item=>item.id===Number(row.tally_ledger_id))?.currency || currencies.tally_currency,
       ledgerId: row.tally_ledger_id,
       ledgerName: row.tally_ledger_name,
       balance: tallyAmount,
@@ -178,6 +183,7 @@ async function detail(id) {
       canMap: Boolean(row.account_id),
     },
     comparison: {
+      currency:currencies.currency,
       reportingDate:row.reporting_date, tallyBalanceDate:row.tally_balance_date, tallyBatchId:row.tally_batch_id, comparisonAvailable:row.comparison_available,
       sourceAmount,
       tallyAmount,
@@ -185,7 +191,7 @@ async function detail(id) {
       differencePct: row.difference_pct,
       tolerance,
       inSync: row.status === 'MATCHED',
-      explanation: explain(row.status, sourceAmount, tallyAmount, difference, tolerance, row.tally_ledger_name),
+      explanation: explain(row.status, sourceAmount, tallyAmount, difference, tolerance, row.tally_ledger_name,currencies.currency),
     },
     ageing,
     suggestions: await suggestions(row.account_name || '', ledgers, Number(row.tally_ledger_id) || null),
@@ -193,10 +199,10 @@ async function detail(id) {
   });
 }
 
-function explain(status, sourceAmount, tallyAmount, difference, tolerance, ledgerName) {
-  if (status === 'COMPARISON_UNAVAILABLE') return 'The Excel reporting date and archived Tally balance date are unknown or different. A financial comparison is unavailable.';
+function explain(status, sourceAmount, tallyAmount, difference, tolerance, ledgerName,currency) {
+  if (status === 'COMPARISON_UNAVAILABLE' || !currency) return 'The Excel and archived Tally balance dates or currencies are unknown or different. Declare the workbook currency and use a matching validated Tally reference before comparing amounts.';
   if (status === 'MATCHED') {
-    return `Excel pending net and Tally balance are within the ₹${tolerance.toLocaleString('en-IN')} tolerance${ledgerName ? ` for ${ledgerName}` : ''}.`;
+    return `Excel pending net and Tally balance are within the ${currency} ${tolerance.toLocaleString('en-IN')} tolerance${ledgerName ? ` for ${ledgerName}` : ''}.`;
   }
   if (status === 'MISSING_IN_TALLY') {
     return 'This Excel account is not mapped to a Tally ledger for the selected company. Map it to the correct ledger to check the amount.';
@@ -211,7 +217,7 @@ function explain(status, sourceAmount, tallyAmount, difference, tolerance, ledge
     return 'No Tally balance is available until a ledger is mapped.';
   }
   const side = difference > 0 ? 'Excel is higher' : 'Tally is higher';
-  return `${side} by ₹${Math.abs(difference).toLocaleString('en-IN')}. Tolerance is ₹${tolerance.toLocaleString('en-IN')}.`;
+  return `${side} by ${currency} ${Math.abs(difference).toLocaleString('en-IN')}. Tolerance is ${currency} ${tolerance.toLocaleString('en-IN')}.`;
 }
 
 async function mapRecon(id,tallyLedgerId,username) {
@@ -230,10 +236,11 @@ async function mapRecon(id,tallyLedgerId,username) {
     const ledger = reference.ledgers.find(row => row.id===Number(tallyLedgerId));
     if (tallyLedgerId!=null && tallyLedgerId!=='' && !ledger) throw Object.assign(new Error('Ledger is unavailable in this generation Tally snapshot'),{status:400});
     if (ledger) {
-      if ((await client.query('SELECT id FROM intel_account_maps WHERE company_id=$1 AND tally_ledger_id=$2 AND account_id<>$3',[current.company_id,ledger.id,current.account_id])).rowCount)
+      if ((await client.query(`SELECT id FROM intel_account_maps WHERE company_id=$1 AND account_id<>$3
+        AND (tally_ledger_id=$2 OR tally_source_key=$4 OR tally_ledger_guid=$5)`,[current.company_id,ledger.id,current.account_id,ledger.sourceKey || null,ledger.guid || null])).rowCount)
         throw Object.assign(new Error('This ledger is already reserved for another account'),{status:409});
-      await client.query(`INSERT INTO intel_account_maps(company_id,account_id,tally_ledger_id,tally_ledger_name,mapped_by,source) VALUES($1,$2,$3,$4,$5,'MANUAL')
-        ON CONFLICT(company_id,account_id) DO UPDATE SET tally_ledger_id=EXCLUDED.tally_ledger_id,tally_ledger_name=EXCLUDED.tally_ledger_name,mapped_by=EXCLUDED.mapped_by,mapped_at=now(),source='MANUAL'`,[current.company_id,current.account_id,ledger.id,ledger.name,username]);
+      await client.query(`INSERT INTO intel_account_maps(company_id,account_id,tally_ledger_id,tally_ledger_name,mapped_by,source,tally_source_key,tally_ledger_guid) VALUES($1,$2,$3,$4,$5,'MANUAL',$6,$7)
+        ON CONFLICT(company_id,account_id) DO UPDATE SET tally_ledger_id=EXCLUDED.tally_ledger_id,tally_ledger_name=EXCLUDED.tally_ledger_name,mapped_by=EXCLUDED.mapped_by,mapped_at=now(),source='MANUAL',tally_source_key=EXCLUDED.tally_source_key,tally_ledger_guid=EXCLUDED.tally_ledger_guid`,[current.company_id,current.account_id,ledger.id,ledger.name,username,ledger.sourceKey || null,ledger.guid || null]);
     } else await client.query('DELETE FROM intel_account_maps WHERE company_id=$1 AND account_id=$2',[current.company_id,current.account_id]);
     const reserved = await imports.claim(current.import_file_id,{username,reprocess:true,reference,inputs:current.frozen_inputs},{transaction:work=>work(client)});
     if (reserved.existing) throw Object.assign(new Error('An import is already processing'),{status:409});

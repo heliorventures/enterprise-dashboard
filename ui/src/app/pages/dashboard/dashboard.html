@@ -111,13 +111,13 @@
       </article>
     }
     <div class="chart-grid">
-      <app-financial-chart
+      <app-financial-chart [unit]="data()?.currency || 'Currency unavailable'"
         [compact]="true"
         title="Cash cover for payables"
         description="A balance comparison. Payables are obligations, not part of an asset mix; their due dates are not available."
         [rows]="liquidityRows()"
       />
-      <app-financial-chart
+      <app-financial-chart [unit]="data()?.currency || 'Currency unavailable'"
         [compact]="true"
         title="Company results on books"
         description="Revenue less expenses; source period, before eliminations. Select a company for details."
@@ -148,7 +148,7 @@
     <details class="disclosure">
       <summary>Funding model, company records &amp; projects</summary>
       <div class="detail-content">
-        <app-financial-chart
+        <app-financial-chart [unit]="data()?.currency || 'Currency unavailable'"
           title="Company performance on books"
           description="Revenue, expenses and the resulting balance for each company; source period, before eliminations."
           [rows]="companyRows()"
@@ -191,12 +191,12 @@
             />
           </section>
           <div class="chart-grid">
-            <app-financial-chart
+            <app-financial-chart [unit]="data()?.currency || 'Currency unavailable'"
               title="Monthly voucher activity"
               description="Latest six recorded months. Sales and receipts, or purchases and payments, may include an invoice and its settlement; these are not verified cash flows."
               [rows]="activityRows()"
             />
-            <app-financial-chart
+            <app-financial-chart [unit]="data()?.currency || 'Currency unavailable'"
               title="3-month funding model"
               description="Estimated balances based on the existing run-rate model. Validate timing, source coverage and double counting before using this for funding decisions."
               [rows]="forecastRows()"
@@ -294,7 +294,7 @@
             >
           </header>
           <div class="section-copy">
-            <app-project-summary
+            <app-project-summary [currency]="data()?.currency ?? null"
               [count]="dashboard.work.totals.total"
               [vouchers]="dashboard.work.totals.voucherCount"
               [totals]="dashboard.work.totals"
@@ -310,7 +310,7 @@
       </div>
     </details>
     <p class="section-copy">
-      Figures are in INR. Snapshot retrieved
+      Figures are in {{ data()?.currency || 'an unavailable currency' }}. Snapshot retrieved
       {{ dashboard.generatedAt | date: 'dd MMM yyyy, HH:mm' }}; this is not the source accounting
       date.
     </p>

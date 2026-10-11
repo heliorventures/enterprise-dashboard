@@ -1,4 +1,5 @@
 const db = require('./db');
+const { reportingCurrency } = require('./reportCurrency');
 const { companyFilter } = require('./filters');
 const { fundsOnHand, groupHistory, money, monthLabel, summarizeFunds } = require('./funds');
 const { EXPENSE_ROOTS } = require('./accountClassification');
@@ -236,6 +237,7 @@ async function bankAccounts(companyId) {
 
 async function getDashboard(companyCode = 'all') {
   const companyId = companyFilter(companyCode);
+  const currency = await reportingCurrency(companyCode);
   const [companies, financialRows, projects, sync, books, activity, accounts] = await Promise.all([
     getCompanies(),
     companyFinancials(companyId),
@@ -253,11 +255,12 @@ async function getDashboard(companyCode = 'all') {
     message: 'Books are updated from dumped Tally source records, not a live Tally connection',
   };
 
-  const companyCards = financialRows.map(mapFinance);
+  const companyCards = financialRows.map(row => ({ ...mapFinance(row), currency }));
   const groupedActivity = groupHistory(activity);
   const workItems = projects.filter((project) => toNumber(project.VoucherCount) > 0 || !project.SourceKey).map((project) => {
     const status = projectStatus(project);
     return {
+      currency,
       id: project.ProjectID,
       companyId: String(project.CompanyID),
       companyName: project.CompanyName,
@@ -278,6 +281,7 @@ async function getDashboard(companyCode = 'all') {
   });
 
   return {
+    currency,
     generatedAt: new Date().toISOString(),
     tally: tallyStatus,
     lastSync: sync,

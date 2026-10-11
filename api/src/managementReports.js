@@ -1,4 +1,6 @@
 const db = require('./db');
+const { withReportingCurrency } = require('./reportCurrency');
+const MAX_REPORT_ROWS = 20000;
 const { companyFilter, optionalDate } = require('./filters');
 const { classifyVoucher, money } = require('./funds');
 
@@ -41,10 +43,10 @@ function params({ company = 'all', type = '', from, to } = {}) {
 
 function flowExpr(kind) {
   if (kind === 'inflow') {
-    return `CASE WHEN v."VoucherType" ~* 'receipt|sales|credit\\s*note' THEN abs(COALESCE(v."Amount",0)) ELSE 0 END`;
+    return `CASE WHEN COALESCE(vt.resolved_root,v."VoucherType") ~* 'receipt|sales|credit\\s*note' THEN abs(COALESCE(v."Amount",0)) ELSE 0 END`;
   }
   if (kind === 'outflow') {
-    return `CASE WHEN v."VoucherType" ~* 'payment|purchase|debit\\s*note' THEN abs(COALESCE(v."Amount",0)) ELSE 0 END`;
+    return `CASE WHEN COALESCE(vt.resolved_root,v."VoucherType") ~* 'payment|purchase|debit\\s*note' THEN abs(COALESCE(v."Amount",0)) ELSE 0 END`;
   }
   return 'abs(COALESCE(v."Amount",0))';
 }
@@ -73,6 +75,7 @@ async function typesFor(companyId) {
       SELECT DISTINCT v."VoucherType" AS name
       FROM "Vouchers" v
       INNER JOIN "Companies" c ON c."CompanyID" = v."CompanyID"
+      LEFT JOIN voucher_types vt ON vt.company_id=v."CompanyID" AND vt.name=v."VoucherType"
       WHERE c."IsActive" = true AND ($1 = 0 OR v."CompanyID" = $1)
       ORDER BY v."VoucherType"
     `,
@@ -96,6 +99,7 @@ async function summary(query) {
           count(DISTINCT v."VoucherDate")::int AS days
         FROM "Vouchers" v
         INNER JOIN "Companies" c ON c."CompanyID" = v."CompanyID"
+      LEFT JOIN voucher_types vt ON vt.company_id=v."CompanyID" AND vt.name=v."VoucherType"
         WHERE ${voucherWhere()}
       `,
       values
@@ -122,6 +126,7 @@ async function daily(query) {
         COALESCE(sum(${flowExpr('outflow')}),0) AS outflow
       FROM "Vouchers" v
       INNER JOIN "Companies" c ON c."CompanyID" = v."CompanyID"
+      LEFT JOIN voucher_types vt ON vt.company_id=v."CompanyID" AND vt.name=v."VoucherType"
       WHERE ${voucherWhere()}
       GROUP BY v."VoucherDate"
       ORDER BY v."VoucherDate" DESC
@@ -146,6 +151,7 @@ async function weekly(query) {
         COALESCE(sum(${flowExpr('outflow')}),0) AS outflow
       FROM "Vouchers" v
       INNER JOIN "Companies" c ON c."CompanyID" = v."CompanyID"
+      LEFT JOIN voucher_types vt ON vt.company_id=v."CompanyID" AND vt.name=v."VoucherType"
       WHERE ${voucherWhere()}
       GROUP BY 1, 2, 3
       ORDER BY 1 DESC
@@ -169,6 +175,7 @@ async function monthly(query) {
         COALESCE(sum(${flowExpr('outflow')}),0) AS outflow
       FROM "Vouchers" v
       INNER JOIN "Companies" c ON c."CompanyID" = v."CompanyID"
+      LEFT JOIN voucher_types vt ON vt.company_id=v."CompanyID" AND vt.name=v."VoucherType"
       WHERE ${voucherWhere()}
       GROUP BY 1, 2
       ORDER BY 1 DESC
@@ -184,6 +191,7 @@ async function types(query) {
     `
       SELECT
         COALESCE(v."VoucherType", 'Unknown') AS voucher_type,
+        COALESCE(vt.resolved_root,v."VoucherType", 'Unknown') AS resolved_type,
         count(*)::int AS vouchers,
         count(*) FILTER (WHERE COALESCE(v."Amount",0) <> 0)::int AS with_amount,
         COALESCE(sum(${flowExpr('turnover')}),0) AS turnover,
@@ -191,8 +199,9 @@ async function types(query) {
         COALESCE(sum(${flowExpr('outflow')}),0) AS outflow
       FROM "Vouchers" v
       INNER JOIN "Companies" c ON c."CompanyID" = v."CompanyID"
+      LEFT JOIN voucher_types vt ON vt.company_id=v."CompanyID" AND vt.name=v."VoucherType"
       WHERE ${voucherWhere()}
-      GROUP BY 1
+      GROUP BY 1, 2
       ORDER BY abs(COALESCE(sum(${flowExpr('turnover')}),0)) DESC, count(*) DESC
     `,
     values
@@ -201,7 +210,7 @@ async function types(query) {
     period: range,
     items: result.rows.map((row) => ({
       ...mapRow(row),
-      flow: classifyVoucher(row.voucher_type),
+      flow: classifyVoucher(row.resolved_type || row.voucher_type),
     })),
   };
 }
@@ -219,6 +228,7 @@ async function parties(query) {
         COALESCE(sum(${flowExpr('outflow')}),0) AS outflow
       FROM "Vouchers" v
       INNER JOIN "Companies" c ON c."CompanyID" = v."CompanyID"
+      LEFT JOIN voucher_types vt ON vt.company_id=v."CompanyID" AND vt.name=v."VoucherType"
       WHERE ${voucherWhere()}
       GROUP BY 1
       ORDER BY abs(COALESCE(sum(${flowExpr('turnover')}),0)) DESC
@@ -243,6 +253,7 @@ async function companies(query) {
         COALESCE(sum(${flowExpr('outflow')}),0) AS outflow
       FROM "Vouchers" v
       INNER JOIN "Companies" c ON c."CompanyID" = v."CompanyID"
+      LEFT JOIN voucher_types vt ON vt.company_id=v."CompanyID" AND vt.name=v."VoucherType"
       WHERE ${voucherWhere()}
       GROUP BY c."CompanyID", c."CompanyName"
       ORDER BY abs(COALESCE(sum(${flowExpr('turnover')}),0)) DESC
@@ -262,6 +273,7 @@ async function large(query) {
         v."VoucherID" AS id,
         v."VoucherDate" AS date,
         v."VoucherType" AS voucher_type,
+        COALESCE(vt.resolved_root,v."VoucherType") AS resolved_type,
         v."VoucherNumber" AS voucher_number,
         v."PartyLedgerName" AS party,
         v."Narration" AS narration,
@@ -271,36 +283,35 @@ async function large(query) {
         abs(COALESCE(v."Amount",0)) AS turnover
       FROM "Vouchers" v
       INNER JOIN "Companies" c ON c."CompanyID" = v."CompanyID"
+      LEFT JOIN voucher_types vt ON vt.company_id=v."CompanyID" AND vt.name=v."VoucherType"
       WHERE ${voucherWhere()}
         AND abs(COALESCE(v."Amount",0)) >= $5
-      ORDER BY abs(COALESCE(v."Amount",0)) DESC, v."VoucherDate" DESC
-      LIMIT 100
+      ORDER BY abs(COALESCE(v."Amount",0)) DESC, v."VoucherDate" DESC, v."VoucherID" DESC
+      LIMIT ${MAX_REPORT_ROWS + 1}
     `,
     [...values, threshold]
   );
+  if (result.rows.length > MAX_REPORT_ROWS) {
+    throw Object.assign(new Error(`Report exceeds ${MAX_REPORT_ROWS} vouchers. Narrow the company, dates or minimum amount before viewing or exporting.`), { status: 422 });
+  }
   return {
     period: range,
     minAmount: threshold,
+    total: result.rows.length,
+    limit: MAX_REPORT_ROWS,
     items: result.rows.map((row) => ({
       ...row,
       companyId: String(row.company_id),
       amount: money(row.amount),
       turnover: money(row.turnover),
-      flow: classifyVoucher(row.voucher_type),
+      flow: classifyVoucher(row.resolved_type || row.voucher_type),
     })),
   };
 }
 
-async function run(kind, query) {
-  if (kind === 'summary') return summary(query);
-  if (kind === 'daily') return daily(query);
-  if (kind === 'weekly') return weekly(query);
-  if (kind === 'monthly') return monthly(query);
-  if (kind === 'types') return types(query);
-  if (kind === 'parties') return parties(query);
-  if (kind === 'companies') return companies(query);
-  if (kind === 'large') return large(query);
-  throw Object.assign(new Error('Unknown management report'), { status: 404 });
-}
-
-module.exports = { run, summary, daily, weekly, monthly, types, parties, companies, large };
+const handlers = { summary, daily, weekly, monthly, types, parties, companies, large };
+const safeHandlers = Object.fromEntries(Object.entries(handlers).map(([kind, work]) => [kind, withReportingCurrency(work)]));
+module.exports = { ...safeHandlers, run: (kind, query) => {
+  if (!Object.hasOwn(safeHandlers, kind)) throw Object.assign(new Error('Unknown management report'), { status: 404 });
+  return safeHandlers[kind](query);
+} };

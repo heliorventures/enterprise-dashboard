@@ -1,5 +1,7 @@
 const db = require('../db');
 const { normalizeSpace } = require('../excel/parser');
+const { scalarField } = require('../../sourceTree');
+const { currencyCode } = require('../../reportCurrency');
 
 function normalizeName(name) {
   return normalizeSpace(name).replace(/[^a-zA-Z0-9]+/g, ' ').trim().toLowerCase();
@@ -26,7 +28,7 @@ async function listLedgers(tallyCompanyId, database=db) {
     const result = await database.query(
       `
         SELECT l."LedgerID" AS id, l."CompanyID" AS company_id, l."LedgerName" AS name,
-               l."GroupCategory" AS group_name, l."CurrentBalance" AS balance
+               l."GroupCategory" AS group_name, l."CurrentBalance" AS balance, l."SourceKey" AS source_key
         FROM "Ledgers" l
         WHERE l."CompanyID" = $1
       `,
@@ -35,6 +37,8 @@ async function listLedgers(tallyCompanyId, database=db) {
     return result.rows.map((row) => ({
       id: Number(row.id),
       companyId: Number(row.company_id),
+      sourceKey: row.source_key || null,
+      guid: null,
       name: row.name,
       normalized: normalizeName(row.name),
       groupName: row.group_name,
@@ -57,18 +61,23 @@ async function matchCompanyName(name) {
 
 async function snapshot(tallyCompanyId, database=db) {
   const read = async () => {
-    const reference = await database.query(`SELECT f.batch_id, s.manifest
+    const reference = await database.query(`SELECT f.batch_id, f.currency, f.coverage, s.manifest
       FROM finance_snapshots f JOIN tally_source_snapshots s ON s.batch_id=f.batch_id
       WHERE f.company_id=$1`, [tallyCompanyId]);
     const row = reference.rows[0];
-    if (!row) return { ledgers:await listLedgers(tallyCompanyId,database),batchId:null,balanceDate:null };
-    const facts = await database.query(`SELECT l."LedgerID" AS id,f.name,f.group_name,f.closing_balance AS balance
+    if (!row) return { ledgers:await listLedgers(tallyCompanyId,database),batchId:null,balanceDate:null,currency:null,uniformCurrency:false };
+    const facts = await database.query(`SELECT l."LedgerID" AS id,l."SourceKey" AS source_key,f.name,f.group_name,f.closing_balance AS balance,
+        r.payload AS archive_payload, f.currency
       FROM finance_ledger_facts f LEFT JOIN "Ledgers" l ON l."CompanyID"=f.company_id AND l."LedgerName"=f.name
+      LEFT JOIN tally_source_records r ON r.batch_id=f.batch_id AND r.collection='LEDGER' AND r.ordinal=f.ordinal
       WHERE f.company_id=$1 AND f.batch_id=$2`,[tallyCompanyId,row.batch_id]);
     const coherent = facts.rows.length>0 && facts.rows.every(ledger=>ledger.id!=null)
       && new Set(facts.rows.map(ledger=>ledger.name)).size===facts.rows.length;
     return { ledgers:coherent ? facts.rows.map(ledger=>({id:Number(ledger.id),companyId:tallyCompanyId,name:ledger.name,
+        sourceKey:ledger.source_key || null,guid:scalarField(ledger.archive_payload,'GUID')?.trim() || null,
+        currency:currencyCode(ledger.currency) || currencyCode(row.currency),
         normalized:normalizeName(ledger.name),groupName:ledger.group_name,balance:String(ledger.balance)})) : await listLedgers(tallyCompanyId,database),
+      currency:currencyCode(row.currency),uniformCurrency:row.coverage?.uniformCurrency===true,
       batchId:row.batch_id, balanceDate:coherent ? require('../excel/parser').parseDate(row.manifest?.dateContext?.ledgers?.to) : null };
   };
   return database===db ? db.readSnapshot(read) : read();

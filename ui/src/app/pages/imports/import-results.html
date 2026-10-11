@@ -15,6 +15,9 @@
   @if (error()) {
     <p class="banner" role="alert">{{ error() }}</p>
   }
+  @if (currencyMessage()) {
+    <p class="banner info" role="status">{{ currencyMessage() }}</p>
+  }
 
   <section class="kpi-grid">
     <app-kpi-card

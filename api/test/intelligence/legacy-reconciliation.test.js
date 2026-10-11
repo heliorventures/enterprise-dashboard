@@ -8,7 +8,7 @@ describe('reconciliation', () => {
       [{ outstanding_id: '1', company_id: 'c', account_name: 'DILIP KASHINATH DHOTRE - CURRENT A/C', source_amount: 500000 }],
       [{ id: 9, name: 'Dilip Kashinath Dhotre - Current A/C', normalized: require('../../src/intelligence/tally/provider').normalizeName('Dilip Kashinath Dhotre - Current A/C'), balance: 480000 }],
       { amount_tolerance: { amount: 1000 }, critical_difference: { amount: 100000 } },
-      {reportingDate:'2026-09-30',balanceDate:'2026-09-30'}
+      {reportingDate:'2026-09-30',balanceDate:'2026-09-30',sourceCurrency:'INR',tallyCurrency:'INR'}
     );
     assert.equal(result.matched[0].status, 'AMOUNT_MISMATCH');
     assert.equal(result.matched[0].matchMethod, 'NAME');
@@ -19,7 +19,7 @@ describe('reconciliation', () => {
     const result = reconcileAccounts(
       [{ outstanding_id: '1', company_id: 'c', account_name: 'Unknown Party', source_amount: 100 }],
       [{ id: 1, name: 'Cash', normalized: 'cash', balance: 50 }],{},
-      {reportingDate:'2026-09-30',balanceDate:'2026-09-30'}
+      {reportingDate:'2026-09-30',balanceDate:'2026-09-30',sourceCurrency:'INR',tallyCurrency:'INR'}
     );
     assert.equal(result.matched[0].status, 'MISSING_IN_TALLY');
     assert.equal(result.missingInSource[0].status, 'MISSING_IN_SOURCE');

@@ -13,6 +13,7 @@ export interface PagedResult<T> {
 }
 
 export interface LedgerRow {
+  currency?: string | null;
   id: number;
   companyId: string;
   companyName: string;
@@ -22,6 +23,7 @@ export interface LedgerRow {
 }
 
 export interface ExpenseLedger {
+  currency?: string | null;
   id: number;
   name: string;
   group: string;
@@ -38,6 +40,7 @@ export interface ExpenseGroup {
 }
 
 export interface ExpenseCompany {
+  currency?: string | null;
   id: string;
   name: string;
   total: number;
@@ -46,6 +49,7 @@ export interface ExpenseCompany {
 }
 
 export interface ProjectResult {
+  currency?: string | null;
   id: string;
   companyId: string;
   companyName: string;
@@ -58,6 +62,7 @@ export interface ProjectResult {
 }
 
 export interface ProjectCompany {
+  currency?: string | null;
   id: string;
   name: string;
   voucherCount: number;
@@ -68,6 +73,7 @@ export interface ProjectCompany {
 }
 
 export interface ProjectReport {
+  currency?: string | null;
   linkedVoucherCount: number;
   projectCount: number;
   invested: number;
@@ -77,6 +83,7 @@ export interface ProjectReport {
 }
 
 export interface ExpenseReport {
+  currency?: string | null;
   lastMonth: {
     key: string;
     label: string;
@@ -91,6 +98,7 @@ export interface ExpenseReport {
 }
 
 export interface VoucherRow {
+  currency?: string | null;
   id: number;
   companyId: string;
   companyName: string;

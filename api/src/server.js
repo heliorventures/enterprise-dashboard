@@ -13,6 +13,8 @@ const auth = require('./auth');
 const { registerExcelImportRoutes } = require('./intelligence/routes');
 
 const app = express();
+const proxies = require('./trustedProxies').createTrustedProxies(config.trustedProxyHosts);
+app.set('trust proxy', proxies.trust);
 
 app.use(cors({ origin: ['http://localhost:4200'], credentials: true }));
 app.disable('x-powered-by');
@@ -101,7 +103,7 @@ app.post('/api/ingest/tally', authenticateSender, express.json({ limit: '20mb' }
   }
 });
 app.use(express.json());
-app.post('/api/auth/login', auth.login);
+app.post('/api/auth/login', proxies.middleware, auth.login);
 app.post('/api/auth/logout', auth.logout);
 app.get('/api/auth/session', auth.requireSession, auth.session);
 app.use('/api', (req, res, next) => {

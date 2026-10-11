@@ -56,10 +56,10 @@
     </nav>
     <section class="kpi-grid" aria-label="Expense indicators">
       <app-kpi-card
-        label="Selected expense balances"
+        label="Selected net expense balances"
         [value]="expenseRows().length ? compactInr(expenseTotal()) : 'Not available'"
         [detail]="expenseRows().length ? fullInr(expenseTotal()) : ''"
-        hint="Current drill-down; source-period ledger balances."
+        hint="Signed balances netted per company, then oriented to its net expense. Negative rows offset expenses."
         icon="spend"
       />
       <app-kpi-card
@@ -77,7 +77,7 @@
         icon="info"
       />
     </section>
-    <app-financial-chart
+    <app-financial-chart [unit]="report()?.currency || projects()?.currency || 'Currency unavailable'"
       title="Where expense balances are concentrated"
       description="Largest six entries plus the remaining total. Select a name to drill into its supporting records."
       [rows]="expenseChart()"
@@ -110,13 +110,13 @@
       </p>
     } @else {
       @if (projects(); as projectReport) {
-        <app-project-summary
+        <app-project-summary [currency]="projects()?.currency ?? null"
           [count]="projectReport.projectCount"
           [vouchers]="projectReport.linkedVoucherCount"
           [totals]="projectReport"
         />
       }
-      <app-financial-chart
+      <app-financial-chart [unit]="report()?.currency || projects()?.currency || 'Currency unavailable'"
         title="Projects with the lowest model net"
         description="Up to six projects, lowest first, for the selected company scope. Voucher-based earned less invested is not project profit; invoice and settlement activity may overlap."
         [rows]="projectChart()"

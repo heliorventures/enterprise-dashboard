@@ -11,6 +11,7 @@ const { reconcileAccounts } = require('../reconciliation/engine');
 const audit = require('../audit');
 const { stage, shouldPublish } = require('./publication');
 const decimal = require('../transform/decimal');
+const {basis,reconciliationSummary,publicBatch} = require('../currency');
 
 async function rulesFor() {
   const result = await db.query(`SELECT key, value FROM intel_rules WHERE company_id IS NULL`);
@@ -34,21 +35,10 @@ async function ensureCompany({ companyId }) {
   if (!tallyCompany.rowCount) {
     throw Object.assign(new Error('Unknown company'), { status: 400 });
   }
-  const existing = await db.query(
-    'SELECT * FROM intel_companies WHERE tally_company_id=$1 AND active=true',
-    [tallyId]
-  );
-  if (existing.rowCount) {
-    const current = existing.rows[0];
-    if (current.name !== tallyCompany.rows[0].name) {
-      await db.query('UPDATE intel_companies SET name=$2 WHERE id=$1', [current.id, tallyCompany.rows[0].name]);
-      return { ...current, name: tallyCompany.rows[0].name };
-    }
-    return current;
-  }
   const inserted = await db.query(
     `INSERT INTO intel_companies (name, tally_company_id, active)
      VALUES ($1,$2,true)
+     ON CONFLICT (tally_company_id) DO UPDATE SET name=EXCLUDED.name, active=true
      RETURNING *`,
     [tallyCompany.rows[0].name, tallyId]
   );
@@ -137,6 +127,7 @@ async function upload({ buffer, fileName, companyId, uploadedBy }) {
     selectedCompany: { id: company.id, name: company.name, tallyCompanyId: company.tally_company_id },
     companyMismatch,
     analysis: {
+      currency:analysis.currency,
       title: analysis.title,
       company: analysis.entity,
       period: analysis.period,
@@ -198,6 +189,7 @@ async function preview(id) {
 
 async function prepare(file, database = db) {
   const analysis = await analyzeWorkbook(await fs.readFile(file.stored_path));
+  if (Object.hasOwn(file.analysis || {},'declaredCurrency')) analysis.currency=file.analysis.declaredCurrency;
   const maps = await loadMaps(database, {sourceSystemId:file.source_system_id, companyId:file.company_id});
   const columns = resolveMaps(maps, analysis.columns);
   let categoryPath=[],lastType=null;
@@ -411,7 +403,8 @@ async function publishGeneration(client,reserved) {
   const reconInput = details.map(item => ({outstanding_id:item.outstandingId,account_id:item.account.id,company_id:companyId,
     account_name:item.mapped.account_name,pan_number:item.mapped.pan_number,gst_number:item.mapped.gst_number,
     source_amount:netOutstanding(item.mapped,rulebook.net_outstanding_formula?.expression)}));
-  const context = {reportingDate:file.reporting_period_to,balanceDate:reference.balanceDate,batchId:reference.batchId,maps:accountMaps};
+  const context = {reportingDate:file.reporting_period_to,balanceDate:reference.balanceDate,batchId:reference.batchId,maps:accountMaps,
+    sourceCurrency:analysis.currency,tallyCurrency:reference.uniformCurrency ? reference.currency : null};
   const reconciled = reconcileAccounts(reconInput,reference.ledgers,rulebook,context);
   for (const row of [...reconciled.matched,...reconciled.missingInSource]) {
     const inserted = (await client.query(`INSERT INTO intel_reconciliations(outstanding_id,company_id,import_batch_id,tally_ledger_id,tally_ledger_name,tally_amount,source_amount,difference,difference_pct,match_method,match_score,matching_fields,status,reporting_date,tally_batch_id,tally_balance_date,comparison_available)
@@ -476,7 +469,7 @@ async function readProgress(id) {
        GROUP BY status`,
       [activeBatch.id, file.company_id],
     );
-    reconciliation = recon.rows;
+    reconciliation = reconciliationSummary(recon.rows,activeBatch.frozen_inputs);
   }
   return {
     fileId: file.id,
@@ -490,7 +483,7 @@ async function readProgress(id) {
     running: batch?.status === 'PROCESSING' && Date.now()-new Date(batch.heartbeat_at || batch.started_at).getTime()<120000,
     validation,
     canProcess: Boolean(validation?.canProcess),
-    batch: activeBatch || (processing ? null : batch),
+    batch: publicBatch(activeBatch || (processing ? null : batch)),
     reconciliation,
     selectedCompany: file.analysis?.selectedCompany || { id: file.company_id, name: file.company_name },
   };
@@ -523,7 +516,10 @@ async function getResults(id) {
       [batch.id, file.company_id]
     )
     : { rows: [] };
-  return { file: summaryPayload(file), companyName: file.company_name, batch, reconciliation: recon.rows };
+  const currencies=basis(batch?.frozen_inputs);
+  return { file: summaryPayload(file), companyName: file.company_name, batch:publicBatch(batch),
+    currency:currencies.source_currency,
+    reconciliation: reconciliationSummary(recon.rows,batch?.frozen_inputs) };
   });
 }
 
@@ -555,7 +551,8 @@ async function rowErrors(id) {
   return result.rows;
 }
 
-async function updateMapping(id, mappings, username) {
+async function updateMapping(id, mappings, username, currency) {
+  if (currency !== undefined && currency !== null && !require('../../reportCurrency').currencyCode(currency)) throw Object.assign(new Error('Declare a supported ISO currency code or leave it unspecified'),{status:400});
   await db.transaction(async client => {
     const owner=(await client.query('SELECT company_id FROM intel_import_files WHERE id=$1',[id])).rows[0];
     if (!owner) throw Object.assign(new Error('Import not found'),{status:404});
@@ -573,6 +570,11 @@ async function updateMapping(id, mappings, username) {
       analysis=COALESCE(analysis,'{}'::jsonb)-'validation',
       status=CASE WHEN status IN ('VALIDATED','FAILED') THEN 'ANALYZED' ELSE status END
       WHERE company_id=$1 AND source_system_id IS NOT DISTINCT FROM $2::uuid AND status<>'PROCESSING'`,[file.company_id,file.source_system_id]);
+    if (currency !== undefined) {
+      const declaredCurrency=require('../../reportCurrency').currencyCode(currency);
+      await client.query(`UPDATE intel_import_files SET analysis=analysis || jsonb_build_object('declaredCurrency',$2::text) WHERE id=$1`,[id,declaredCurrency]);
+      await client.query(`INSERT INTO intel_audit(username,action,entity,entity_id,old_value,new_value) VALUES($1,'CURRENCY_DECLARATION','import_file',$2,$3,$4)`,[username,id,{currency:file.analysis?.declaredCurrency ?? file.analysis?.currency ?? null},{currency:declaredCurrency}]);
+    }
     await client.query(`INSERT INTO intel_audit(username,action,entity,entity_id,new_value) VALUES($1,'MAPPING_CHANGE','import_file',$2,$3)`,[username,id,JSON.stringify(mappings)]);
   });
   return preview(id);

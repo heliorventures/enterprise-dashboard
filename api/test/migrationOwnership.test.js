@@ -5,10 +5,10 @@ const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { migrate } = require('../src/migrate');
 
-async function fixture(legacy = ['001_intelligence.sql', '002_difference_pct.sql', '003_account_maps.sql', '004_recon_tally_only.sql']) {
+async function fixture(legacy = ['001_intelligence.sql', '002_difference_pct.sql', '003_account_maps.sql', '004_recon_tally_only.sql'], cutoff = '015') {
   const directory = path.join(__dirname, '../migrations');
   const files = (await readdir(directory)).filter(n => /^\d+_[a-z0-9_]+\.sql$/.test(n)).sort();
-  const core = await Promise.all(files.filter(n => n < '015').map(async version => ({
+  const core = await Promise.all(files.filter(n => n < cutoff).map(async version => ({
     version, checksum: createHash('sha256').update((await readFile(path.join(directory, version), 'utf8')).replace(/\r\n/g, '\n')).digest('hex'),
   })));
   const calls = [];
@@ -36,10 +36,27 @@ test('existing Intel identities are adopted into the checksum owner without exec
   assert.deepEqual(calls.slice(-2).map(c => c.sql), ['COMMIT', 'RELEASE']);
   assert.equal(calls.some(c => c.sql.startsWith('INSERT INTO schema_migrations')), false,
     'old images must not see unknown new identities during a rollback');
+  assert.ok(versions.every(version => Number(version.split('_')[0]) <= 19));
+  const forward = calls.filter(c => c.sql.startsWith('INSERT INTO application_schema_history'));
+  assert.ok(forward.some(call => call.params[0] === '020_ingestion_integrity.sql'));
+  assert.ok(forward.every(call => call.params[2] === 19));
 });
 
 test('unknown legacy migration is rejected atomically rather than guessing its schema', async () => {
   const { pool, calls } = await fixture(['999_unknown.sql']);
   await assert.rejects(migrate(pool), /Unknown.*Intel.*migration/i);
   assert.deepEqual(calls.slice(-2).map(c => c.sql), ['ROLLBACK', 'RELEASE']);
+});
+
+test('legacy source-key backfills are widened before pending migrations execute', async () => {
+  const { pool, calls } = await fixture([], '008');
+  await migrate(pool);
+  for (const table of ['Ledgers', 'Vouchers', 'Projects']) {
+    const quoted = '"' + table + '"';
+    const backfill = calls.findIndex(c => c.sql.includes('UPDATE ' + quoted) && c.sql.includes('SourceKey'));
+    assert.ok(backfill >= 0);
+    assert.ok(calls.slice(0, backfill).some(c => c.sql.includes('ALTER TABLE ' + quoted)
+      && /ADD COLUMN IF NOT EXISTS "SourceKey" text/.test(c.sql)),
+    table + ' must have an unbounded key before its historical backfill');
+  }
 });

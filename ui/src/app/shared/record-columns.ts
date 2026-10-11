@@ -30,7 +30,7 @@ export const ledgerColumns: DataColumn<LedgerRow>[] = [
   {
     key: 'balance',
     label: 'Closing balance',
-    value: (r) => fullInr(r.balance),
+    value: (r) => fullInr(r.balance, r.currency ?? null),
     numeric: true,
     primary: true,
   },
@@ -47,7 +47,7 @@ export const voucherColumns: DataColumn<VoucherRow>[] = [
   {
     key: 'amount',
     label: 'Reported amount',
-    value: (r) => fullInr(r.amount),
+    value: (r) => fullInr(r.amount, r.currency ?? null),
     secondary: (r) => (r.amount === 0 ? 'Zero or missing in source' : ''),
     numeric: true,
     primary: true,

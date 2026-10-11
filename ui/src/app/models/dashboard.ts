@@ -53,6 +53,7 @@ export interface CompanyOption {
 }
 
 export interface CompanyFinancial {
+  currency?: string | null;
   historyCoverage?: {kind:'full'|'periods';periods?: {from:string;to:string}[]} | null;
   id: string;
   name: string;
@@ -83,6 +84,7 @@ export interface FundMonth {
 }
 
 export interface BankAccount {
+  currency?: string | null;
   companyId: string;
   companyName: string;
   name: string;
@@ -93,6 +95,7 @@ export interface BankAccount {
 }
 
 export interface CompanyFunds {
+  currency?: string | null;
   financialDataAvailable?: boolean;
   id: string;
   name: string;
@@ -151,6 +154,7 @@ export interface LedgerGroupTotal {
 }
 
 export interface WorkItem {
+  currency?: string | null;
   id: number;
   companyId: string;
   companyName: string;
@@ -167,6 +171,7 @@ export interface WorkItem {
 }
 
 export interface DashboardData {
+  currency?: string | null;
   generatedAt: string;
   tally: TallyStatus;
   lastSync: { Source: string; Status: string; Message: string; SyncedAt: string } | null;

@@ -7,6 +7,7 @@ import { Dashboard } from './dashboard';
 
 function snapshot(): DashboardData {
   return {
+    currency: 'INR',
     generatedAt: '2026-09-13T00:00:00Z',
     selectedCompany: 'all',
     tally: { connected: true, mode: 'archive', url: '', message: '', companies: [] },
@@ -37,6 +38,11 @@ function snapshot(): DashboardData {
     work: { totals: { total: 0, onTrack: 0, delayed: 0, atRisk: 0, completed: 0 }, items: [] },
   };
 }
+function createDashboard() {
+  const fixture = TestBed.createComponent(Dashboard);
+  TestBed.inject(HttpTestingController).expectOne('/api/companies').flush(snapshot().companies);
+  return fixture;
+}
 describe('Dashboard', () => {
   beforeEach(async () => {
     await TestBed.configureTestingModule({
@@ -44,8 +50,26 @@ describe('Dashboard', () => {
       providers: [provideRouter([]), provideHttpClient(), provideHttpClientTesting()],
     }).compileComponents();
   });
+  it('keeps company selection available when combined currencies cannot be reported', () => {
+    const fixture = createDashboard();
+    TestBed.inject(HttpTestingController).expectOne('/api/dashboard?company=all')
+      .flush({ error: 'Selected companies have different currencies. Choose one company.' }, { status: 422, statusText: 'Unprocessable' });
+    expect(fixture.componentInstance.companies().length).toBe(1);
+    expect(fixture.componentInstance.error()).toContain('different currencies');
+    expect(fixture.componentInstance.data()).toBeNull();
+  });
+  it('renders supported USD across overview amounts and charts', async () => {
+    const fixture = createDashboard();
+    const data = snapshot();
+    data.currency = 'USD';
+    TestBed.inject(HttpTestingController).expectOne('/api/dashboard?company=all').flush(data);
+    await fixture.whenStable();
+    expect(fixture.nativeElement.textContent).toContain('$');
+    expect(fixture.nativeElement.textContent).not.toContain('₹');
+    expect(fixture.nativeElement.textContent).toContain('Figures are in USD');
+  });
   it('shows the exact imported periods when voucher history is incomplete', async () => {
-    const fixture=TestBed.createComponent(Dashboard),http=TestBed.inject(HttpTestingController);
+    const fixture=createDashboard(),http=TestBed.inject(HttpTestingController);
     const data=snapshot();
     data.companyFinancials=[{id:'1',name:'Period company',historyCoverage:{kind:'periods',periods:[{from:'2026-09-01',to:'2026-09-15'}]}} as DashboardData['companyFinancials'][number]];
     http.expectOne('/api/dashboard?company=all').flush(data);await fixture.whenStable();
@@ -55,7 +79,7 @@ describe('Dashboard', () => {
     expect(text).toContain('Other dates have not been fully imported');http.verify();
   });
   it('clears the prior company snapshot and cancels its request when the selection changes', () => {
-    const fixture = TestBed.createComponent(Dashboard);
+    const fixture = createDashboard();
     const component = fixture.componentInstance;
     const http = TestBed.inject(HttpTestingController);
     const first = http.expectOne('/api/dashboard?company=all');
@@ -69,7 +93,7 @@ describe('Dashboard', () => {
     http.verify();
   });
   it('puts financial indicators and charts before detailed records and keeps diagnostics off Overview', async () => {
-    const fixture = TestBed.createComponent(Dashboard),
+    const fixture = createDashboard(),
       http = TestBed.inject(HttpTestingController);
     http.expectOne('/api/dashboard?company=all').flush(snapshot());
     await fixture.whenStable();
@@ -88,7 +112,7 @@ describe('Dashboard', () => {
     http.verify();
   });
   it('keeps empty books and absent funds unavailable instead of presenting zero liquidity', () => {
-    const fixture = TestBed.createComponent(Dashboard);
+    const fixture = createDashboard();
     const d = snapshot();
     d.books.ledgerCount = 0;
     TestBed.inject(HttpTestingController).expectOne('/api/dashboard?company=all').flush(d);
@@ -96,7 +120,7 @@ describe('Dashboard', () => {
     expect(fixture.componentInstance.liquidityRows()).toEqual([]);
   });
   it('shows the payables gap and keeps missing forecast balances out of the chart', () => {
-    const fixture = TestBed.createComponent(Dashboard);
+    const fixture = createDashboard();
     const d = snapshot();
     d.funds.forecast = [{ key: '2026-10', label: 'October', expenses: 20, inflow: 10 }];
     TestBed.inject(HttpTestingController).expectOne('/api/dashboard?company=all').flush(d);
@@ -106,7 +130,7 @@ describe('Dashboard', () => {
     expect(component.kpis().find((k) => k.key === 'profit')?.tone).toBe('negative');
   });
   it('shows a load error without retaining a prior balance', () => {
-    const fixture = TestBed.createComponent(Dashboard);
+    const fixture = createDashboard();
     TestBed.inject(HttpTestingController)
       .expectOne('/api/dashboard?company=all')
       .flush({}, { status: 500, statusText: 'Failure' });
@@ -115,7 +139,7 @@ describe('Dashboard', () => {
     expect(fixture.componentInstance.loading()).toBe(false);
   });
   it('preserves the original executive summaries and dashboard drill-downs', async () => {
-    const fixture = TestBed.createComponent(Dashboard);
+    const fixture = createDashboard();
     const d = snapshot();
     d.books.groups = [{ name: 'Bank Accounts', count: 1, balance: -50 }];
     d.work.items = [
@@ -157,7 +181,7 @@ describe('Dashboard', () => {
     });
   });
   it('does not turn absent per-company inflow into a zero total', () => {
-    const fixture = TestBed.createComponent(Dashboard);
+    const fixture = createDashboard();
     const d = snapshot();
     d.funds.byCompany = [
       {
@@ -209,7 +233,7 @@ describe('Dashboard', () => {
     ).toBe('Not available');
   });
   it('renders unavailable funding estimates without inventing zero or a funding gap', () => {
-    const fixture = TestBed.createComponent(Dashboard);
+    const fixture = createDashboard();
     const d = snapshot();
     Object.assign(d.funds, { threeMonthBudget: null, afterThreeMonths: null, forecast: [], history: [] });
     Object.assign(d.funds.runRate, { method: 'unavailable', monthlyExpense: null, monthlyInflow: null, monthsUsed: 0 });
@@ -229,7 +253,7 @@ describe('Dashboard', () => {
     const { Router } = await import('@angular/router');
     const router = TestBed.inject(Router),
       http = TestBed.inject(HttpTestingController);
-    const fixture = TestBed.createComponent(Dashboard);
+    const fixture = createDashboard();
     const pending = http.expectOne('/api/dashboard?company=all');
     await router.navigateByUrl('/?detailType=posting&detailsCursor=b');
     expect(pending.cancelled).toBe(false);

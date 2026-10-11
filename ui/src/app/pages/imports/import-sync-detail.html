@@ -44,13 +44,13 @@
       />
       <app-kpi-card
         label="Tally balance"
-        [value]="tally()['balance'] == null ? 'Not mapped' : money(tally()['balance'])"
+        [value]="tally()['balance'] == null ? 'Not mapped' : money(tally()['balance'],tally()['currency'])"
         icon="ledgers"
         hint="Balance from the archived Tally reference"
       />
       <app-kpi-card
         label="Difference"
-        [value]="comparisonMoney(comparison()['difference'])"
+        [value]="comparisonMoney(comparison()['difference'],comparison()['currency'])"
         icon="warning"
         [tone]="!comparisonAvailable() ? 'neutral' : inSync() ? 'positive' : 'negative'"
         [hint]="inSync() ? 'Within tolerance' : text(status())"
@@ -116,7 +116,7 @@
           </div>
           <div>
             <dt>Balance</dt>
-            <dd>{{ tally()['balance'] == null ? '—' : money(tally()['balance']) }}</dd>
+            <dd>{{ tally()['balance'] == null ? '—' : money(tally()['balance'],tally()['currency']) }}</dd>
           </div>
           <div>
             <dt>Match method</dt>
@@ -128,7 +128,7 @@
           </div>
           <div>
             <dt>Tolerance</dt>
-            <dd>{{ money(comparison()['tolerance']) }}</dd>
+            <dd>{{ money(comparison()['tolerance'],comparison()['currency']) }}</dd>
           </div>
         </dl>
       </article>
@@ -152,7 +152,7 @@
               <option value="">Not mapped</option>
               @for (row of suggestions(); track row.id) {
                 <option [value]="row.id">
-                  {{ row.name }} · {{ money(row.balance) }}{{ row.current ? ' · current' : '' }}
+                  {{ row.name }} · {{ money(row.balance,row.currency) }}{{ row.current ? ' · current' : '' }}
                 </option>
               }
             </select>
@@ -174,7 +174,7 @@
               @for (row of ledgerHits(); track row.id) {
                 <button type="button" class="suggestion" (click)="pick(row.id)">
                   <strong>{{ row.name }}</strong>
-                  <span>{{ row.groupName }} · {{ money(row.balance) }}</span>
+                  <span>{{ row.groupName }} · {{ money(row.balance,row.currency) }}</span>
                 </button>
               }
             </div>

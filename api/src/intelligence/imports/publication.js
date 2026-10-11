@@ -3,7 +3,11 @@ const { transformRow } = require('../transform/normalize');
 
 function stage(analysis, columns, required, rules) {
   const targets = new Set(columns.map(column => column.target).filter(Boolean));
-  const missingRequired = required.filter(field => !targets.has(field.field_key));
+  const measurements = rules.net_outstanding_formula?.expression === 'bill_amount - paid_amount'
+    ? ['bill_amount', 'paid_amount'] : ['pending_bill_debit', 'pending_bill_credit'];
+  const requiredByKey = new Map(required.map(field => [field.field_key, field]));
+  for (const field of measurements) requiredByKey.set(field, {field_key:field,label:field.replaceAll('_',' ')});
+  const missingRequired = [...requiredByKey.values()].filter(field => !targets.has(field.field_key));
   const duplicateTargets = columns.filter((column,index) => column.target && columns.findIndex(other=>other.target===column.target)!==index);
   const names = new Set();
   const staged = analysis.rows.map(row => {
@@ -11,6 +15,11 @@ function stage(analysis, columns, required, rules) {
     const errors = [...result.errors];
     if (row.rowType === 'DETAIL') {
       if (!result.mapped.account_name) errors.push({ code: 'REQUIRED_FIELD', field: 'account_name' });
+      // A blank opposite debit/credit side is conventional in a populated
+      // financial pair. Two absent measurements cannot establish a zero balance.
+      if (!missingRequired.length && measurements.every(field => result.mapped[field] == null)) {
+        errors.push({ code: 'REQUIRED_FIELD', field: measurements.join(' or ') });
+      }
       const name = String(result.mapped.account_name || '').trim().toLowerCase();
       if (name && names.has(name)) errors.push({ code: 'DUPLICATE_ACCOUNT', field: 'account_name' });
       names.add(name);

@@ -1,9 +1,20 @@
 import { ImportRecord } from '../../services/excel-import';
 import { DataColumn } from '../../shared/data-table';
-import { fullInr } from '../../shared/money';
+import { importMoney } from './import-money';
 
 export function importText(value: unknown) {
   return value == null || value === '' ? '—' : String(value);
+}
+
+export function importDetail(value: unknown): string {
+  if (value == null || value === '') return '—';
+  if (Array.isArray(value)) return value.length ? value.map(importDetail).join('; ') : '—';
+  if (typeof value === 'object') {
+    const entries = Object.entries(value);
+    return entries.length ? entries.map(([key, item]) =>
+      `${key.replace(/([a-z])([A-Z])/g, '$1 $2').replaceAll('_', ' ')}: ${importDetail(item)}`).join('; ') : '—';
+  }
+  return String(value);
 }
 
 export function importRowKey(row: ImportRecord) {
@@ -16,8 +27,8 @@ export function importDate(value: unknown) {
   return Number.isNaN(date.getTime()) ? 'Unknown' : date.toLocaleDateString('en-IN');
 }
 
-export function comparisonMoney(value: unknown) {
-  return value == null ? 'Unavailable' : fullInr(Number(value));
+export function comparisonMoney(value: unknown, currency: unknown = null) {
+  return value == null || !currency ? 'Unavailable' : importMoney(value,currency);
 }
 
 export const exceptionColumns: DataColumn<ImportRecord>[] = [
@@ -34,7 +45,7 @@ export const exceptionColumns: DataColumn<ImportRecord>[] = [
     primary: true,
   },
   { key: 'status', label: 'Status', value: (row) => importText(row['status']), primary: true },
-  { key: 'detail', label: 'Detail', value: (row) => importText(row['detail']) },
+  { key: 'detail', label: 'Detail', value: (row) => importDetail(row['detail']) },
   { key: 'owner', label: 'Owner', value: (row) => importText(row['owner']) },
 ];
 

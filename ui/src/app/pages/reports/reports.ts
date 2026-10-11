@@ -73,8 +73,8 @@ export class Reports {
   readonly voucherError = signal('');
   private readonly directory = inject(CompanyDirectory);
   readonly companies = this.directory.companies;
-  readonly compactInr = compactInr;
-  readonly fullInr = fullInr;
+  readonly compactInr = (value: number | null | undefined) => compactInr(value, this.report()?.currency ?? null);
+  readonly fullInr = (value: number | null | undefined) => fullInr(value, this.report()?.currency ?? null);
   readonly lastMonthEnd = monthEnd;
   readonly recordKey = recordKey;
   readonly voucherColumns = voucherColumns;
@@ -129,7 +129,7 @@ export class Reports {
       key: r.id,
       label: r.name,
       link: r.link,
-      values: [{ label: 'On books', value: r.amount }],
+      values: [{ label: 'Net expense on books', value: r.amount }],
     }));
     if (rows.length > 6)
       result.push({
@@ -176,7 +176,7 @@ export class Reports {
     {
       key: 'amount',
       label: 'On books',
-      value: (r) => fullInr(r.amount),
+      value: (r) => this.fullInr(r.amount),
       numeric: true,
       primary: true,
     },
@@ -228,8 +228,8 @@ export class Reports {
         this.loading.set(false);
         this.loadVouchers(report);
       },
-      error: () => {
-        this.error.set('Expense data could not be loaded. Retry to view this selection.');
+      error: (err) => {
+        this.error.set(err.error?.error || 'Expense data could not be loaded. Retry to view this selection.');
         this.loading.set(false);
       },
     });
@@ -240,8 +240,8 @@ export class Reports {
         this.projects.set(report);
         this.loadingProjects.set(false);
       },
-      error: () => {
-        this.projectError.set('Project data could not be loaded.');
+      error: (err) => {
+        this.projectError.set(err.error?.error || 'Project data could not be loaded.');
         this.loadingProjects.set(false);
       },
     });

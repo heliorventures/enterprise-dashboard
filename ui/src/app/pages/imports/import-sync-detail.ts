@@ -6,7 +6,7 @@ import { DataColumn, DataTable } from '../../shared/data-table';
 import { Icon } from '../../shared/icon';
 import { KpiCard } from '../../shared/kpi-card';
 import { LatestRequest } from '../../shared/latest-request';
-import { fullInr } from '../../shared/money';
+import { importMoney as fullInr } from './import-money';
 import { PageHeader } from '../../shared/page-header';
 import { ImportNav } from './import-nav';
 import { comparisonMoney, importDate } from './import-columns';
@@ -18,6 +18,7 @@ interface Suggestion {
   balance: string | number;
   score?: number;
   current?: boolean;
+  currency?: string | null;
 }
 
 @Component({
@@ -53,14 +54,14 @@ export class ImportSyncDetail {
     {
       key: 'debit',
       label: 'Debit',
-      value: (row) => fullInr(Number(row['debit_amount'] || 0)),
+      value: (row) => fullInr(row['debit_amount'],this.excel()['currency']),
       numeric: true,
       primary: true,
     },
     {
       key: 'credit',
       label: 'Credit',
-      value: (row) => fullInr(Number(row['credit_amount'] || 0)),
+      value: (row) => fullInr(row['credit_amount'],this.excel()['currency']),
       numeric: true,
     },
   ];
@@ -132,8 +133,8 @@ export class ImportSyncDetail {
     return (this.detail()?.['ageing'] || []) as Record<string, unknown>[];
   }
 
-  money(value: unknown) {
-    return fullInr(Number(value || 0));
+  money(value: unknown, currency: unknown = this.excel()['currency']) {
+    return fullInr(value,currency);
   }
 
   text(value: unknown) {

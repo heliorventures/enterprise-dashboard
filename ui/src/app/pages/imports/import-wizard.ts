@@ -10,9 +10,10 @@ import {
   ExcelImportService,
   ExcelUploadResult,
   ExcelValidation,
+  ImportReconciliationSummary,
 } from '../../services/excel-import';
 import { Icon } from '../../shared/icon';
-import { fullInr } from '../../shared/money';
+import { importMoney as fullInr } from './import-money';
 import { PageHeader } from '../../shared/page-header';
 import { ImportNav } from './import-nav';
 
@@ -32,6 +33,8 @@ export class ImportWizard {
   readonly step = signal(1);
   readonly companyId = signal('');
   readonly fileName = signal('');
+  readonly declaredCurrency = signal('');
+  readonly currencies = Intl.supportedValuesOf('currency').filter(code=>code!=='XXX' && code!=='XTS');
   readonly busy = signal('');
   readonly error = signal('');
   readonly progressPercent = signal(0);
@@ -43,7 +46,7 @@ export class ImportWizard {
   readonly processed = signal<{
     file: { id: string };
     batch: Record<string, unknown>;
-    reconciliation: { status: string; count: number; difference: number }[];
+    reconciliation: ImportReconciliationSummary[];
   } | null>(null);
   private file: File | null = null;
   private pollSub?: Subscription;
@@ -83,6 +86,10 @@ export class ImportWizard {
   onFile(event: Event) {
     this.file = (event.target as HTMLInputElement).files?.[0] || null;
     this.fileName.set(this.file?.name || '');
+  }
+  onCurrency(event: Event) {
+    this.declaredCurrency.set((event.target as HTMLSelectElement).value);
+    this.validation.set(null);
   }
 
   analysis() {
@@ -183,6 +190,7 @@ export class ImportWizard {
             return;
           }
           this.result.set(this.ensureAccountMapping(data));
+          this.declaredCurrency.set(data.analysis.currency || '');
           this.step.set(2);
           this.setProgress(0, '', false);
           if (data.companyMismatch) {
@@ -251,7 +259,7 @@ export class ImportWizard {
     this.error.set('');
     this.setProgress(40, 'Checking the rows…');
     this.api
-      .mapping(current.file.id, mappings)
+      .mapping(current.file.id, mappings,this.declaredCurrency() || null)
       .pipe(
         switchMap(() => this.api.validate(current.file.id)),
         takeUntilDestroyed(this.destroyRef),

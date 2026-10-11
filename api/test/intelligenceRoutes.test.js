@@ -339,3 +339,17 @@ test('mapping changes require explicit targets and preserve deliberate null igno
     assert.equal(calls, 1);
   });
 });
+
+test('currency declaration validates supported codes and reaches the authenticated mapping service',async()=>{
+  await stub(imports,'updateMapping',async(_id,_mappings,username,currency)=>({username,currency}),async()=>{
+    for(const currency of ['XXX','bad',123,{}]) {
+      const response=await request(`/${id}/mapping`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({mappings:[],currency})});
+      assert.equal(response.status,400);
+    }
+    for(const currency of ['USD',null]) {
+      const response=await request(`/${id}/mapping`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({mappings:[],currency})});
+      assert.equal(response.status,200);
+      const body=await response.json();assert.equal(body.currency,currency);assert.equal(body.username,'retained-api-user');
+    }
+  });
+});

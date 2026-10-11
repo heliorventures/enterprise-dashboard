@@ -2,11 +2,11 @@ import { Component, DestroyRef, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute } from '@angular/router';
 import { Subscription, interval, startWith, switchMap } from 'rxjs';
-import { ExcelImportService } from '../../services/excel-import';
+import { ExcelImportService, ImportReconciliationSummary } from '../../services/excel-import';
 import { DataColumn, DataTable } from '../../shared/data-table';
 import { Icon } from '../../shared/icon';
 import { KpiCard } from '../../shared/kpi-card';
-import { fullInr } from '../../shared/money';
+import { importMoney as fullInr } from './import-money';
 import { PageHeader } from '../../shared/page-header';
 import { recordKey } from '../../shared/record-columns';
 import { LatestRequest } from '../../shared/latest-request';
@@ -33,7 +33,8 @@ export class ImportDetail {
   private readonly detailRequest = new LatestRequest();
   private readonly issuesRequest = new LatestRequest();
   readonly recordKey = recordKey;
-  readonly fullInr = fullInr;
+  readonly currency = signal<string | null>(null);
+  readonly fullInr = (value: unknown) => fullInr(value,this.currency());
   readonly date = importDate;
   readonly provenanceText = importText;
   readonly loading = signal(true);
@@ -45,10 +46,10 @@ export class ImportDetail {
   readonly progressPercent = signal(0);
   readonly progressLabel = signal('');
   readonly progressActive = signal(false);
-  readonly reconciliation = signal<{ status: string; count: number; difference: number }[]>([]);
+  readonly reconciliation = signal<ImportReconciliationSummary[]>([]);
   readonly issues = signal<IssueRow[]>([]);
   private pollSub?: Subscription;
-  readonly reconColumns: DataColumn<{ status: string; count: number; difference: number }>[] = [
+  readonly reconColumns: DataColumn<ImportReconciliationSummary>[] = [
     {
       key: 'status',
       label: 'Status',
@@ -56,7 +57,7 @@ export class ImportDetail {
       primary: true,
     },
     { key: 'count', label: 'Count', value: (row) => String(row.count), primary: true },
-    { key: 'diff', label: 'Difference', value: (row) => fullInr(row.difference), numeric: true },
+    { key: 'diff', label: 'Difference', value: (row) => fullInr(row.difference,row.currency), numeric: true },
   ];
   readonly issueColumns: DataColumn<IssueRow>[] = [
     { key: 'row', label: 'Row', value: (row) => String(row.source_row_number), primary: true },
@@ -92,6 +93,7 @@ export class ImportDetail {
           String(data.file?.['detectedTitle'] || data.file?.['detected_title'] || ''),
         );
         this.batch.set(data.batch || null);
+        this.currency.set(data.currency || null);
         this.reconciliation.set(data.reconciliation || []);
         this.loading.set(false);
         const status = String(data.file?.['status'] || data.batch?.['status'] || '');
@@ -127,7 +129,10 @@ export class ImportDetail {
         next: (state) => {
           this.progressPercent.set(state.percent);
           this.progressLabel.set(state.message || state.status);
-          if (state.batch) this.batch.set(state.batch);
+          if (state.batch) {
+            this.batch.set(state.batch);
+            this.currency.set(typeof state.batch['currency']==='string' ? state.batch['currency'] : null);
+          }
           if (state.reconciliation?.length) this.reconciliation.set(state.reconciliation);
           if (
             state.status === 'COMPLETED' ||

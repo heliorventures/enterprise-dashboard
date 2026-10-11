@@ -73,6 +73,10 @@ export class ReportView {
   readonly types = signal<string[]>([]);
   readonly loading = signal(true);
   readonly error = signal('');
+  readonly summaryError = signal('');
+  readonly summaryLoading = signal(false);
+  readonly currency = signal<string | null>(null);
+  readonly summaryCurrency = signal<string | null>(null);
   readonly exporting = signal(false);
   readonly cards = signal<ReportRow>({});
   readonly items = signal<ReportRow[]>([]);
@@ -146,19 +150,24 @@ export class ReportView {
   }
 
   money(value: unknown) {
-    return compactInr(Number(value || 0));
+    return compactInr(typeof value === 'number' ? value : null, this.summaryCurrency());
   }
 
   netTone() {
-    return Number(this.cards()['net'] || 0) < 0 ? 'negative' : 'positive';
+    const value = this.cards()['net'];
+    return typeof value !== 'number' ? 'neutral' : value < 0 ? 'negative' : 'positive';
   }
 
   text(value: unknown) {
-    return value == null ? '0' : String(value);
+    return value == null ? 'Not available' : String(value);
   }
 
   load() {
     this.summaryRequest.cancel();
+    this.summaryError.set('');
+    this.summaryLoading.set(false);
+    this.currency.set(null);
+    this.summaryCurrency.set(null);
     if (this.from() && this.to() && this.from() > this.to()) {
       this.request.cancel();
       this.items.set([]);
@@ -188,6 +197,8 @@ export class ReportView {
       }),
       {
         next: (result) => {
+          this.currency.set(result.currency ?? null);
+          this.summaryCurrency.set(result.currency ?? null);
           this.items.set(result.items || []);
           this.cards.set(result.cards || {});
           this.period.set(result.period);
@@ -203,7 +214,10 @@ export class ReportView {
     );
   }
 
-  private loadSummary() {
+  loadSummary() {
+    this.summaryLoading.set(true);
+    this.summaryError.set('');
+    this.cards.set({});
     this.summaryRequest.run(
       this.api.get('summary', {
         company: this.company(),
@@ -213,8 +227,14 @@ export class ReportView {
       }),
       {
         next: (result) => {
+          this.summaryLoading.set(false);
+          this.summaryCurrency.set(result.currency ?? null);
           this.cards.set(result.cards || {});
           if (result.types) this.types.set(result.types);
+        },
+        error: (err) => {
+          this.summaryLoading.set(false);
+          this.summaryError.set(err.error?.error || 'Summary could not be loaded. Retry to view totals.');
         },
       },
     );
@@ -226,8 +246,17 @@ export class ReportView {
     this.exporting.set(true);
     downloadCsv(
       `${this.kind()}-report.csv`,
-      columns.map((column) => column.label),
-      this.items().map((row) => columns.map((column) => column.value(row))),
+      [...columns.map((column) => column.label), 'Currency'],
+      this.items().map((row) => [
+        ...columns.map((column) => {
+          if (['turnover', 'inflow', 'outflow', 'net', 'amount'].includes(column.key)) {
+            const value = column.key === 'amount' ? row['turnover'] ?? row['amount'] : row[column.key];
+            return typeof value === 'number' ? value : null;
+          }
+          return column.value(row);
+        }),
+        this.currency() || 'Unknown',
+      ]),
     );
     this.exporting.set(false);
   }
@@ -238,7 +267,7 @@ export class ReportView {
         row['date'] ||
         row['week_label'] ||
         row['month_key'] ||
-        row['voucher_type'] ||
+        (row['voucher_type'] ? JSON.stringify([row['voucher_type'], row['resolved_type'] ?? null]) : '') ||
         row['party'] ||
         row['company_id'] ||
         index,
@@ -256,7 +285,7 @@ export class ReportView {
             : key === 'outflow'
               ? 'Payments / purchases'
               : 'Net',
-      value: (row) => fullInr(Number(row[key] || 0)),
+      value: (row) => fullInr(typeof row[key] === 'number' ? row[key] as number : null, this.currency()),
       numeric: true,
       primary: true,
     });
@@ -424,7 +453,7 @@ export class ReportView {
       {
         key: 'amount',
         label: 'Amount',
-        value: (row) => fullInr(Number(row['turnover'] || row['amount'] || 0)),
+        value: (row) => fullInr(typeof (row['turnover'] ?? row['amount']) === 'number' ? (row['turnover'] ?? row['amount']) as number : null, this.currency()),
         numeric: true,
         primary: true,
       },

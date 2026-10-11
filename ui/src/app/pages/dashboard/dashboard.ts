@@ -1,3 +1,4 @@
+import { CompanyDirectory } from '../../services/company-directory';
 import { PageDrawer } from '../../shared/page-drawer';
 import {
   ProjectSummary,
@@ -31,6 +32,7 @@ interface FundingRow extends Partial<CompanyFunds> {
 }
 
 @Component({
+  providers: [CompanyDirectory],
   selector: 'app-dashboard',
   imports: [
     PageDrawer,
@@ -52,7 +54,8 @@ export class Dashboard {
   private readonly route = inject(ActivatedRoute);
   private readonly request = new LatestRequest();
   readonly selectedCompany = signal('all');
-  readonly companies = signal<DashboardData['companies']>([]);
+  private readonly directory = inject(CompanyDirectory);
+  readonly companies = this.directory.companies;
   readonly loading = signal(true);
   readonly error = signal('');
   readonly data = signal<DashboardData | null>(null);
@@ -62,8 +65,8 @@ export class Dashboard {
       ? 'All companies · combined, before eliminations'
       : this.companies().find((c) => c.id === this.selectedCompany())?.name || 'Selected company',
   );
-  readonly compactInr = compactInr;
-  readonly fullInr = fullInr;
+  readonly compactInr = (value: number | null | undefined) => compactInr(value, this.data()?.currency ?? null);
+  readonly fullInr = (value: number | null | undefined) => fullInr(value, this.data()?.currency ?? null);
   readonly recordKey = recordKey;
   readonly accountKey = (r: BankAccount) => `${r.companyId}:${r.kind}:${r.name}`;
 
@@ -148,7 +151,7 @@ export class Dashboard {
       });
     if (f && f.cashAndBank < f.payables)
       rows.push({
-        title: `${compactInr(f.payables - f.cashAndBank)} cash-to-payables gap`,
+        title: `${this.compactInr(f.payables - f.cashAndBank)} cash-to-payables gap`,
         detail:
           'Recorded payables exceed cash and bank balances. Review obligations and their payment dates.',
         path: '/ledgers',
@@ -159,7 +162,7 @@ export class Dashboard {
     if (f?.afterThreeMonths != null && f.afterThreeMonths < 0)
       rows.push({
         title: 'Model projects a funding gap',
-        detail: `${fullInr(-f.afterThreeMonths)} below zero after three model months. Validate collections and spending assumptions.`,
+        detail: `${this.fullInr(-f.afterThreeMonths)} below zero after three model months. Validate collections and spending assumptions.`,
         path: '/reports',
         query: { company: this.selectedCompany() },
         action: 'Review expenses',
@@ -167,7 +170,7 @@ export class Dashboard {
       });
     if (f && f.receivables > 0)
       rows.push({
-        title: `${compactInr(f.receivables)} to review for collection`,
+        title: `${this.compactInr(f.receivables)} to review for collection`,
         detail:
           'Customer ledger balances are not aged here. Confirm recoverability and expected receipt dates.',
         path: '/ledgers',
@@ -250,7 +253,7 @@ export class Dashboard {
       },
     ];
   });
-  readonly reportedMoney = reportedMoney;
+  readonly reportedMoney = (value: number | null | undefined) => reportedMoney(value, this.data()?.currency ?? null);
   readonly projectColumns = projectActivityColumns;
   readonly groupKey = (r: LedgerGroupTotal) => r.name;
   readonly groupColumns: DataColumn<LedgerGroupTotal>[] = [
@@ -267,7 +270,7 @@ export class Dashboard {
     {
       key: 'balance',
       label: 'Signed closing balance',
-      value: (r) => fullInr(r.balance),
+      value: (r) => this.fullInr(r.balance),
       numeric: true,
       primary: true,
     },
@@ -316,27 +319,27 @@ export class Dashboard {
     {
       key: 'bank',
       label: 'Bank balance',
-      value: (r) => reportedMoney(r.bank),
+      value: (r) => this.reportedMoney(r.bank),
       numeric: true,
       primary: true,
     },
     {
       key: 'inflow',
       label: 'Last-month inflow activity',
-      value: (r) => reportedMoney(r.lastMonthInflow),
+      value: (r) => this.reportedMoney(r.lastMonthInflow),
       numeric: true,
     },
     {
       key: 'cash',
       label: 'Cash & bank',
-      value: (r) => reportedMoney(r.cashAndBank),
+      value: (r) => this.reportedMoney(r.cashAndBank),
       numeric: true,
       primary: true,
     },
     {
       key: 'headroom',
       label: 'Cash less payables',
-      value: (r) => reportedMoney(this.fundingHeadroom(r)),
+      value: (r) => this.reportedMoney(this.fundingHeadroom(r)),
       tone: (r) =>
         this.fundingHeadroom(r) == null ? 'neutral' : balanceTone(this.fundingHeadroom(r)!),
       numeric: true,
@@ -345,7 +348,7 @@ export class Dashboard {
     {
       key: 'next',
       label: 'Next-month model balance',
-      value: (r) => reportedMoney(r.nextMonthFund),
+      value: (r) => this.reportedMoney(r.nextMonthFund),
       tone: (r) => (r.nextMonthFund == null ? 'neutral' : balanceTone(r.nextMonthFund)),
       numeric: true,
       primary: true,
@@ -353,20 +356,20 @@ export class Dashboard {
     {
       key: 'spend',
       label: 'Last-month spend / estimate',
-      value: (r) => reportedMoney(r.lastMonthExpenses),
+      value: (r) => this.reportedMoney(r.lastMonthExpenses),
       numeric: true,
     },
     {
       key: 'receivables',
       label: 'Receivables',
-      value: (r) => reportedMoney(r.receivables),
+      value: (r) => this.reportedMoney(r.receivables),
       numeric: true,
     },
-    { key: 'payables', label: 'Payables', value: (r) => reportedMoney(r.payables), numeric: true },
+    { key: 'payables', label: 'Payables', value: (r) => this.reportedMoney(r.payables), numeric: true },
     {
       key: 'budget',
       label: 'Next-month spending estimate',
-      value: (r) => reportedMoney(r.nextMonthNeed),
+      value: (r) => this.reportedMoney(r.nextMonthNeed),
       numeric: true,
     },
     {
@@ -423,7 +426,7 @@ export class Dashboard {
     {
       key: 'value',
       label: 'Reported balance',
-      value: (r) => fullInr(r.available),
+      value: (r) => this.fullInr(r.available),
       numeric: true,
       primary: true,
     },
@@ -436,7 +439,7 @@ export class Dashboard {
     {
       key: 'raw',
       label: 'Signed source balance',
-      value: (r) => reportedMoney(r.rawBalance),
+      value: (r) => this.reportedMoney(r.rawBalance),
       secondary: () => 'Sign preserved for reconciliation; source convention must be confirmed.',
       numeric: true,
       primary: true,
@@ -455,7 +458,7 @@ export class Dashboard {
           payables: 'Payables',
           cashAndBank: 'Cash & bank',
         }[key],
-        value: (r: CompanyFinancial) => (r.ledgerCount ? fullInr(r[key]) : 'Not available'),
+        value: (r: CompanyFinancial) => (r.ledgerCount ? this.fullInr(r[key]) : 'Not available'),
         numeric: true,
         primary: key === 'profit' || key === 'cashAndBank',
       }),
@@ -483,12 +486,11 @@ export class Dashboard {
     this.data.set(null);
     this.request.run(this.api.getDashboard(this.selectedCompany()), {
       next: (d) => {
-        this.companies.set(d.companies);
         this.data.set(d);
         this.loading.set(false);
       },
-      error: () => {
-        this.error.set('Financial overview could not be loaded. Retry or check Data operations.');
+      error: (err) => {
+        this.error.set(err.error?.error || 'Financial overview could not be loaded. Retry or check Data operations.');
         this.loading.set(false);
       },
     });

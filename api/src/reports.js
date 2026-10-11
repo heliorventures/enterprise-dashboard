@@ -2,6 +2,7 @@ const db = require('./db');
 const { companyFilter } = require('./filters');
 const { fundsOnHand, lastCompleteMonthKey, monthLabel, money } = require('./funds');
 const { isExpenseGroup } = require('./accountClassification');
+const { withReportingCurrency } = require('./reportCurrency');
 
 function toNumber(value) {
   return Number(value) || 0;
@@ -24,7 +25,7 @@ function nestExpenses(rows) {
       group = { name: row.GroupCategory, total: 0, ledgerCount: 0, ledgers: [] };
       company.groups.push(group);
     }
-    const balance = fundsOnHand(row.CurrentBalance);
+    const balance = money(row.CurrentBalance);
     const ledger = {
       id: row.LedgerID,
       name: row.LedgerName,
@@ -40,6 +41,14 @@ function nestExpenses(rows) {
     company.ledgerCount += 1;
   }
   for (const company of companies) {
+    // Match dashboard's absolute-of-company-net basis, retaining corrections.
+    // Apply one orientation to every child so drill-downs reconcile exactly.
+    const direction = company.total < 0 ? -1 : 1;
+    company.total = fundsOnHand(company.total);
+    for (const group of company.groups) {
+      group.total = money(group.total * direction);
+      for (const ledger of group.ledgers) ledger.balance = money(ledger.balance * direction);
+    }
     company.groups.sort((left, right) => Math.abs(right.total) - Math.abs(left.total) || left.name.localeCompare(right.name));
     for (const group of company.groups) {
       group.ledgers.sort((left, right) => Math.abs(right.balance) - Math.abs(left.balance) || left.name.localeCompare(right.name));
@@ -194,6 +203,6 @@ module.exports = {
   isExpenseGroup,
   nestExpenses,
   nestProjects,
-  expenseReport: (query = {}) => { companyFilter(query.company); return db.readSnapshot(() => expenseReport(query)); },
-  projectReport: (query = {}) => { companyFilter(query.company); return db.readSnapshot(() => projectReport(query)); },
+  expenseReport: withReportingCurrency(expenseReport),
+  projectReport: withReportingCurrency(projectReport),
 };

@@ -253,16 +253,27 @@ function detectStructure(valuesByRow, colCount) {
     if (!titleRow && /report/i.test(joined)) titleRow = r;
     if (!periodRow && /from\s*:/i.test(joined)) periodRow = r;
     if (titleRow && periodRow && r > periodRow && !entityRow && normalizeSpace(valuesByRow[r][0])) entityRow = r;
-    if (!headerRow && /particular|ledger|party name|account name/i.test(joined)) headerRow = r;
-    if (headerRow && r === headerRow + 1 && /bill amount|dr amt|paid amount/i.test(joined)) subHeaderRow = r;
+    if (!headerRow && valuesByRow[r].some(value => /^(particulars?|ledger(?: name)?|party(?: name)?|account name|supplier|customer|vendor|name)$/i.test(normalizeSpace(value)))) headerRow = r;
+    if (headerRow && r === headerRow + 1) {
+      // A child header has labels in financial columns, never measurements.
+      // Looking only at the existence of a next row drops the first account.
+      const values = valuesByRow[r].filter(value => value != null && value !== '');
+      const accountColumn = buildColumns(valuesByRow[headerRow], [], colCount).find(column => column.target === 'account_name');
+      const accountLabel = accountColumn ? valuesByRow[r][accountColumn.index - 1] : null;
+      const continuesHeader = accountLabel == null || normalizeSpace(accountLabel) === normalizeSpace(valuesByRow[headerRow][accountColumn.index - 1]);
+      const financialLabels = values.filter(value => /^(dr|cr)(\s*(amt|amount))?$|^(debit|credit|bill amount|paid amount)$/i.test(normalizeSpace(value)));
+      const hasMeasurement = values.some(value => typeof value === 'number' || parseDecimal(value) !== undefined && parseDecimal(value) !== null);
+      if (continuesHeader && financialLabels.length && !hasMeasurement) subHeaderRow = r;
+    }
   }
+  if (!headerRow) throw Object.assign(new Error('Cannot identify the account header row in this workbook'), { status: 400, code: 'HEADER_NOT_FOUND' });
   return {
     titleRow,
     periodRow,
     entityRow,
-    headerRow: headerRow || 4,
-    subHeaderRow: subHeaderRow || (headerRow ? headerRow + 1 : 5),
-    dataStartRow: (subHeaderRow || (headerRow ? headerRow + 1 : 5)) + 1,
+    headerRow,
+    subHeaderRow,
+    dataStartRow: (subHeaderRow || headerRow) + 1,
     colCount,
   };
 }
@@ -289,7 +300,9 @@ function classifyRow(raw, columns) {
     const value = raw[col.canonical];
     return value != null && value !== '';
   });
-  if (!hasAmount) return name ? 'GROUP' : 'IGNORED';
+  const hasAccountData = columns.some(col => !['account_name','particulars'].includes(col.target)
+    && raw[col.canonical] != null && raw[col.canonical] !== '');
+  if (!hasAmount && !hasAccountData) return name ? 'GROUP' : 'IGNORED';
   return 'DETAIL';
 }
 
@@ -316,6 +329,10 @@ async function analyzeWorkbook(source) {
   const title = normalizeSpace(valuesByRow[structure.titleRow]?.[0] || '');
   const period = parsePeriod(valuesByRow[structure.periodRow]?.[0]);
   const entity = parseEntity(valuesByRow[structure.entityRow]?.[0]);
+  const currencyLabels = Object.values(valuesByRow).slice(0, structure.dataStartRow - 1).flat()
+    .filter(value => typeof value === 'string').map(value => /^\s*(?:report\s+)?currency\s*:\s*([A-Za-z]{3})\s*$/i.exec(value)?.[1]).filter(Boolean);
+  const currencies = [...new Set(currencyLabels.map(value => require('../../reportCurrency').currencyCode(value)))];
+  if (currencies.includes(null) || currencies.length > 1) throw Object.assign(new Error('Workbook currency must declare one supported currency code'), {status:400});
   const rows = [];
   let path = [];
   let lastType = null;
@@ -354,6 +371,7 @@ async function analyzeWorkbook(source) {
     title,
     period,
     entity,
+    currency: currencies[0] || null,
     columns,
     rows,
     preview: rows.filter((row) => row.rowType === 'DETAIL').slice(0, 50),
