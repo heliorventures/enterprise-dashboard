@@ -5,7 +5,7 @@
       {{ exporting() ? 'Exporting…' : 'Export CSV' }}
     </button>
   </app-page-header>
-  <app-report-nav />
+  <app-report-nav [scope]="navigationScope()" />
 
   @if (error()) {
     <p class="banner" role="alert">{{ error() }}</p>

@@ -244,10 +244,16 @@ async function mapRecon(id,tallyLedgerId,username) {
   return detail(nextId);
 }
 
-async function listLedgers({ company, q } = {}) {
-  const tallyId = Number(company);
-  if (!Number.isInteger(tallyId) || tallyId <= 0) return [];
-  const ledgers = await tally.listLedgers(tallyId);
+async function listLedgers({ reconciliationId, q } = {}) {
+  // Candidate identity and balance must come from the same immutable reference
+  // that mapRecon will use, even after a newer Tally upload replaces live IDs.
+  const result = await db.query(`SELECT b.frozen_inputs
+    FROM intel_current_reconciliations r
+    JOIN intel_import_batches b ON b.id=r.import_batch_id
+    WHERE r.id=$1`, [reconciliationId]);
+  if (!result.rowCount) throw Object.assign(new Error('Publication changed; reload this reconciliation'), { status: 409 });
+  const ledgers = result.rows[0].frozen_inputs?.reference?.ledgers;
+  if (!Array.isArray(ledgers)) throw Object.assign(new Error('Reprocess this legacy import before changing its reconciliation'), { status: 409 });
   const needle = tally.normalizeName(q || '');
   if (!needle) return ledgers.slice(0, 80);
   return ledgers

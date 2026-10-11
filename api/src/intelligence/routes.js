@@ -112,11 +112,6 @@ function registerExcelImportRoutes(app) {
   app.get('/api/imports/accounts/:id', wrap(async (req, res) => {
     res.json(await dashboard.accountDetail(reports.uuid(req.params.id)));
   }));
-  app.get('/api/imports/tally-ledgers', wrap(async (req, res) => {
-    reports.keys(req.query, ['company', 'q']);
-    const company = reports.company(req.query.company);
-    res.json(await sync.listLedgers({ company: company === null ? 'all' : company, q: reports.text(req.query.q, 'q') }));
-  }));
   app.get('/api/imports/sync', wrap(async (req, res) => {
     const mapped = reports.text(req.query.mapped, 'mapped', 20);
     if (mapped && !['all', 'manual', 'unmapped', 'auto'].includes(mapped)) throw reports.bad('Unsupported mapped filter');
@@ -126,6 +121,10 @@ function registerExcelImportRoutes(app) {
   }));
   app.get('/api/imports/sync/:id', wrap(async (req, res) => {
     res.json(await sync.detail(reports.uuid(req.params.id)));
+  }));
+  app.get('/api/imports/sync/:id/ledgers', wrap(async (req, res) => {
+    reports.keys(req.query, ['q']);
+    res.json(await sync.listLedgers({ reconciliationId: reports.uuid(req.params.id), q: reports.text(req.query.q, 'q') }));
   }));
   app.put('/api/imports/sync/:id/map', wrap(async (req, res) => {
     reports.keys(req.body, ['tallyLedgerId']);

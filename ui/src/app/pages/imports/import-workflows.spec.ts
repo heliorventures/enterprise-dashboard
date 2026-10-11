@@ -131,10 +131,10 @@ describe('Import workflow correctness', () => {
 
   it('cancels ledger search when the search input is cleared', () => {
     const component = TestBed.createComponent(ImportSyncDetail).componentInstance;
-    component.detail.set({ company: { tallyCompanyId: '2' } });
+    component.detail.set({ id: 'generation-recon', company: { tallyCompanyId: '2' } });
     const http = TestBed.inject(HttpTestingController);
     component.searchLedgers({ target: { value: 'Party' } } as unknown as Event);
-    const request = http.expectOne('/api/imports/tally-ledgers?company=2&q=Party');
+    const request = http.expectOne('/api/imports/sync/generation-recon/ledgers?q=Party');
     component.searchLedgers({ target: { value: '' } } as unknown as Event);
     expect(request.cancelled).toBe(true);
     expect(component.ledgerHits()).toEqual([]);

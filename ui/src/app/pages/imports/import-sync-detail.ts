@@ -15,7 +15,7 @@ interface Suggestion {
   id: number;
   name: string;
   groupName?: string;
-  balance: number;
+  balance: string | number;
   score?: number;
   current?: boolean;
 }
@@ -175,13 +175,13 @@ export class ImportSyncDetail {
   searchLedgers(event: Event) {
     const q = (event.target as HTMLInputElement).value;
     this.ledgerQuery.set(q);
-    const company = String(this.company()['tallyCompanyId'] || '');
-    if (!company || !q.trim()) {
+    const reconciliationId = String(this.detail()?.['id'] || '');
+    if (!reconciliationId || !q.trim()) {
       this.searchRequest.cancel();
       this.ledgerHits.set([]);
       return;
     }
-    this.searchRequest.run(this.api.tallyLedgers(company, q), {
+    this.searchRequest.run(this.api.tallyLedgers(reconciliationId, q), {
       next: (rows) => this.ledgerHits.set(rows || []),
       error: () => this.ledgerHits.set([]),
     });

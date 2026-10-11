@@ -45,13 +45,39 @@ async function stub(object, key, implementation, run) {
 }
 
 test('all retained reads and exception decisions remain protected by the real session guard', async () => {
-  for (const path of ['/quality', '/audit', '/exceptions', `/accounts/${id}`, '/reports/outstanding.csv', '/reports/reconciliation.csv', '/reports/exceptions.csv', '/reports/quality.csv']) {
+  for (const path of ['/quality', '/audit', '/exceptions', `/accounts/${id}`, `/sync/${id}/ledgers`, '/reports/outstanding.csv', '/reports/reconciliation.csv', '/reports/exceptions.csv', '/reports/quality.csv']) {
     assert.equal((await fetch(`${origin}/api/imports${path}`)).status, 401, path);
   }
   const response = await fetch(`${origin}/api/imports/exceptions/${id}`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: '{}',
   });
   assert.equal(response.status, 401);
+});
+
+test('mapping search returns frozen ledger IDs and balances even after live ledgers change', async () => {
+  const ledgers = Array.from({ length: 20 }, (_, index) => ({
+    id: index + 1, name: `Supplier ${index + 1}`, normalized: `supplier ${index + 1}`,
+    groupName: 'Creditors', balance: '125.01',
+  }));
+  await stub(db, 'query', async (sql, params) => {
+    assert.match(sql, /intel_current_reconciliations/);
+    assert.deepEqual(params, [id]);
+    return { rowCount: 1, rows: [{ frozen_inputs: { reference: { ledgers } } }] };
+  }, async () => {
+    const response = await request(`/sync/${id}/ledgers?q=Supplier%2020`);
+    assert.equal(response.status, 200);
+    const rows = await response.json();
+    assert.equal(rows.find(row => row.id === 20)?.balance, '125.01');
+  });
+});
+
+test('mapping search rejects superseded and legacy generations instead of using live ledgers', async () => {
+  for (const [rows, status] of [[[], 409], [[{ frozen_inputs: null }], 409]]) {
+    await stub(db, 'query', async () => ({ rowCount: rows.length, rows }), async () => {
+      const response = await request(`/sync/${id}/ledgers?q=Supplier`);
+      assert.equal(response.status, status);
+    });
+  }
 });
 
 test('quality and audit use static routes and retain their service payloads', async () => {
@@ -121,6 +147,7 @@ test('malformed identities, scalar filters and paging fail safely before service
       '/exceptions?status=arbitrary', '/audit?limit=-1', '/audit?limit=501', '/audit?entity[]=exception',
       '/accounts/not-a-uuid', '/sync/not-a-uuid', '/not-a-uuid/preview', '/not-a-uuid/progress', '/not-a-uuid',
       '/sync?mapped=invalid', '/sync?minDifference=NaN', '/sync?minDifference=-1',
+      '/sync/not-a-uuid/ledgers', `/sync/${id}/ledgers?company=2`, `/sync/${id}/ledgers?q=a&q=b`,
     ]) {
       const response = await request(path);
       assert.equal(response.status, 400, path);

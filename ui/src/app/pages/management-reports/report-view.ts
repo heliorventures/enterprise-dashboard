@@ -93,6 +93,7 @@ export class ReportView {
       .join(' · '),
   );
   readonly columns = computed(() => this.columnsFor(this.kind()));
+  readonly navigationScope = signal<Record<string, string>>({});
 
   constructor() {
     combineLatest([this.route.paramMap, this.route.queryParamMap])
@@ -102,6 +103,7 @@ export class ReportView {
         this.type.set(query.get('type') || '');
         if (query.has('from')) this.from.set(query.get('from') || '');
         if (query.has('to')) this.to.set(query.get('to') || '');
+        if (query.has('minAmount')) this.minAmount.set(query.get('minAmount') || '100000');
         this.kind.set(params.get('kind') || 'daily');
         this.load();
       });
@@ -166,6 +168,13 @@ export class ReportView {
       return;
     }
     this.loading.set(true);
+    this.navigationScope.set({
+      company: this.company(),
+      type: this.type(),
+      from: this.from(),
+      to: this.to(),
+      minAmount: this.minAmount(),
+    });
     this.error.set('');
     this.items.set([]);
     this.cards.set({});

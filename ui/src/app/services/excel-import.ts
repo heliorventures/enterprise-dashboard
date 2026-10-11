@@ -254,10 +254,10 @@ export class ExcelImportService {
     return this.http.put<Record<string, unknown>>(`/api/imports/sync/${id}/map`, { tallyLedgerId });
   }
 
-  tallyLedgers(company: string, q = '') {
-    return this.http.get<{ id: number; name: string; groupName?: string; balance: number }[]>(
-      '/api/imports/tally-ledgers',
-      { params: this.params({ company, q }) },
+  tallyLedgers(reconciliationId: string, q = '') {
+    return this.http.get<{ id: number; name: string; groupName?: string; balance: string | number }[]>(
+      `/api/imports/sync/${reconciliationId}/ledgers`,
+      { params: this.params({ q }) },
     );
   }
 
