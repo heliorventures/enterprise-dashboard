@@ -1,5 +1,6 @@
 const { entities } = require("./reportingEntities");
 const { isEmptyList } = require('./sourceTree');
+const { normalizeCurrency } = require('./currency');
 const MASTER_TYPES = new Set([
   "GROUP",
   "VOUCHERTYPE",
@@ -140,9 +141,9 @@ function buildProjection(
     model.coverage[row.collection] = (model.coverage[row.collection] || 0) + 1;
     const p = row.payload;
     if (row.collection === "COMPANY") {
-      // BaseCurrencyName describes the company's accounting currency. Keep
-      // CurrencyName as an exposed native alternative, never infer INR.
-      const baseCurrency=text(p, "BASECURRENCYNAME"),currency=text(p, "CURRENCYNAME");
+      // Base currency takes precedence. Keep absent source metadata absent here;
+      // publication resolves it against the company configuration in the database.
+      const baseCurrency=normalizeCurrency(text(p, "BASECURRENCYNAME")),currency=normalizeCurrency(text(p, "CURRENCYNAME"));
       model.company.currency = baseCurrency || currency;
       if(baseCurrency&&currency&&key(baseCurrency)!==key(currency))
         issue(row,"BASECURRENCYNAME","CURRENCY_LABEL_DIFFERENCE","Company currency labels differ; base currency is used. Inspect the archived company record.","warning");
@@ -318,7 +319,7 @@ function buildProjection(
       root_group: root("GROUP", group, row),
       opening_balance: money(row, p, "OPENINGBALANCE"),
       closing_balance: money(row, p, "CLOSINGBALANCE", true),
-      currency: text(p, "CURRENCYNAME"),
+      currency: normalizeCurrency(text(p, "CURRENCYNAME")),
       ordinal: row.ordinal,
     });
   }
@@ -538,7 +539,7 @@ function buildProjection(
       severity: "warning",
       code: "MISSING_CURRENCY",
       message:
-        "Company reporting currency is unavailable; cross-company money totals are disabled",
+        "Source currency is absent; publication uses the company's configured currency (INR for new companies)",
     });
   return model;
 }

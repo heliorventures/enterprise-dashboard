@@ -31,6 +31,8 @@ try {
         }
         & "$PSScriptRoot/deploy-on-vps.ps1" -Tag $tag @options
         if ($global:DeploymentSshTestCalls[-1] -notcontains $expected) { throw 'Standalone deployment authentication differs' }
+        if ($global:DeploymentSshTestInput -notmatch 'candidates=') { throw 'Standalone deploy must discover uploaded releases' }
+        if ($global:DeploymentSshTestInput -notmatch 'Multiple uploads found') { throw 'Ambiguous releases must require an explicit staging path' }
         $staging = "/opt/apps/enterprise-dashboard/incoming/$tag.0123456789abcdef0123456789abcdef"
         & "$PSScriptRoot/migrate-database.ps1" -Tag $tag -StagingDir $staging @options
         if ($global:DeploymentSshTestCalls[-1] -notcontains $expected) { throw 'Migration authentication differs' }

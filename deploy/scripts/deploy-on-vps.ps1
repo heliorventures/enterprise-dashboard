@@ -15,10 +15,13 @@ Assert-RemoteInputs $VpsHost $VpsUser $AppDir $PublicBaseUrl
 if ($StagingDir -and $StagingDir -notmatch ('^' + [regex]::Escape("$AppDir/incoming/$Tag.") + '[a-f0-9]{32}$')) { throw 'Invalid staging directory' }
 $remote = "${VpsUser}@${VpsHost}"
 $sshOptions = @(Get-SshOptions $SshPort $SshIdentityFile -Interactive:(-not $NonInteractive))
-if ($StagingDir) {
-    $command = "bash '$StagingDir/deploy.sh' '$AppDir' '$Tag' '$PublicBaseUrl' '$StagingDir'"
-} else {
-    # The target release contains its own matching helper. This also restores archived releases.
-    $command = "if test -f '$AppDir/releases/$Tag/deploy.sh'; then bash '$AppDir/releases/$Tag/deploy.sh' '$AppDir' '$Tag' '$PublicBaseUrl'; else bash '$AppDir/archive/$Tag/deploy.sh' '$AppDir' '$Tag' '$PublicBaseUrl'; fi"
+$resolver = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../resolve-release.sh'))
+$remoteScript = ("set -- '$AppDir' '$Tag' '$PublicBaseUrl' '$StagingDir'`n" + $resolver).Replace("`r`n", "`n")
+$previousEncoding = $OutputEncoding
+try {
+    $OutputEncoding = New-Object Text.UTF8Encoding($false)
+    $remoteScript | & ssh @sshOptions -T $remote "tr -d '\r' | bash -se"
+    if ($LASTEXITCODE -ne 0) { throw "Deployment failed (SSH exit code $LASTEXITCODE). Review the error above." }
+} finally {
+    $OutputEncoding = $previousEncoding
 }
-Invoke-Native ssh ($sshOptions + @($remote, $command))

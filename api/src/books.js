@@ -39,9 +39,11 @@ async function listLedgers({ company = 'all', q = '', group = '', page = 1, page
       `
         SELECT
           l."LedgerID", l."CompanyID", c."CompanyName", l."LedgerName", l."GroupCategory", l."CurrentBalance",
-          (SELECT CASE WHEN s.coverage->>'uniformCurrency' = 'true' THEN s.currency END FROM finance_snapshots s WHERE s.company_id=l."CompanyID") AS currency
+          CASE WHEN s.company_id IS NULL THEN c."Currency"
+            WHEN s.coverage->>'uniformCurrency' = 'true' THEN s.currency END AS currency
         FROM "Ledgers" l
         INNER JOIN "Companies" c ON c."CompanyID" = l."CompanyID"
+        LEFT JOIN finance_snapshots s ON s.company_id=l."CompanyID"
         WHERE ${where}
         ORDER BY c."CompanyName", l."GroupCategory", l."LedgerName", l."LedgerID"
         LIMIT $4 OFFSET $5
@@ -128,9 +130,11 @@ async function listVouchers({
         SELECT
           v."VoucherID", v."CompanyID", c."CompanyName", v."VoucherDate", v."VoucherType",
           v."Amount", v."Narration", v."ProjectID", p."ProjectName", v."VoucherNumber", v."PartyLedgerName",
-          (SELECT CASE WHEN s.coverage->>'uniformCurrency' = 'true' THEN s.currency END FROM finance_snapshots s WHERE s.company_id=v."CompanyID") AS currency
+          CASE WHEN s.company_id IS NULL THEN c."Currency"
+            WHEN s.coverage->>'uniformCurrency' = 'true' THEN s.currency END AS currency
         FROM "Vouchers" v
         INNER JOIN "Companies" c ON c."CompanyID" = v."CompanyID"
+        LEFT JOIN finance_snapshots s ON s.company_id=v."CompanyID"
         LEFT JOIN "Projects" p ON p."ProjectID" = v."ProjectID"
         WHERE ${where}
         ORDER BY v."VoucherDate" DESC, v."VoucherID" DESC

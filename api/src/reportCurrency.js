@@ -1,15 +1,17 @@
 const db = require('./db');
 const { companyFilter } = require('./filters');
+const { normalizeCurrency } = require('./currency');
 
 const supported = new Set(Intl.supportedValuesOf('currency'));
 function currencyCode(value) {
-  const code = typeof value === 'string' ? value.trim().toUpperCase() : '';
+  const code = normalizeCurrency(value);
   return supported.has(code) && code !== 'XXX' && code !== 'XTS' ? code : null;
 }
 
 async function reportingCurrency(company = 'all') {
   const result = await db.query(
-    `SELECT s.currency, s.coverage->>'uniformCurrency' AS uniform_currency
+    `SELECT COALESCE(NULLIF(btrim(s.currency),''),c."Currency") AS currency,
+       CASE WHEN s.company_id IS NULL THEN 'true' ELSE s.coverage->>'uniformCurrency' END AS uniform_currency
      FROM "Companies" c LEFT JOIN finance_snapshots s ON s.company_id=c."CompanyID"
      WHERE c."IsActive" = true AND ($1=0 OR c."CompanyID"=$1)`,
     [companyFilter(company)],

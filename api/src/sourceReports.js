@@ -49,7 +49,7 @@ async function overview(query = {}, client) {
   const id = companyFilter(query.company);
   const period = await periodOf(query, id, client);
   const companies = await client.query(
-    `SELECT c."CompanyID"::text id,c."CompanyName" name,s.batch_id,s.currency,
+    `SELECT c."CompanyID"::text id,c."CompanyName" name,s.batch_id,COALESCE(s.currency,c."Currency") AS currency,
     s.books_from,s.starting_from,s.captured_at,s.applied_at,s.coverage,
     (SELECT count(*)::int FROM source_validation_issues i WHERE i.batch_id=s.batch_id) issue_count
     FROM "Companies" c LEFT JOIN finance_snapshots s ON s.company_id=c."CompanyID"
