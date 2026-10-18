@@ -117,6 +117,14 @@ function normalizeSpace(text) {
   return String(text || '').replace(/\s+/g, ' ').trim();
 }
 
+// Account names are identities. Tally and ERP systems allow names that differ only
+// by repeated spaces (for example "MACHINERY  2%" and "MACHINERY 2%") and treat them
+// as different accounts, so internal spacing is preserved. Only characters that
+// cannot be typed as a normal space (tabs, line breaks, no-break spaces) become one.
+function cleanName(text) {
+  return String(text ?? '').replace(/[\u0000]/g, '').replace(/[\u00a0\t\r\n\u2028\u2029]/g, ' ').trim();
+}
+
 function ageingFromHeader(text) {
   const compact = normalizeSpace(text).toLowerCase();
   if (!compact) return null;
@@ -342,7 +350,7 @@ async function analyzeWorkbook(source) {
     columns.forEach((col, i) => {
       raw[col.canonical] = values[i] ?? null;
     });
-    const particulars = normalizeSpace(values[0]);
+    const particulars = cleanName(values[0]);
     raw.Particulars = particulars;
     const rowType = classifyRow(raw, columns);
     if (rowType === 'GROUP') {
@@ -399,4 +407,5 @@ module.exports = {
   ageingFromHeader,
   buildColumns,
   normalizeSpace,
+  cleanName,
 };

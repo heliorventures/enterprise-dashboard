@@ -16,11 +16,12 @@ import { Icon } from '../../shared/icon';
 import { importMoney as fullInr } from './import-money';
 import { PageHeader } from '../../shared/page-header';
 import { ImportNav } from './import-nav';
+import { ImportProjectDifference } from './import-project-difference';
 
 @Component({
   providers: [CompanyDirectory],
   selector: 'app-import-wizard',
-  imports: [RouterLink, Icon, PageHeader, ImportNav],
+  imports: [RouterLink, Icon, PageHeader, ImportNav, ImportProjectDifference],
   templateUrl: './import-wizard.html',
   styleUrl: './imports.css',
 })
@@ -113,8 +114,13 @@ export class ImportWizard {
     return value.replaceAll('_', ' ') || 'Imported';
   }
 
-  issueText(code: string, field?: string, label?: string) {
+  issueText(code: string, field?: string, label?: string, firstRow?: number) {
     const name = label || field || 'field';
+    if (code === 'DUPLICATE_ACCOUNT') {
+      return firstRow
+        ? `Same account name as row ${firstRow} (capital letters are ignored, spaces are compared exactly)`
+        : 'Same account name appears more than once';
+    }
     if (code === 'UNMAPPED_REQUIRED') return `Choose the column for ${name}`;
     if (code === 'REQUIRED_FIELD') return `Missing ${name.replaceAll('_', ' ')}`;
     if (code === 'INVALID_DECIMAL') return `Invalid number in ${name.replaceAll('_', ' ')}`;

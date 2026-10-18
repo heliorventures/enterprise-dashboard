@@ -9,7 +9,7 @@ function stage(analysis, columns, required, rules) {
   for (const field of measurements) requiredByKey.set(field, {field_key:field,label:field.replaceAll('_',' ')});
   const missingRequired = [...requiredByKey.values()].filter(field => !targets.has(field.field_key));
   const duplicateTargets = columns.filter((column,index) => column.target && columns.findIndex(other=>other.target===column.target)!==index);
-  const names = new Set();
+  const names = new Map();
   const staged = analysis.rows.map(row => {
     const result = row.rowType === 'DETAIL' ? transformRow(row.raw, columns) : { mapped: {}, errors: [] };
     const errors = [...result.errors];
@@ -20,9 +20,11 @@ function stage(analysis, columns, required, rules) {
       if (!missingRequired.length && measurements.every(field => result.mapped[field] == null)) {
         errors.push({ code: 'REQUIRED_FIELD', field: measurements.join(' or ') });
       }
+      // Identity ignores letter case (as Tally does) but keeps internal spacing, so
+      // two different ledgers such as "X  2%" and "X 2%" are not merged.
       const name = String(result.mapped.account_name || '').trim().toLowerCase();
-      if (name && names.has(name)) errors.push({ code: 'DUPLICATE_ACCOUNT', field: 'account_name' });
-      names.add(name);
+      if (name && names.has(name)) errors.push({ code: 'DUPLICATE_ACCOUNT', field: 'account_name', firstRow: names.get(name) });
+      else if (name) names.set(name, row.sourceRowNumber);
       if (rules.gst_required?.required && !result.mapped.gst_number) errors.push({ code: 'REQUIRED_FIELD', field: 'gst_number' });
     }
     const status = errors.some(error => error.code.startsWith('INVALID') || ['REQUIRED_FIELD','DUPLICATE_ACCOUNT'].includes(error.code))

@@ -65,7 +65,15 @@ async function snapshot(tallyCompanyId, database=db) {
       FROM finance_snapshots f JOIN tally_source_snapshots s ON s.batch_id=f.batch_id
       WHERE f.company_id=$1`, [tallyCompanyId]);
     const row = reference.rows[0];
-    if (!row) return { ledgers:await listLedgers(tallyCompanyId,database),batchId:null,balanceDate:null,currency:null,uniformCurrency:false };
+    if (!row) {
+      // No dated balance snapshot (legacy ledgers). The company's own currency is the
+      // Tally currency; the configured default applies only if the company has none.
+      const company = (await database.query('SELECT "Currency" AS currency FROM "Companies" WHERE "CompanyID"=$1',[tallyCompanyId])).rows[0];
+      const currency = currencyCode(company?.currency) || currencyCode(require('../config').defaultCurrency);
+      return { ledgers:await listLedgers(tallyCompanyId,database),batchId:null,balanceDate:null,
+        balanceDateAssumed:require('../config').assumeUndatedTallyBalances===true,
+        currency,currencyAssumed:Boolean(currency),uniformCurrency:Boolean(currency) };
+    }
     const facts = await database.query(`SELECT l."LedgerID" AS id,l."SourceKey" AS source_key,f.name,f.group_name,f.closing_balance AS balance,
         r.payload AS archive_payload, f.currency
       FROM finance_ledger_facts f LEFT JOIN "Ledgers" l ON l."CompanyID"=f.company_id AND l."LedgerName"=f.name

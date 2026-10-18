@@ -107,4 +107,4 @@ async function report(type, scope) {
   return csv(rows);
 }
 
-module.exports = { bad, keys, text, integer, uuid, company, status, filters, decision, report };
+module.exports = { bad, keys, text, integer, uuid, company, status, filters, decision, report, csv };

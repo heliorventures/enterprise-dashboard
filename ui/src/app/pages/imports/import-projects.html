@@ -1,0 +1,238 @@
+<section class="grid-page">
+  <app-page-header
+    title="Projects"
+    eyebrow="Excel vs Tally"
+    description="Each Excel party belongs to a project. See, project by project, what matches Tally and where the gap is."
+  />
+  <app-import-nav />
+
+  <article class="grid-card">
+    <div class="grid-toolbar">
+      <div>
+        <h2><app-icon name="company" /> Company</h2>
+        <p>Projects are set up per company, because every company has its own ERP file.</p>
+      </div>
+    </div>
+    <div class="project-toolbar">
+      <app-company-select
+        [companies]="companies()"
+        [value]="company()"
+        (companyChange)="onCompany($event)"
+      />
+      <button type="button" class="btn ghost" [disabled]="busy() || !summary()" (click)="applyRules()">
+        <app-icon name="refresh" />
+        Apply keywords again
+      </button>
+      @if (company() !== 'all') {
+        <app-import-project-report [company]="company()" />
+      }
+    </div>
+  </article>
+
+  @if (error()) {
+    <p class="banner" role="alert">{{ error() }}</p>
+  }
+  @if (notice()) {
+    <p class="banner ok" role="status">{{ notice() }}</p>
+  }
+  @if (loading()) {
+    <p class="empty" role="status">Loading projects…</p>
+  }
+
+  @if (summary(); as data) {
+    @if (data.currencyMessage) {
+      <p class="banner" role="status">{{ data.currencyMessage }}</p>
+    }
+    @for (note of data.notes; track note) {
+      <p class="muted summary-note" role="note">{{ note }}</p>
+    }
+    @if (!data.tally.amountsAvailable) {
+      <p class="banner" role="status">
+        Tally has {{ data.tally.vouchers }} vouchers for this company but none carry an amount, so
+        project spend cannot be read from Tally vouchers yet. Projects are compared with Tally
+        <strong>ledger balances</strong> instead.
+      </p>
+    }
+
+    <section class="kpi-grid">
+      <app-kpi-card
+        label="Projects"
+        [value]="'' + data.projects.length"
+        icon="company"
+        [hint]="data.latestImport ? 'Excel: ' + data.latestImport.file_name : 'No Excel file published yet'"
+      />
+      <app-kpi-card
+        label="Parties in a project"
+        [value]="data.coverage.assigned + ' of ' + data.coverage.total"
+        icon="ledgers"
+        [tone]="coveragePct() >= 80 ? 'positive' : 'neutral'"
+        [hint]="coveragePct() + '% placed. Add keywords to place the rest.'"
+      />
+      <app-kpi-card
+        label="Parties with a gap"
+        [value]="'' + gapParties()"
+        icon="warning"
+        [tone]="gapParties() ? 'negative' : 'positive'"
+        hint="Excel and Tally differ, or only one side has it"
+      />
+      <app-kpi-card
+        label="Latest Excel date"
+        [value]="date(data.latestImport?.reporting_date)"
+        icon="calendar"
+        hint="Balances are as of this date"
+      />
+    </section>
+
+    <article class="grid-card">
+      <div class="grid-toolbar">
+        <div>
+          <h2><app-icon name="reports" /> Progress and gaps by project</h2>
+          <p>Open a project to see each party, move parties, and edit keywords or budget.</p>
+        </div>
+      </div>
+      <div class="desktop-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Project</th>
+              <th>Parties</th>
+              <th>Billed</th>
+              <th>Paid</th>
+              <th>Pending</th>
+              <th>In sync</th>
+              <th>Gaps</th>
+              <th>Gap amount</th>
+              <th>Budget used</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (row of rows(); track row.id ?? 'none') {
+              <tr [class.unassigned]="!row.id">
+                <td>
+                  <a [routerLink]="link(row)" [queryParams]="{ company: company() }">{{ row.name }}</a>
+                  @if (row.tallyProjectName) {
+                    <small class="cell-note">Tally: {{ row.tallyProjectName }}</small>
+                  }
+                  @if (row.tallyVouchers !== null) {
+                    <small class="cell-note">{{ row.tallyVouchers }} Tally vouchers tagged</small>
+                  }
+                </td>
+                <td class="num">{{ row.parties }}</td>
+                <td class="num">{{ money(row.billed) }}</td>
+                <td class="num">
+                  {{ money(row.paid) }}
+                  @if (row.paidPct !== null) {
+                    <small class="cell-note">{{ row.paidPct }}% of billed</small>
+                  }
+                </td>
+                <td class="num">{{ money(row.pending) }}</td>
+                <td class="num">{{ row.matched }}</td>
+                <td class="num">
+                  {{ row.differences + row.tallyOnlyLedgers }}
+                  @if (row.tallyOnlyLedgers) {
+                    <small class="cell-note">{{ row.tallyOnlyLedgers }} only in Tally</small>
+                  }
+                </td>
+                <td class="num">{{ money(row.gap) }}</td>
+                <td>
+                  @if (row.id && row.budgetUsedPct !== null) {
+                    <span class="meter" [attr.data-status]="row.budgetStatus"
+                      ><span [style.width.%]="meter(row)"></span
+                    ></span>
+                    <small class="cell-note">{{ row.budgetUsedPct }}% of {{ money(row.budgetExpense) }}</small>
+                  } @else if (row.id) {
+                    <small class="cell-note">Set a budget on the project page</small>
+                  } @else {
+                    —
+                  }
+                </td>
+                <td>
+                  @if (row.id) {
+                    <span class="status-pill" [attr.data-status]="row.budgetStatus">{{ budgetLabel(row) }}</span>
+                  }
+                  <span class="status-pill" [attr.data-status]="row.health">{{ healthLabel(row) }}</span>
+                </td>
+              </tr>
+            } @empty {
+              <tr>
+                <td colspan="10">No Excel data yet. Upload and import an Excel file for this company first.</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <article class="grid-card">
+      <div class="grid-toolbar">
+        <div>
+          <h2><app-icon name="search" /> Suggested projects</h2>
+          <p>
+            Found in the names of your Excel parties and Tally ledgers, for example “Pratik Petrolium -
+            Majalgaon”. Pick one to create the project and its keyword in one click.
+          </p>
+        </div>
+      </div>
+      <div class="status-chips">
+        @for (item of suggestions(); track item.keyword) {
+          <button type="button" class="chip-btn" [disabled]="busy()" (click)="createFromSuggestion(item)">
+            {{ item.tallyProjectName || item.keyword }} · {{ item.count }} names
+            @if (item.source === 'TALLY_PROJECT') {
+              · Tally project
+            }
+          </button>
+        } @empty {
+          <p class="muted">No new suggestions. Use the form below to add a project.</p>
+        }
+      </div>
+    </article>
+
+    <article class="grid-card">
+      <div class="grid-toolbar">
+        <div>
+          <h2><app-icon name="upload" /> Add a project</h2>
+          <p>
+            Keywords are words in a party name, separated by commas. Every Excel party whose name contains
+            a keyword joins this project. You can always move a party by hand.
+          </p>
+        </div>
+      </div>
+      <form class="project-form" (submit)="create($event)">
+        <label class="field">
+          <span>Project name</span>
+          <input type="text" required maxlength="120" [value]="name()" (input)="setField('name', $event)" />
+        </label>
+        <label class="field">
+          <span>Keywords</span>
+          <input
+            type="text"
+            [value]="keywords()"
+            (input)="setField('keywords', $event)"
+            placeholder="Majalgaon, Kharat Adgaon"
+          />
+        </label>
+        <label class="field">
+          <span>Matching Tally project</span>
+          <select [value]="tallyProjectId()" (change)="setField('tallyProjectId', $event)">
+            <option value="">None</option>
+            @for (item of data.tallyProjects; track item.id) {
+              <option [value]="item.id">{{ item.name }}</option>
+            }
+          </select>
+        </label>
+        <label class="field">
+          <span>Budget (expense)</span>
+          <input type="number" min="0" step="0.01" [value]="budget()" (input)="setField('budget', $event)" />
+        </label>
+        <label class="field">
+          <span>Target revenue</span>
+          <input type="number" min="0" step="0.01" [value]="target()" (input)="setField('target', $event)" />
+        </label>
+        <div class="filter-actions">
+          <button type="submit" class="btn" [disabled]="busy() || !name().trim()">Create project</button>
+        </div>
+      </form>
+    </article>
+  }
+</section>

@@ -557,3 +557,17 @@ a {
   padding: 0 16px 16px;
   min-width: 0;
 }
+
+/* Printing a page (for example the project summary) should not include the app navigation. */
+@media print {
+  .sidebar,
+  .mobile-header,
+  .skip-link,
+  .sidebar-toggle {
+    display: none !important;
+  }
+
+  .shell {
+    display: block !important;
+  }
+}

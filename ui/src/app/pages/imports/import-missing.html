@@ -1,0 +1,142 @@
+<section class="grid-page">
+  <app-page-header
+    title="Missing in Tally"
+    eyebrow="Excel vs Tally"
+    description="Which parties are in the Excel outstanding but not in Tally, and which Tally ledgers are not in the Excel."
+  />
+  <app-import-nav />
+
+  <article class="grid-card">
+    <div class="project-toolbar">
+      <app-company-select [companies]="companies()" [value]="company()" (companyChange)="onCompany($event)" />
+      @if (company() !== 'all') {
+        <app-import-project-report kind="missing" [company]="company()" />
+      }
+    </div>
+  </article>
+
+  @if (error()) {
+    <p class="banner" role="alert">{{ error() }}</p>
+  }
+  @if (loading()) {
+    <p class="empty" role="status">Comparing names…</p>
+  }
+
+  @if (data(); as result) {
+    <p class="muted summary-note">
+      @if (result.latestImport) {
+        Excel file “{{ result.latestImport.file_name }}”, as on {{ date(result.latestImport.reporting_date) }}. Parties are
+        matched to Tally ledgers by name, PAN or GST. Amounts are shown as each system states them. For the difference in
+        amounts, see Project summary or Compare with Tally.
+      } @else {
+        No Excel file has been imported for this company yet.
+      }
+    </p>
+
+    <section class="kpi-grid">
+      <app-kpi-card label="Parties in the Excel" [value]="'' + result.summary.excelParties" icon="ledgers" hint="In the latest import" />
+      <app-kpi-card
+        label="Missing in Tally"
+        [value]="'' + result.summary.missingInTally"
+        icon="warning"
+        [tone]="result.summary.missingInTally ? 'negative' : 'positive'"
+        hint="In Excel, no Tally ledger with this name"
+      />
+      <app-kpi-card
+        label="Check these"
+        [value]="'' + result.summary.possible"
+        icon="search"
+        hint="Only a similar name in Tally"
+      />
+      <app-kpi-card
+        label="Missing in Excel"
+        [value]="'' + result.summary.missingInExcel"
+        icon="reports"
+        hint="Tally ledgers with a balance, not in Excel"
+      />
+    </section>
+
+    <article class="grid-card">
+      <div class="status-chips">
+        @for (item of sections; track item.id) {
+          <button type="button" class="chip-btn" [class.on]="section() === item.id" (click)="onSection(item.id)">
+            {{ item.label }} · {{ counts()[item.id] }}
+          </button>
+        }
+      </div>
+      <p class="muted padded">{{ help() }}</p>
+      <div class="inline-form padded">
+        <input type="search" [value]="search()" (input)="onSearch($event)" placeholder="Search a name, group or project" aria-label="Search" />
+      </div>
+
+      <div class="desktop-table">
+        <table>
+          @if (isTallyList()) {
+            <thead>
+              <tr>
+                <th>Name in Tally</th>
+                <th>Balance in Tally</th>
+                <th>Group in Tally</th>
+                <th>Project</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of tallyRows(); track row.tally_ledger_id) {
+                <tr>
+                  <td>{{ row.tally_ledger_name }}</td>
+                  <td class="num">{{ amount(row.tally_amount) }}</td>
+                  <td>{{ row.tally_group || '—' }}</td>
+                  <td>{{ row.project_name || '—' }}</td>
+                </tr>
+              } @empty {
+                <tr>
+                  <td colspan="4">Nothing here.</td>
+                </tr>
+              }
+            </tbody>
+          } @else {
+            <thead>
+              <tr>
+                <th>Name in Excel</th>
+                <th>Amount in Excel</th>
+                @if (section() !== 'missingInTally') {
+                  <th>Name in Tally</th>
+                  <th>Balance in Tally</th>
+                  <th>How matched</th>
+                }
+                <th>Group</th>
+                <th>Project</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of excelRows(); track row.account_id) {
+                <tr>
+                  <td>
+                    <a [routerLink]="['/imports/accounts', row.account_id]">{{ row.account_name }}</a>
+                  </td>
+                  <td class="num">{{ amount(row.source_amount) }}</td>
+                  @if (section() !== 'missingInTally') {
+                    <td>{{ row.tally_ledger_name || '—' }}</td>
+                    <td class="num">{{ amount(row.tally_amount) }}</td>
+                    <td>{{ how(row) }}</td>
+                  }
+                  <td>{{ row.level_1_category || '—' }}</td>
+                  <td>{{ row.project_name || '—' }}</td>
+                </tr>
+              } @empty {
+                <tr>
+                  <td [attr.colspan]="section() === 'missingInTally' ? 4 : 7">Nothing here.</td>
+                </tr>
+              }
+            </tbody>
+          }
+        </table>
+      </div>
+      @if (hidden()) {
+        <p class="muted padded">
+          Showing the first {{ limit }} of {{ total() }}. Search to narrow the list, or download the Excel report for every row.
+        </p>
+      }
+    </article>
+  }
+</section>

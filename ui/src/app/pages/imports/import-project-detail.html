@@ -1,0 +1,253 @@
+<section class="grid-page">
+  <app-page-header
+    [title]="title()"
+    [eyebrow]="detail()?.company?.name || 'Project'"
+    [description]="
+      isUnassigned
+        ? 'These Excel parties are not in any project yet. Add a keyword to a project, or move a party by hand.'
+        : 'Every Excel party in this project next to its Tally ledger.'
+    "
+  >
+    <a class="btn ghost" routerLink="/imports/projects">Back to projects</a>
+  </app-page-header>
+  <app-import-nav />
+
+  @if (error()) {
+    <p class="banner" role="alert">{{ error() }}</p>
+  }
+  @if (notice()) {
+    <p class="banner ok" role="status">{{ notice() }}</p>
+  }
+
+  @if (loading() && !detail()) {
+    <p class="empty" role="status">Loading project…</p>
+  }
+
+  @if (detail(); as data) {
+    @if (data.project; as project) {
+      <article class="grid-card">
+        <div class="grid-toolbar">
+          <div>
+            <h2><app-icon name="budget" /> Project settings</h2>
+            <p>Budget is compared with the amount billed in the Excel file. Keywords decide which parties belong here.</p>
+          </div>
+        </div>
+        <form class="project-form" (submit)="save($event)">
+          <label class="field">
+            <span>Project name</span>
+            <input type="text" required maxlength="120" [value]="name()" (input)="setField('name', $event)" />
+          </label>
+          <label class="field">
+            <span>Matching Tally project</span>
+            <select [value]="tallyProjectId()" (change)="setField('tallyProjectId', $event)">
+              <option value="">None</option>
+              @for (item of data.tallyProjects; track item.id) {
+                <option [value]="item.id" [selected]="'' + item.id === tallyProjectId()">{{ item.name }}</option>
+              }
+            </select>
+          </label>
+          <label class="field">
+            <span>Budget (expense)</span>
+            <input type="number" min="0" step="0.01" [value]="budget()" (input)="setField('budget', $event)" />
+          </label>
+          <label class="field">
+            <span>Target revenue</span>
+            <input type="number" min="0" step="0.01" [value]="target()" (input)="setField('target', $event)" />
+          </label>
+          <div class="filter-actions">
+            <button type="submit" class="btn" [disabled]="busy() || !name().trim()">Save</button>
+            <button type="button" class="btn ghost danger" [disabled]="busy()" (click)="remove()">Delete project</button>
+          </div>
+        </form>
+
+        <div class="section-copy">
+          <h3>Keywords</h3>
+          <p class="muted">A party joins this project when its name contains one of these words.</p>
+          <div class="keyword-list">
+            @for (rule of project.rules; track rule.id) {
+              <span class="keyword">
+                {{ rule.keyword }}
+                <button type="button" [attr.aria-label]="'Remove keyword ' + rule.keyword" [disabled]="busy()" (click)="removeKeyword(rule.id, rule.keyword)">
+                  <app-icon name="close" />
+                </button>
+              </span>
+            } @empty {
+              <span class="muted">No keywords yet.</span>
+            }
+          </div>
+          <form class="inline-form" (submit)="addKeyword($event)">
+            <input
+              type="text"
+              maxlength="80"
+              [value]="keyword()"
+              (input)="setField('keyword', $event)"
+              placeholder="Add a keyword, e.g. Majalgaon"
+              aria-label="New keyword"
+            />
+            <button type="submit" class="btn ghost" [disabled]="busy() || keyword().trim().length < 2">Add keyword</button>
+          </form>
+        </div>
+      </article>
+    }
+
+    <article class="grid-card">
+      <div class="grid-toolbar">
+        <div>
+          <h2><app-icon name="calendar" /> Progress by upload</h2>
+          <p>
+            Every Excel file you import is saved here for this project, so you can show how billing,
+            payment and the gap with Tally move from one upload to the next.
+          </p>
+        </div>
+      </div>
+      <div class="desktop-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Excel as on</th>
+              <th>File</th>
+              <th>Parties</th>
+              <th>Billed</th>
+              <th>Paid</th>
+              <th>Pending</th>
+              <th>Same as Tally</th>
+              <th>Different</th>
+              <th>Only in Tally</th>
+              <th>Gap</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (row of history(); track row.batchId) {
+              <tr>
+                <td>
+                  {{ date(row.reportingDate) }}
+                  @if (row.current) {
+                    <small class="cell-note">Latest</small>
+                  }
+                </td>
+                <td>
+                  <a [routerLink]="['/imports', row.importId]">{{ row.fileName }}</a>
+                </td>
+                <td class="num">{{ row.parties }}</td>
+                <td class="num">{{ histMoney(row.billed, row) }}</td>
+                <td class="num">
+                  {{ histMoney(row.paid, row) }}
+                  @if (row.paidPct !== null) {
+                    <small class="cell-note">{{ row.paidPct }}% of billed</small>
+                  }
+                </td>
+                <td class="num">{{ histMoney(row.pending, row) }}</td>
+                <td class="num">{{ row.matched }}</td>
+                <td class="num">{{ row.differences }}</td>
+                <td class="num">{{ row.tallyOnlyLedgers }}</td>
+                <td class="num">{{ histMoney(row.gap, row) }}</td>
+              </tr>
+            } @empty {
+              <tr>
+                <td colspan="10">No upload has been saved for this project yet.</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <article class="grid-card">
+      <div class="grid-toolbar">
+        <div>
+          <h2><app-icon name="ledgers" /> Excel parties in this project</h2>
+          <p>{{ data.total }} parties. “Difference” is Excel pending minus Tally balance.</p>
+        </div>
+      </div>
+      <div class="status-chips">
+        @for (item of statuses; track item.id) {
+          <button type="button" class="chip-btn" [class.on]="status() === item.id" (click)="onStatus(item.id)">
+            {{ item.label }}
+          </button>
+        }
+      </div>
+      <form class="inline-form padded" (submit)="applySearch($event)">
+        <input type="search" [value]="search()" (input)="onSearch($event)" placeholder="Search party or Tally ledger" aria-label="Search" />
+        <button type="submit" class="btn ghost" [disabled]="loading()">Search</button>
+      </form>
+      <div class="desktop-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Excel party</th>
+              <th>Excel pending</th>
+              <th>Tally ledger</th>
+              <th>Tally balance</th>
+              <th>Difference</th>
+              <th>Status</th>
+              <th>Placed</th>
+              <th>Move to</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (row of data.items; track rowId(row)) {
+              <tr>
+                <td>
+                  <a [routerLink]="['/imports/accounts', row['account_id']]">{{ row['account_name'] }}</a>
+                </td>
+                <td class="num">{{ money(row['source_amount'], row['source_currency']) }}</td>
+                <td>{{ row['tally_ledger_name'] || 'Not matched' }}</td>
+                <td class="num">{{ row['tally_amount'] == null ? '—' : money(row['tally_amount'], row['tally_currency']) }}</td>
+                <td class="num">{{ gap(row['difference'], row['currency']) }}</td>
+                <td>
+                  <span class="status-pill" [attr.data-status]="row['status']">{{ statusLabel(row['status']) }}</span>
+                </td>
+                <td>{{ sourceLabel(row) }}</td>
+                <td>
+                  <select class="mapping-select" [attr.aria-label]="'Move ' + row['account_name']" [disabled]="busy()" (change)="move(row, $event)">
+                    <option value="" [selected]="!data.project">
+                      {{ data.project ? 'Use keywords (release)' : 'Not assigned' }}
+                    </option>
+                    @for (choice of data.projectChoices; track choice.id) {
+                      <option [value]="choice.id" [selected]="choice.id === data.project?.id">{{ choice.name }}</option>
+                    }
+                  </select>
+                </td>
+              </tr>
+            } @empty {
+              <tr>
+                <td colspan="8">{{ loading() ? 'Loading…' : 'No parties match these filters.' }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    @if (data.tallyOnly.length) {
+      <article class="grid-card">
+        <div class="grid-toolbar">
+          <div>
+            <h2><app-icon name="warning" /> In Tally, not in Excel</h2>
+            <p>These Tally ledgers have a keyword of this project in their name but are missing from the Excel file.</p>
+          </div>
+        </div>
+        <div class="desktop-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Tally ledger</th>
+                <th>Tally balance</th>
+                <th>Gap</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of data.tallyOnly; track row['reconciliation_id']) {
+                <tr>
+                  <td>{{ row['tally_ledger_name'] }}</td>
+                  <td class="num">{{ money(row['tally_amount'], row['tally_currency']) }}</td>
+                  <td class="num">{{ gap(row['difference'], row['currency']) }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </article>
+    }
+  }
+</section>

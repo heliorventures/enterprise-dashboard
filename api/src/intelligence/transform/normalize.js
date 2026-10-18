@@ -1,4 +1,4 @@
-const { parseDate, parseDecimal, parseInteger, normalizeSpace } = require('../excel/parser');
+const { parseDate, parseDecimal, parseInteger, normalizeSpace, cleanName } = require('../excel/parser');
 const decimal = require('./decimal');
 
 const DATE_FIELDS = new Set(['last_payment_date', 'last_date']);
@@ -12,7 +12,8 @@ const DECIMAL_FIELDS = new Set([
 
 function transformValue(field, value) {
   if (value == null || value === '') return { value: null };
-  if (field === 'account_name' || field === 'particulars' || field === 'gst_number' || field === 'pan_number' || field === 'msme_number') {
+  if (field === 'account_name' || field === 'particulars') return { value: cleanName(value) };
+  if (field === 'gst_number' || field === 'pan_number' || field === 'msme_number') {
     return { value: normalizeSpace(value) };
   }
   if (DATE_FIELDS.has(field)) {

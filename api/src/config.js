@@ -9,6 +9,10 @@ module.exports = {
   dashboardPassword: process.env.DASHBOARD_PASSWORD || (process.env.NODE_ENV === 'production' ? '' : 'admin'),
   dashboardPasswordHash: process.env.DASHBOARD_PASSWORD_HASH || '',
   sessionSecret: process.env.DASHBOARD_SESSION_SECRET || '',
+  // Used when neither the Excel nor the Tally company states a currency. No conversion is ever applied.
+  defaultCurrency: (process.env.DEFAULT_CURRENCY || 'INR').trim().toUpperCase(),
+  // The legacy Tally ledgers carry no balance date. When true they are treated as dated the same as the Excel.
+  assumeUndatedTallyBalances: !['false', '0', 'no'].includes(String(process.env.ASSUME_UNDATED_TALLY_BALANCES || 'true').toLowerCase()),
   trustedProxyHosts: (process.env.TRUSTED_PROXY_HOSTS || '').split(',').map(value => value.trim()).filter(Boolean),
   db: {
     user: process.env.DB_USER || 'enterprise_dashboard',

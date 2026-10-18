@@ -1,0 +1,140 @@
+<section class="grid-page summary-page">
+  <app-page-header
+    title="Project summary"
+    eyebrow="Excel vs Tally"
+    description="For each project: how far it has come, what has been paid, what is left to pay, and how the Excel figures differ from Tally."
+  />
+  <app-import-nav class="no-print" />
+
+  <article class="grid-card no-print">
+    <div class="project-toolbar">
+      <app-company-select [companies]="companies()" [value]="company()" (companyChange)="onCompany($event)" />
+      <button type="button" class="btn ghost" [disabled]="!summary()" (click)="print()">
+        <app-icon name="reports" /> Print or save as PDF
+      </button>
+      @if (company() !== 'all') {
+        <app-import-project-report [company]="company()" />
+      }
+    </div>
+  </article>
+
+  @if (error()) {
+    <p class="banner" role="alert">{{ error() }}</p>
+  }
+  @if (loading()) {
+    <p class="empty" role="status">Loading summary…</p>
+  }
+
+  @if (summary(); as data) {
+    <header class="summary-title">
+      <h2>{{ data.company.name }}</h2>
+      <p>
+        @if (data.latestImport) {
+          Excel file “{{ data.latestImport.file_name }}”, figures as on {{ date(data.latestImport.reporting_date) }}.
+        } @else {
+          No Excel file has been imported for this company yet.
+        }
+      </p>
+    </header>
+
+    @if (data.currencyMessage) {
+      <p class="banner" role="status">{{ data.currencyMessage }}</p>
+    }
+    @for (note of data.notes; track note) {
+      <p class="muted summary-note" role="note">{{ note }}</p>
+    }
+
+    <section class="kpi-grid">
+      <app-kpi-card label="Billed so far" [value]="money(totals().billed)" icon="budget" hint="All projects, from the Excel file" />
+      <app-kpi-card
+        label="Paid"
+        [value]="money(totals().paid)"
+        icon="check"
+        tone="positive"
+        [hint]="paidPct() === null ? 'Nothing billed yet' : paidPct() + '% of what was billed'"
+      />
+      <app-kpi-card
+        label="Still to pay"
+        [value]="money(totals().pending)"
+        icon="calendar"
+        hint="Pending bills still open"
+      />
+      <app-kpi-card
+        label="Excel vs Tally"
+        [value]="net() === 0 ? 'No difference' : money(net())"
+        icon="warning"
+        [tone]="net() === 0 && totals().gapCount === 0 ? 'positive' : 'negative'"
+        [hint]="
+          totals().gapCount
+            ? totals().gapCount + ' parties or ledgers differ. Excel minus Tally.'
+            : 'Every party agrees with Tally'
+        "
+      />
+    </section>
+
+    <section class="summary-grid">
+      @for (row of rows(); track row.id ?? 'none') {
+        <article class="summary-card" [class.unassigned]="!row.id">
+          <header>
+            <h3>
+              <a [routerLink]="link(row)" [queryParams]="{ company: company() }">{{ row.id ? row.name : 'Not placed in a project yet' }}</a>
+            </h3>
+            <span class="status-pill" [attr.data-status]="row.health">{{ healthLabel(row) }}</span>
+          </header>
+          <p class="muted">{{ row.parties }} parties</p>
+
+          <div class="summary-block">
+            <h4>How far along</h4>
+            @if (row.id && row.budgetUsedPct !== null) {
+              <span class="meter" [attr.data-status]="row.budgetStatus"><span [style.width.%]="meter(row.budgetUsedPct)"></span></span>
+            }
+            <p>
+              {{ budgetText(row) }}
+              @if (row.id && row.budgetUsedPct !== null) {
+                <span class="status-pill" [attr.data-status]="row.budgetStatus">{{ budgetLabel(row) }}</span>
+              }
+            </p>
+          </div>
+
+          <div class="summary-block">
+            <h4>Payments</h4>
+            @if (row.paidPct !== null) {
+              <span class="meter" data-status="ON_TRACK"><span [style.width.%]="meter(row.paidPct)"></span></span>
+            }
+            <dl class="summary-lines">
+              <div><dt>Billed</dt><dd class="num">{{ money(row.billed) }}</dd></div>
+              <div>
+                <dt>Paid</dt>
+                <dd class="num">
+                  {{ money(row.paid) }}
+                  @if (row.paidPct !== null) {
+                    <small class="cell-note">{{ row.paidPct }}% of billed</small>
+                  }
+                </dd>
+              </div>
+              <div><dt>Still to pay</dt><dd class="num strong">{{ money(row.pending) }}</dd></div>
+            </dl>
+          </div>
+
+          <div class="summary-block">
+            <h4>Excel compared with Tally</h4>
+            <dl class="summary-lines">
+              <div><dt>Excel total</dt><dd class="num">{{ money(row.excelAmount) }}</dd></div>
+              <div><dt>Tally total</dt><dd class="num">{{ money(row.tallyAmount) }}</dd></div>
+              <div><dt>Excel minus Tally</dt><dd class="num strong">{{ money(row.netDifference) }}</dd></div>
+            </dl>
+            <p>{{ compare(row.netDifference) }} {{ gapText(row) }}</p>
+          </div>
+        </article>
+      } @empty {
+        <p class="empty">No Excel data yet. Upload and import an Excel file for this company first.</p>
+      }
+    </section>
+
+    @if (!data.tally.amountsAvailable) {
+      <p class="muted summary-note">
+        Tally figures here are ledger balances. Tally voucher amounts are not available yet, so project spend is taken from the Excel file.
+      </p>
+    }
+  }
+</section>

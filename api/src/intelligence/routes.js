@@ -6,6 +6,9 @@ const config = require('./config');
 const imports = require('./imports/service');
 const dashboard = require('./dashboard/service');
 const sync = require('./sync/service');
+const projects = require('./projects/service');
+const projectReport = require('./projects/report');
+const presence = require('./presence');
 const audit = require('./audit');
 const reports = require('./reports');
 
@@ -184,6 +187,111 @@ function registerExcelImportRoutes(app) {
     }
     res.json(await imports.updateMapping(reports.uuid(req.params.id), mappings, actor(req),req.body.currency));
   }));
+
+  // Project-wise view of the same Excel data. Registered before /api/imports/:id.
+  const projectCompany = async value => {
+    if (!reports.company(value)) throw reports.bad('Select a company');
+    return intelCompanyId(value);
+  };
+  const tallyProjectId = value => (value === null || value === undefined ? value
+    : reports.integer(value, 'tallyProjectId', undefined, 2147483647));
+  const projectBody = (body, allowed) => {
+    reports.keys(body, allowed);
+    return {
+      ...(body.name !== undefined ? { name: reports.text(body.name, 'name', 120) } : {}),
+      ...(body.tallyProjectId !== undefined ? { tallyProjectId: tallyProjectId(body.tallyProjectId) } : {}),
+      ...(body.budgetExpense !== undefined ? { budgetExpense: body.budgetExpense } : {}),
+      ...(body.targetRevenue !== undefined ? { targetRevenue: body.targetRevenue } : {}),
+    };
+  };
+  app.get('/api/imports/projects', wrap(async (req, res) => {
+    reports.keys(req.query, ['company']);
+    res.json(await projects.summary(await projectCompany(req.query.company)));
+  }));
+  app.get('/api/imports/projects/suggestions', wrap(async (req, res) => {
+    reports.keys(req.query, ['company']);
+    res.json(await projects.suggestions(await projectCompany(req.query.company)));
+  }));
+  // What exists in Excel but not in Tally, and the other way round. Name based, so it
+  // works even when amounts cannot be compared.
+  app.get('/api/imports/missing', wrap(async (req, res) => {
+    reports.keys(req.query, ['company']);
+    res.json(await presence.presence(await projectCompany(req.query.company)));
+  }));
+  app.get('/api/imports/missing/report/:format', wrap(async (req, res) => {
+    reports.keys(req.query, ['company']);
+    const format = req.params.format;
+    if (!['xlsx', 'csv'].includes(format)) { res.status(404).json({ error: 'Report not found' }); return; }
+    const data = await presence.presence(await projectCompany(req.query.company));
+    res.setHeader('Content-Disposition', `attachment; filename="${presence.fileName(data.company, format)}"`);
+    if (format === 'csv') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.send(presence.toCsv(data));
+      return;
+    }
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.send(await presence.toWorkbook(data));
+  }));
+  // Progress by upload, one project or all of them.
+  app.get('/api/imports/projects/history', wrap(async (req, res) => {
+    reports.keys(req.query, ['company', 'project']);
+    const project = req.query.project === undefined ? undefined : req.query.project === 'unassigned' ? 'unassigned' : reports.uuid(req.query.project);
+    res.json(await projects.history(await projectCompany(req.query.company), project));
+  }));
+  // Difference report between Tally and the uploaded Excel, grouped by project.
+  app.get('/api/imports/projects/report/:format', wrap(async (req, res) => {
+    reports.keys(req.query, ['company']);
+    const format = req.params.format;
+    if (!['xlsx', 'csv'].includes(format)) { res.status(404).json({ error: 'Report not found' }); return; }
+    const report = await projectReport.build(await projectCompany(req.query.company));
+    const name = projectReport.fileName(report.company, format);
+    res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
+    if (format === 'csv') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.send(projectReport.toCsv(report));
+      return;
+    }
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.send(await projectReport.toWorkbook(report));
+  }));
+  app.post('/api/imports/projects/apply', wrap(async (req, res) => {
+    reports.keys(req.body, ['company']);
+    res.json(await projects.reapply(await projectCompany(req.body.company), actor(req)));
+  }));
+  app.post('/api/imports/projects', wrap(async (req, res) => {
+    const fields = projectBody(req.body, ['company', 'name', 'tallyProjectId', 'budgetExpense', 'targetRevenue', 'keywords']);
+    const keywords = req.body.keywords === undefined ? [] : req.body.keywords;
+    if (!Array.isArray(keywords) || keywords.length > 20) throw reports.bad('keywords must be a list of at most 20 words');
+    res.status(201).json(await projects.createProject(await projectCompany(req.body.company), { ...fields, keywords }, actor(req)));
+  }));
+  app.delete('/api/imports/projects/rules/:ruleId', wrap(async (req, res) => {
+    res.json(await projects.deleteRule(reports.uuid(req.params.ruleId), actor(req)));
+  }));
+  app.post('/api/imports/projects/:id/rules', wrap(async (req, res) => {
+    reports.keys(req.body, ['keyword']);
+    res.status(201).json(await projects.addRule(reports.uuid(req.params.id), reports.text(req.body.keyword, 'keyword', 80), actor(req)));
+  }));
+  app.put('/api/imports/projects/:id', wrap(async (req, res) => {
+    res.json(await projects.updateProject(reports.uuid(req.params.id), projectBody(req.body, ['name', 'tallyProjectId', 'budgetExpense', 'targetRevenue']), actor(req)));
+  }));
+  app.delete('/api/imports/projects/:id', wrap(async (req, res) => {
+    res.json(await projects.deleteProject(reports.uuid(req.params.id), actor(req)));
+  }));
+  app.get('/api/imports/projects/:id', wrap(async (req, res) => {
+    reports.keys(req.query, ['company', 'q', 'status', 'page', 'pageSize']);
+    const { status: rawStatus, ...rest } = req.query;
+    const filters = reports.filters({ ...rest, company: undefined }, 'reconciliation', []);
+    const status = rawStatus === 'differences' ? 'differences' : reports.status(rawStatus, 'reconciliation', 'all') ?? 'all';
+    const id = req.params.id === 'unassigned' ? null : reports.uuid(req.params.id);
+    res.json(await projects.detail(await projectCompany(req.query.company), id,
+      { q: filters.q, status, page: filters.page, pageSize: filters.pageSize }));
+  }));
+  app.put('/api/imports/accounts/:id/project', wrap(async (req, res) => {
+    reports.keys(req.body, ['projectId']);
+    const projectId = req.body.projectId === null ? null : reports.uuid(req.body.projectId);
+    res.json(await projects.assignAccount(reports.uuid(req.params.id), projectId, actor(req)));
+  }));
+
   app.get('/api/imports/:id', wrap(async (req, res) => {
     res.json(await imports.getResults(reports.uuid(req.params.id)));
   }));

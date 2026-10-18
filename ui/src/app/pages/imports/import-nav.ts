@@ -14,7 +14,10 @@ import { RouterLink, RouterLinkActive } from '@angular/router';
       <a routerLink="/imports" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }"
         >2. Uploaded files</a
       >
-      <a routerLink="/imports/sync" routerLinkActive="active">3. Compare with Tally</a>
+      <a routerLink="/imports/missing" routerLinkActive="active">3. Missing in Tally</a>
+      <a routerLink="/imports/sync" routerLinkActive="active">Compare with Tally</a>
+      <a routerLink="/imports/summary" routerLinkActive="active">Project summary</a>
+      <a routerLink="/imports/projects" routerLinkActive="active">By project</a>
       <a routerLink="/imports/results" routerLinkActive="active">Excel outstanding</a>
       <a routerLink="/imports/exceptions" routerLinkActive="active">Exceptions</a>
       <a routerLink="/imports/quality" routerLinkActive="active">Data quality</a>

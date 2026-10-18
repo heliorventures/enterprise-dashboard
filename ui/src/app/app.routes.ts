@@ -7,6 +7,10 @@ import { ImportAudit } from './pages/imports/import-audit';
 import { ImportExceptions } from './pages/imports/import-exceptions';
 import { ImportQualityView } from './pages/imports/import-quality';
 import { ImportResults } from './pages/imports/import-results';
+import { ImportProjectDetail } from './pages/imports/import-project-detail';
+import { ImportMissing } from './pages/imports/import-missing';
+import { ImportProjects } from './pages/imports/import-projects';
+import { ImportProjectSummary } from './pages/imports/import-project-summary';
 import { ImportSync } from './pages/imports/import-sync';
 import { ImportSyncDetail } from './pages/imports/import-sync-detail';
 import { ImportWizard } from './pages/imports/import-wizard';
@@ -32,6 +36,10 @@ export const routes: Routes = [
   { path: 'imports', component: Imports, canActivate: [authGuard] },
   { path: 'imports/new', component: ImportWizard, canActivate: [authGuard] },
   { path: 'imports/results', component: ImportResults, canActivate: [authGuard] },
+  { path: 'imports/projects', component: ImportProjects, canActivate: [authGuard] },
+  { path: 'imports/missing', component: ImportMissing, canActivate: [authGuard] },
+  { path: 'imports/summary', component: ImportProjectSummary, canActivate: [authGuard] },
+  { path: 'imports/projects/:id', component: ImportProjectDetail, canActivate: [authGuard] },
   { path: 'imports/sync', component: ImportSync, canActivate: [authGuard] },
   { path: 'imports/sync/:id', component: ImportSyncDetail, canActivate: [authGuard] },
   { path: 'imports/accounts/:id', component: ImportAccount, canActivate: [authGuard] },

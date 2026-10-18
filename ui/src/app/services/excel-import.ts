@@ -57,7 +57,7 @@ export interface ExcelField {
 export interface ExcelValidationIssue {
   row: number | null;
   account?: string | null;
-  errors: { code: string; field?: string; label?: string; column?: string }[];
+  errors: { code: string; field?: string; label?: string; column?: string; firstRow?: number }[];
 }
 
 export interface ExcelValidation {
@@ -109,6 +109,167 @@ export interface ImportAccountDetail {
 }
 export interface ImportQuality extends ImportRecord {
   issues: { type: string; count: number }[];
+}
+
+export interface ProjectRule {
+  id: string;
+  keyword: string;
+}
+
+export interface ProjectRow {
+  id: string | null;
+  name: string;
+  tallyProjectId: number | null;
+  tallyProjectName: string | null;
+  budgetExpense: string | null;
+  targetRevenue: string | null;
+  rules: ProjectRule[];
+  parties: number;
+  billed: string | null;
+  paid: string | null;
+  pending: string | null;
+  paidPct: number | null;
+  matched: number;
+  differences: number;
+  unavailable: number;
+  tallyOnlyLedgers: number;
+  gap: string | null;
+  excelAmount: string | null;
+  tallyAmount: string | null;
+  /** Excel minus Tally. */
+  netDifference: string | null;
+  budgetUsedPct: number | null;
+  budgetStatus: 'NO_BUDGET' | 'ON_TRACK' | 'AT_RISK' | 'OVER_BUDGET';
+  tallyVouchers: number | null;
+  tallyVouchersWithAmount: number | null;
+  tallyLastVoucherDate: string | null;
+  health: 'IN_SYNC' | 'HAS_GAPS' | 'COMPARISON_UNAVAILABLE' | 'EMPTY';
+}
+
+export interface ProjectSummary {
+  company: { id: string; name: string; tallyCompanyId: number };
+  currency: string | null;
+  monetaryAvailable: boolean;
+  currencyMessage: string | null;
+  /** Assumptions the comparison made (company currency, undated Tally balances). */
+  notes: string[];
+  projects: ProjectRow[];
+  unassigned: ProjectRow;
+  tallyProjects: { id: number; name: string }[];
+  coverage: { assigned: number; total: number };
+  tally: { vouchers: number; vouchersWithAmount: number; amountsAvailable: boolean };
+  latestImport: {
+    id: string;
+    file_name: string;
+    status: string;
+    reporting_date: string | null;
+    published_at: string;
+    detail_rows: number;
+  } | null;
+}
+
+export interface ProjectSuggestion {
+  keyword: string;
+  count: number;
+  tallyProjectId?: number;
+  tallyProjectName?: string;
+  source: 'TALLY_PROJECT' | 'NAME_SUFFIX';
+}
+
+export interface ProjectInput {
+  name?: string;
+  tallyProjectId?: number | null;
+  budgetExpense?: string | null;
+  targetRevenue?: string | null;
+  keywords?: string[];
+}
+
+export interface ProjectDetail {
+  company: { id: string; name: string };
+  project: {
+    id: string;
+    name: string;
+    budget_expense: string | null;
+    target_revenue: string | null;
+    tally_project_id: number | null;
+    tally_project_name: string | null;
+    rules: ProjectRule[];
+  } | null;
+  projectChoices: { id: string; name: string }[];
+  tallyProjects: { id: number; name: string }[];
+  items: ImportRecord[];
+  total: number;
+  page: number;
+  pageSize: number;
+  tallyOnly: ImportRecord[];
+}
+
+/** What one project looked like when one Excel file was imported. */
+export interface ProjectHistoryItem {
+  importId: string;
+  batchId: string;
+  fileName: string;
+  generation: number;
+  importedAt: string | null;
+  reportingDate: string | null;
+  current: boolean;
+  projectId: string | null;
+  projectName: string;
+  currency: string | null;
+  parties: number;
+  billed: string | null;
+  paid: string | null;
+  pending: string | null;
+  paidPct: number | null;
+  matched: number;
+  differences: number;
+  unavailable: number;
+  tallyOnlyLedgers: number;
+  gap: string | null;
+}
+
+export interface ProjectHistory {
+  company: { id: string; name: string };
+  items: ProjectHistoryItem[];
+}
+
+/** An Excel party and the Tally ledger it was matched to, if any. */
+export interface PresenceExcelRow {
+  account_id: string;
+  account_name: string;
+  level_1_category: string | null;
+  project_name: string;
+  tally_ledger_id: number | null;
+  tally_ledger_name: string | null;
+  match_method: string | null;
+  source_amount: string | null;
+  tally_amount: string | null;
+  tally_group: string | null;
+}
+
+/** A Tally ledger with a balance that no Excel party was matched to. */
+export interface PresenceTallyRow {
+  tally_ledger_id: number;
+  tally_ledger_name: string;
+  tally_amount: string | null;
+  tally_group: string | null;
+  project_name: string;
+}
+
+export interface Presence {
+  company: { id: string; name: string };
+  latestImport: { file_name: string; reporting_date: string | null } | null;
+  summary: {
+    excelParties: number;
+    found: number;
+    possible: number;
+    missingInTally: number;
+    missingInExcel: number;
+  };
+  missingInTally: PresenceExcelRow[];
+  possible: PresenceExcelRow[];
+  found: PresenceExcelRow[];
+  missingInExcel: PresenceTallyRow[];
 }
 
 export interface ExcelUploadProgress {
@@ -301,6 +462,76 @@ export class ExcelImportService {
   audit(entity = '', limit = 100) {
     return this.http.get<ImportRecord[]>('/api/imports/audit', {
       params: this.params({ entity, limit }),
+    });
+  }
+
+  projects(company: string) {
+    return this.http.get<ProjectSummary>('/api/imports/projects', { params: this.params({ company }) });
+  }
+
+  projectSuggestions(company: string) {
+    return this.http.get<ProjectSuggestion[]>('/api/imports/projects/suggestions', {
+      params: this.params({ company }),
+    });
+  }
+
+  projectDetail(company: string, id: string, filters: { q?: string; status?: string } = {}) {
+    return this.http.get<ProjectDetail>(`/api/imports/projects/${encodeURIComponent(id)}`, {
+      params: this.params({ company, ...filters, pageSize: 500 }),
+    });
+  }
+
+  createProject(company: string, input: ProjectInput) {
+    return this.http.post<{ id: string; assigned: number }>('/api/imports/projects', { company, ...input });
+  }
+
+  updateProject(id: string, input: Omit<ProjectInput, 'keywords'>) {
+    return this.http.put(`/api/imports/projects/${encodeURIComponent(id)}`, input);
+  }
+
+  deleteProject(id: string) {
+    return this.http.delete(`/api/imports/projects/${encodeURIComponent(id)}`);
+  }
+
+  addProjectRule(id: string, keyword: string) {
+    return this.http.post<{ assigned: number }>(`/api/imports/projects/${encodeURIComponent(id)}/rules`, { keyword });
+  }
+
+  deleteProjectRule(ruleId: string) {
+    return this.http.delete(`/api/imports/projects/rules/${encodeURIComponent(ruleId)}`);
+  }
+
+  applyProjectRules(company: string) {
+    return this.http.post<{ changed: number; assigned: number }>('/api/imports/projects/apply', { company });
+  }
+
+  assignProject(accountId: string, projectId: string | null) {
+    return this.http.put(`/api/imports/accounts/${encodeURIComponent(accountId)}/project`, { projectId });
+  }
+
+  /** Which Excel parties exist in Tally and which Tally ledgers are not in the Excel (by name). */
+  missing(company: string) {
+    return this.http.get<Presence>('/api/imports/missing', { params: this.params({ company }) });
+  }
+
+  missingReport(company: string, format: 'xlsx' | 'csv') {
+    return this.http.get(`/api/imports/missing/report/${format}`, {
+      params: this.params({ company }),
+      responseType: 'blob',
+    });
+  }
+
+  projectHistory(company: string, project?: string) {
+    return this.http.get<ProjectHistory>('/api/imports/projects/history', {
+      params: this.params({ company, project }),
+    });
+  }
+
+  /** Tally vs Excel difference report grouped by project. */
+  projectReport(company: string, format: 'xlsx' | 'csv') {
+    return this.http.get(`/api/imports/projects/report/${format}`, {
+      params: this.params({ company }),
+      responseType: 'blob',
     });
   }
 

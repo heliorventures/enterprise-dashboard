@@ -9,6 +9,7 @@ const { netOutstanding, ageingEntries } = require('../transform/normalize');
 const tally = require('../tally/provider');
 const { reconcileAccounts } = require('../reconciliation/engine');
 const audit = require('../audit');
+const projects = require('../projects/service');
 const { stage, shouldPublish } = require('./publication');
 const decimal = require('../transform/decimal');
 const {basis,reconciliationSummary,publicBatch} = require('../currency');
@@ -190,6 +191,14 @@ async function preview(id) {
 async function prepare(file, database = db) {
   const analysis = await analyzeWorkbook(await fs.readFile(file.stored_path));
   if (Object.hasOwn(file.analysis || {},'declaredCurrency')) analysis.currency=file.analysis.declaredCurrency;
+  // A workbook that states no currency uses the company's currency (INR by default),
+  // and says so in the frozen inputs. A stated or declared currency always wins.
+  if (!analysis.currency) {
+    const company = (await database.query(
+      `SELECT c."Currency" AS currency FROM intel_companies ic JOIN "Companies" c ON c."CompanyID"=ic.tally_company_id WHERE ic.id=$1`,[file.company_id])).rows[0];
+    const fallback = require('../../reportCurrency').currencyCode(company?.currency) || require('../../reportCurrency').currencyCode(require('../config').defaultCurrency);
+    if (fallback) { analysis.currency = fallback; analysis.currencyAssumed = true; }
+  }
   const maps = await loadMaps(database, {sourceSystemId:file.source_system_id, companyId:file.company_id});
   const columns = resolveMaps(maps, analysis.columns);
   let categoryPath=[],lastType=null;
@@ -347,6 +356,9 @@ async function publishGeneration(client,reserved) {
       }, {}))), publishEligible]
     );
     const accountByName = new Map(accounts.rows.map((row) => [row.account_name, row]));
+    // New parties join their project through the company's keyword rules; parties
+    // a user placed manually keep their project.
+    await projects.applyRules(client, companyId);
     await transactionalProgress(batchId, 64, 'Saving outstanding balances');
     const outstandingRows = await client.query(
       `INSERT INTO intel_outstanding (
@@ -403,7 +415,7 @@ async function publishGeneration(client,reserved) {
   const reconInput = details.map(item => ({outstanding_id:item.outstandingId,account_id:item.account.id,company_id:companyId,
     account_name:item.mapped.account_name,pan_number:item.mapped.pan_number,gst_number:item.mapped.gst_number,
     source_amount:netOutstanding(item.mapped,rulebook.net_outstanding_formula?.expression)}));
-  const context = {reportingDate:file.reporting_period_to,balanceDate:reference.balanceDate,batchId:reference.batchId,maps:accountMaps,
+  const context = {reportingDate:file.reporting_period_to,balanceDate:reference.balanceDate,balanceDateAssumed:reference.balanceDateAssumed===true,batchId:reference.batchId,maps:accountMaps,
     sourceCurrency:analysis.currency,tallyCurrency:reference.uniformCurrency ? reference.currency : null};
   const reconciled = reconcileAccounts(reconInput,reference.ledgers,rulebook,context);
   for (const row of [...reconciled.matched,...reconciled.missingInSource]) {
@@ -418,6 +430,8 @@ async function publishGeneration(client,reserved) {
     source_total_status=$7,source_total_debit=$8,source_total_credit=$9,calculated_total_debit=$10,calculated_total_credit=$11,
     progress_percent=100,progress_message='Completed',completed_at=now(),heartbeat_at=now() WHERE id=$1 AND lease_token=$12`,
     [batchId,successful,warning,failed,analysis.counts.groupRows,analysis.counts.dataRows,totalStatus,sourceDebit,sourceCredit,calcDebit,calcCredit,token,analysis.rows.length]);
+  // Keep what every project looked like for this upload, for progress over time.
+  await projects.snapshotBatch(client, companyId, batchId);
   if (publishEligible) await client.query(`INSERT INTO intel_company_publications(company_id,import_batch_id,reporting_date) VALUES($1,$2,$3)
     ON CONFLICT(company_id) DO UPDATE SET import_batch_id=EXCLUDED.import_batch_id,reporting_date=EXCLUDED.reporting_date,published_at=now()`,[companyId,batchId,file.reporting_period_to]);
   await client.query(`UPDATE intel_import_files SET status='COMPLETED' WHERE id=$1`,[id]);

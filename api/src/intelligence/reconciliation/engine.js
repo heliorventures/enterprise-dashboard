@@ -19,7 +19,10 @@ function comparison(row, ledger, match, rules, context) {
   const tallyAmount = ledger ? decimal.amount(ledger.balance) : null;
   const currency = require('../../reportCurrency').currencyCode(context.sourceCurrency);
   const tallyCurrency = require('../../reportCurrency').currencyCode(ledger?.currency || context.tallyCurrency);
-  const available = Boolean(context.reportingDate && context.balanceDate && context.reportingDate === context.balanceDate
+  // Legacy Tally balances have no date. Only when that is explicitly allowed are they
+  // treated as dated the same as the Excel; a dated snapshot must always agree.
+  const sameDate = context.balanceDate ? context.reportingDate === context.balanceDate : context.balanceDateAssumed === true;
+  const available = Boolean(context.reportingDate && sameDate
     && currency && currency===tallyCurrency && currency===require('../../reportCurrency').currencyCode(context.tallyCurrency));
   const difference = available ? decimal.subtract(sourceAmount, tallyAmount || 0) : null;
   const status = available ? !ledger ? 'MISSING_IN_TALLY' : decimal.abs(difference) <= decimal.cents(rules.amount_tolerance?.amount ?? 1000)
@@ -51,10 +54,33 @@ function reconcileAccounts(sourceRows, ledgers, rules = {}, context = {}) {
     reservations.set(id,row.account_id);
   }
   const used = new Set(reservations.keys());
+  // Names that differ only by spacing or punctuation ("X  2%" and "X 2%") normalize to
+  // the same text. Within such a group the account whose exact name equals a Tally
+  // ledger name claims that ledger first, so the result does not depend on row order.
+  const exactName = value => String(value ?? '').trim().toLowerCase();
+  const groups = new Map();
+  for (const row of sourceRows) {
+    if (mapsByAccount.has(row.account_id)) continue;
+    const key = normalizeName(row.account_name);
+    if (key) groups.set(key, [...(groups.get(key) || []), row]);
+  }
+  const claims = new Map();
+  for (const rows of groups.values()) {
+    if (rows.length < 2) continue;
+    for (const row of rows) {
+      const ledger = ledgers.find(item => !used.has(Number(item.id)) && exactName(item.name) === exactName(row.account_name));
+      if (ledger) { used.add(Number(ledger.id)); claims.set(row, ledger); }
+    }
+  }
   const matched = sourceRows.map(row => {
     const manual = mapsByAccount.get(row.account_id);
     if (manual) return comparison(row,manualLedgers.get(row.account_id),{method:'MANUAL',score:1,fields:['manual_map']},rules,context);
     const account = {...row,normalized:normalizeName(row.account_name),pan:row.pan_number,gst:row.gst_number};
+    const claimed = claims.get(row);
+    if (claimed) {
+      const match = scoreMatch(account,{...claimed,normalized:claimed.normalized || normalizeName(claimed.name)},row.source_amount || 0,claimed.balance,rules);
+      return comparison(row,claimed,match,rules,context);
+    }
     let best = null;
     for (const ledger of ledgers) {
       if (used.has(Number(ledger.id))) continue;
