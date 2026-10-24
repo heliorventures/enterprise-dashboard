@@ -163,6 +163,9 @@ test('Excel parties are grouped by project and compared with Tally per project',
 
     await t.test('history and the report download are served over HTTP behind the session', async () => {
       const { app } = require('../src/server');
+      const localSite = (await db.query(`INSERT INTO dashboard_sites(hostname,display_name)
+        VALUES('127.0.0.1','Project integration test') ON CONFLICT(hostname) DO UPDATE SET enabled=true RETURNING id`)).rows[0];
+      await db.query('INSERT INTO dashboard_site_companies(site_id,company_id) VALUES($1,$2) ON CONFLICT DO NOTHING', [localSite.id,tallyId]);
       const server = app.listen(0, '127.0.0.1');
       await new Promise(resolve => server.once('listening', resolve));
       const origin = `http://127.0.0.1:${server.address().port}`;

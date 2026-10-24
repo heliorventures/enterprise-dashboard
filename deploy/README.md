@@ -35,7 +35,7 @@ Back up the application's `shared` folder with an account that can read these ow
 
 ## First deployment preparation
 
-1. The confirmed domain is `finance.heliorsoft.com`. Verify its DNS and the existing Docker network. Keep PostgreSQL private. Add only the site block from `Caddyfile.example` to the existing shared Caddyfile, using the confirmed finance domain. Preserve the HRMS/RMS blocks in the supplied shared-file reference. The Cloudflare origin certificate option must cover the chosen domain. Back up and validate the full shared file before reloading:
+1. Company websites use `scfinance.heliorsoft.com` and `sbfinance.heliorsoft.com`; `finance.heliorsoft.com` remains available for machine ingestion. Follow [company website configuration and migration](dashboard-sites.md) for the initial five/one split and future configuration-only changes. Verify DNS and the existing Docker network. Keep PostgreSQL private. Add only the finance site block from `Caddyfile.example` to the existing shared Caddyfile. Preserve HRMS/RMS routes. Certificate coverage must include the chosen domains. Back up and validate the full shared file before reloading:
 
    ```bash
    cp /opt/apps/Caddyfile /opt/apps/Caddyfile.before-enterprise-dashboard

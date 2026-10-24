@@ -1,5 +1,6 @@
 # Run after building enterprise-dashboard-{api,ui}:local-test and starting the
 # disposable enterprise-dashboard-pg-test database on enterprise-dashboard-test-network.
+# dashboard_test must be a non-superuser, non-BYPASSRLS role for website checks.
 # Uses only the dedicated enterprise-dashboard-test Compose project.
 [CmdletBinding()]
 param()
@@ -30,6 +31,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'API smoke checks failed' }
     @'
 const assert = require('node:assert/strict');
+const db = require('./src/db');
 (async () => {
   const origin = 'http://enterprise-dashboard-ui:8080';
   assert.equal(await (await fetch(origin + '/healthz')).text(), 'enterprise-dashboard local-test');
@@ -52,6 +54,10 @@ const assert = require('node:assert/strict');
     assert.equal(response.status, 200);
     assert.equal((await response.json()).duplicate, duplicate);
   }
+  const site = (await db.query(`INSERT INTO dashboard_sites(hostname,display_name)
+    VALUES('enterprise-dashboard-ui','Container test') ON CONFLICT(hostname) DO UPDATE SET enabled=true RETURNING id`)).rows[0];
+  await db.query(`INSERT INTO dashboard_site_companies(site_id,company_id)
+    SELECT $1,"CompanyID" FROM "Companies" WHERE "ExternalID"='container-test-company' ON CONFLICT DO NOTHING`, [site.id]);
   const login = await fetch(origin + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username: 'tester', password: 'local-test-password' }) });
   assert.equal(login.status, 200);
@@ -59,7 +65,7 @@ const assert = require('node:assert/strict');
   const dashboard = await (await fetch(origin + '/api/dashboard', { headers: { Cookie: cookie } })).json();
   assert.equal(dashboard.kpis.revenue, 123.45);
   console.log('Container routing, browser authentication, ingestion and retry checks passed.');
-})().catch(error => { console.error(error); process.exitCode = 1; });
+})().finally(() => db.close()).catch(error => { console.error(error); process.exitCode = 1; });
 '@ | & docker @compose exec -T enterprise-dashboard-api node
     if ($LASTEXITCODE -ne 0) { throw 'Container routing checks failed' }
 } finally {

@@ -36,10 +36,11 @@ test('existing Intel identities are adopted into the checksum owner without exec
   assert.deepEqual(calls.slice(-2).map(c => c.sql), ['COMMIT', 'RELEASE']);
   assert.equal(calls.some(c => c.sql.startsWith('INSERT INTO schema_migrations')), false,
     'old images must not see unknown new identities during a rollback');
-  assert.ok(versions.every(version => Number(version.split('_')[0]) <= 19));
+  assert.ok(versions.every(version => Number(version.split('_')[0]) <= 19 || version === '028_dashboard_sites.sql'));
   const forward = calls.filter(c => c.sql.startsWith('INSERT INTO application_schema_history'));
   assert.ok(forward.some(call => call.params[0] === '020_ingestion_integrity.sql'));
-  assert.ok(forward.every(call => call.params[2] === 19));
+  assert.ok(forward.every(call => call.params[2] === (call.params[0] === '028_dashboard_sites.sql' ? 28 : 19)));
+  assert.ok(versions.includes('028_dashboard_sites.sql'), 'old unscoped binaries must refuse the website access boundary');
 });
 
 test('unknown legacy migration is rejected atomically rather than guessing its schema', async () => {

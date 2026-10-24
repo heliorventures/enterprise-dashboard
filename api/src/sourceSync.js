@@ -80,6 +80,13 @@ function mapItem(row) {
 }
 
 function mapRun(row, items = []) {
+  if (db.currentSite()) {
+    const done = items.filter(item => !['pending', 'running'].includes(item.status)).length;
+    const running = done < items.length;
+    row = { ...row, company_total: items.length, company_done: done,
+      ...(running ? { status: 'running', message: `Promoted ${done} of ${items.length} companies` }
+        : finishState(items)) };
+  }
   return {
     id: row.run_id,
     status: row.status,
@@ -105,6 +112,8 @@ function finishState(items) {
 }
 
 async function failOrphans() {
+  // A website cannot reconcile the state of a machine run spanning other sites.
+  if (db.currentSite()) return;
   const live = [...activeRuns];
   await db.query(
     `UPDATE source_sync_items
@@ -270,6 +279,7 @@ async function recordBatch(batchId, { triggeredBy = 'source-complete' } = {}) {
 }
 
 module.exports = {
+  recoverInterruptedRuns: failOrphans,
   progress,
   itemFromPromote,
   finishState,

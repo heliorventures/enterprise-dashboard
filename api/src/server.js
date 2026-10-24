@@ -10,6 +10,7 @@ const { registerTallyRoutes } = require('./tallyRoutes');
 const reports = require('./reports');
 const managementReports = require('./managementReports');
 const auth = require('./auth');
+const sites = require('./dashboardSites');
 const { registerExcelImportRoutes } = require('./intelligence/routes');
 
 const app = express();
@@ -103,9 +104,9 @@ app.post('/api/ingest/tally', authenticateSender, express.json({ limit: '20mb' }
   }
 });
 app.use(express.json());
-app.post('/api/auth/login', proxies.middleware, auth.login);
+app.post('/api/auth/login', sites.middleware, proxies.middleware, auth.login);
 app.post('/api/auth/logout', auth.logout);
-app.get('/api/auth/session', auth.requireSession, auth.session);
+app.get('/api/auth/session', auth.requireSession, sites.middleware, auth.session);
 app.use('/api', (req, res, next) => {
   if (req.path === '/health' || req.path === '/auth/login' || req.path === '/auth/logout' || req.path === '/auth/session') {
     return next();
@@ -114,6 +115,10 @@ app.use('/api', (req, res, next) => {
     return next();
   }
   return auth.requireSession(req, res, next);
+});
+app.use('/api', (req, res, next) => {
+  if (req.path === '/health') return next();
+  return sites.middleware(req, res, next);
 });
 
 app.get('/api/health', async (_req, res) => {
@@ -262,6 +267,7 @@ async function start() {
   if (config.production && config.ingestToken.length < 32) throw new Error('TALLY_INGEST_TOKEN must contain at least 32 characters');
   auth.validateConfiguration();
   await db.migrate();
+  await sourceSync.recoverInterruptedRuns();
   const server = app.listen(config.port, config.host, () => console.log('API listening on port ' + config.port));
   for (const signal of ['SIGTERM', 'SIGINT']) process.once(signal, () => {
     server.close(() => db.close().then(() => process.exit(0)));

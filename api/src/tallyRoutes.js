@@ -1,6 +1,13 @@
 const config = require('./config');
 const tally = require('./tally');
 const dashboardService = require('./dashboardService');
+const db = require('./db');
+
+function scopedLiveAccess(res) {
+  if (!db.currentSite()) return false;
+  res.status(409).json({ error: 'Use the archived Tally reports on company-scoped websites' });
+  return true;
+}
 
 function matchCompany(requested, companies) {
   const name = String(requested || '').trim();
@@ -18,6 +25,7 @@ function matchCompany(requested, companies) {
 }
 
 async function requireTally(res) {
+  if (scopedLiveAccess(res)) return null;
   const status = await tally.ping({ fresh: true });
   if (!status.connected) {
     res.status(503).json({
@@ -55,6 +63,7 @@ async function resolveCompany(req, res, status) {
 
 function registerTallyRoutes(app) {
   app.get('/api/tally/status', async (_req, res) => {
+    if (scopedLiveAccess(res)) return;
     const status = await tally.ping({ fresh: true });
     res.status(status.connected ? 200 : 503).json({
       source: 'tally',

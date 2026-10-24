@@ -6,6 +6,9 @@ process.env.DASHBOARD_PASSWORD = 'retained-api-password';
 process.env.DASHBOARD_SESSION_SECRET = 'retained-api-session-secret-at-least-32-chars';
 const { app } = require('../src/server');
 const db = require('../src/db');
+// Keep the real site context while replacing this suite's external registry lookup.
+const siteForHost = db.siteForHost;
+db.siteForHost = async hostname => hostname === '127.0.0.1' ? { id: 1, hostname } : undefined;
 const dashboard = require('../src/intelligence/dashboard/service');
 const imports = require('../src/intelligence/imports/service');
 const audit = require('../src/intelligence/audit');
@@ -24,6 +27,7 @@ before(async () => {
   cookie = response.headers.get('set-cookie').split(';')[0];
 });
 after(async () => {
+  db.siteForHost = siteForHost;
   if (server) await new Promise(resolve => server.close(resolve));
   await db.close();
 });

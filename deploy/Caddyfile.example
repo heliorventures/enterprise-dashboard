@@ -28,8 +28,12 @@ rms.heliorsoft.com {
     reverse_proxy rms-app:3000
 }
 
-finance.heliorsoft.com {
-    reverse_proxy enterprise-dashboard-ui:8080
+scfinance.heliorsoft.com, sbfinance.heliorsoft.com, finance.heliorsoft.com {
+    # finance remains reachable for existing token-authenticated Tally senders.
+    # Browser company access requires an enabled exact hostname in dashboard_sites.
+    reverse_proxy enterprise-dashboard-ui:8080 {
+        header_up Host {host}
+    }
 }
 
 api.heliorsoft.com {

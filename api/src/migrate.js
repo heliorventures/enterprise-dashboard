@@ -94,6 +94,8 @@ async function migrate(pool) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // Old processes without explicit context must fail closed after site cutover.
+    await client.query("SET LOCAL dashboard.access_mode='system'");
     await client.query('SELECT pg_advisory_xact_lock(74312001)');
     await client.query(`CREATE TABLE IF NOT EXISTS application_migrations (
       version text PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP)`);

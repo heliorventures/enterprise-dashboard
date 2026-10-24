@@ -74,12 +74,13 @@ async function requiredFields() {
 
 async function upload({ buffer, fileName, companyId, uploadedBy }) {
   const fileHash = await hashBuffer(buffer);
+  const company = await ensureCompany({ companyId });
   const existing = await db.query(
-    `SELECT id, file_name, uploaded_at, status FROM intel_import_files WHERE file_hash=$1 ORDER BY uploaded_at DESC LIMIT 1`,
-    [fileHash]
+    `SELECT id, file_name, uploaded_at, status FROM intel_import_files
+     WHERE file_hash=$1 AND company_id=$2 ORDER BY uploaded_at DESC LIMIT 1`,
+    [fileHash, company.id]
   );
   const source = await excelSource();
-  const company = await ensureCompany({ companyId });
   const analysis = await analyzeWorkbook(buffer);
   const maps = await loadMaps(db, { sourceSystemId: source?.id, companyId: company.id });
   analysis.columns = resolveMaps(maps, analysis.columns);
@@ -163,7 +164,13 @@ function summaryPayload(file) {
 
 async function getFile(id) {
   const result = await db.query(
-    `SELECT f.*, c.name AS company_name, s.name AS source_name
+    `SELECT f.*, c.name AS company_name, s.name AS source_name,
+       (CASE WHEN jsonb_typeof(f.analysis)='object' THEN f.analysis ELSE '{}'::jsonb END)
+       || jsonb_build_object('duplicateOf',(
+         SELECT jsonb_build_object('id',d.id,'file_name',d.file_name,'uploaded_at',d.uploaded_at,'status',d.status)
+         FROM intel_import_files d WHERE d.id::text=f.analysis->'duplicateOf'->>'id'
+           AND d.company_id=f.company_id
+       )) AS analysis
      FROM intel_import_files f
      LEFT JOIN intel_companies c ON c.id=f.company_id
      LEFT JOIN intel_source_systems s ON s.id=f.source_system_id

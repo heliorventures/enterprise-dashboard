@@ -6,6 +6,9 @@ process.env.DASHBOARD_PASSWORD = 'secret-pass';
 process.env.DASHBOARD_SESSION_SECRET = 'test-session-secret-at-least-32-chars!!';
 const { app } = require('../src/server');
 const db = require('../src/db');
+// These are HTTP/auth contract tests; SQL ownership is exercised against PostgreSQL.
+const siteForHost = db.siteForHost;
+db.siteForHost = async hostname => hostname === '127.0.0.1' ? { id: 1, hostname } : undefined;
 let server;
 
 test('saved exports succeed independently of automatic sync validation, including retries', async () => {
@@ -40,6 +43,7 @@ test('saved exports succeed independently of automatic sync validation, includin
   }
 });
 after(async () => {
+  db.siteForHost = siteForHost;
   if (server) await new Promise(resolve => server.close(resolve));
   await db.close();
 });
