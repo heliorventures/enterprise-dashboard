@@ -5,7 +5,7 @@ const {safeText}=require('./export-diagnostics');
 const EVENTS=new Set(['tally_export_failed','source_collection_failed','source_consistency_failed','source_capture_failed','source_upload_failed','run_failure','run_cancelled','source_readiness_failed','source_readiness_warning']);
 function exporterIdentity() {
   const hash=createHash('sha256');
-  for(const file of ['source-agent.js','source-export.js','source-readiness.js','export-diagnostics.js','tally-encoding.js','diagnostic-outbox.js','outbox.js','tally.js','scope.js'])hash.update(file).update(fs.readFileSync(path.join(__dirname,file)));
+  for(const file of ['source-agent.js','source-export.js','source-readiness.js','export-diagnostics.js','tally-encoding.js','source-limits.js','diagnostic-outbox.js','outbox.js','tally.js','scope.js'])hash.update(file).update(fs.readFileSync(path.join(__dirname,file)));
   return {version:require('./package.json').version,contract:'financial-source-v2',buildHash:hash.digest('hex')};
 }
 function diagnosticQueue(directory,config,log) {
@@ -16,7 +16,7 @@ function diagnosticQueue(directory,config,log) {
       if(!EVENTS.has(event.event))return;
       const diagnostic=event.diagnostic||event;
       const details={};
-      for(const name of ['requestId','requestHash','phase','stage','endpoint','httpStatus','bytesReceived','recordsReceived','recordsProcessed','discardedRecords','durationMs','xmlLine','xmlColumn','xmlPosition','xmlPath','xmlCharacterReference','contentType','charset','action','tallyMessage','from','to','errorCount','warningCount','serverDiagnosticId','operation','attempt']) {
+      for(const name of ['requestId','requestHash','phase','stage','endpoint','httpStatus','bytesReceived','recordsReceived','recordsProcessed','discardedRecords','durationMs','xmlLine','xmlColumn','xmlPosition','xmlPath','xmlCharacterReference','contentType','charset','action','tallyMessage','from','to','errorCount','warningCount','serverDiagnosticId','operation','attempt','actualBytes','limitBytes','invalidByteOffset','invalidByteValue','utf8LeadingByte','utf8SequenceStartOffset','utf8ExpectedContinuationBytes','utf8FailureReason']) {
         const value=diagnostic[name]??event[name];
         if(typeof value==='string')details[name]=safeText(value);
         else if(typeof value==='number'&&Number.isSafeInteger(value)&&value>=0)details[name]=value;

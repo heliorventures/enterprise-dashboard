@@ -2,6 +2,10 @@ function explainError(error={}) {
   const diagnostic=error.exportDiagnostic||error.diagnostic||{};
   const codes=[error.code,...(diagnostic.errorCodes||[])];
   const message=String(error.message||error.error||'');
+  if(codes.includes('SOURCE_STAGING_LIMIT'))return 'Finance upload staging is full. Your completed capture is saved locally; retry after the server has capacity.';
+  if(codes.includes('SOURCE_SNAPSHOT_LIMIT')||/Source snapshot exceeds (capture|transfer|configured)/.test(message))return 'This company exceeds the configured sync size limit. Ask your administrator to review Finance server capacity and the reported size budget.';
+  if(codes.some(c=>['SOURCE_RECORD_LIMIT','SOURCE_CHUNK_LIMIT','SOURCE_COLLECTION_LIMIT'].includes(c)))return 'This company exceeds the supported export size or record limit. Share the diagnostic log with your administrator.';
+  if(codes.includes('ERR_ENCODING_INVALID_ENCODED_DATA'))return 'Tally returned invalid UTF-8 encoding. Share the diagnostic log with your administrator; it identifies the failing byte position.';
   if(message.includes('BATCH_LEDGER_'))return 'Tally returned an incomplete or changed ledger batch. No complete capture was uploaded. Check Tally and share the diagnostic log.';
   if(message.includes('PERIOD_CAPTURE_STALE'))return 'Finance already has newer data. This old capture is retained for investigation. Click Sync now again to take a fresh capture.';
   if(message.includes('PERIOD_BASELINE_REQUIRED'))return 'Run All data once for this company and resolve any Finance processing errors before using a shorter period.';
@@ -32,6 +36,10 @@ function publicEvent(event) {
   const d=event.diagnostic||event;
   if(Array.isArray(d.errorCodes))result.errorCodes=d.errorCodes.filter(c=>typeof c==='string'&&/^[A-Za-z][A-Za-z0-9_]{0,60}$/.test(c)).slice(0,10);
   for(const key of ['httpStatus','xmlLine','xmlColumn'])if(Number.isFinite(d[key]))result[key]=d[key];
+  for(const key of ['actualBytes','limitBytes','invalidByteOffset','invalidByteValue','utf8LeadingByte','utf8SequenceStartOffset','utf8ExpectedContinuationBytes']) {
+    if(Number.isSafeInteger(d[key])&&d[key]>=0)result[key]=d[key];
+  }
+  if(['invalid_leading_byte','invalid_continuation','incomplete_sequence'].includes(d.utf8FailureReason))result.utf8FailureReason=d.utf8FailureReason;
   return result;
 }
 module.exports={publicEvent,explainError};

@@ -21,6 +21,8 @@ function codes(error) {
   visit(error);return [...found];
 }
 function hint(errorCodes,stage,status) {
+  if(errorCodes.includes('SOURCE_SNAPSHOT_LIMIT'))return 'The complete company snapshot exceeds the configured size budget. Review the reported actualBytes/limitBytes and the Finance server capacity before retrying.';
+  if(errorCodes.includes('SOURCE_RECORD_LIMIT')||errorCodes.includes('SOURCE_CHUNK_LIMIT'))return 'The complete snapshot exceeds the supported record or chunk count. Review its volume before retrying.';
   if(errorCodes.includes('XML_INVALID_CHARACTER_REFERENCE'))return 'The response contains a numeric character reference rejected by XML. Use xmlPath and xmlLine/xmlColumn to identify it; do not strip source characters.';
   if(errorCodes.includes('XML_INVALID_CHARACTER'))return 'The response contains a character not allowed by the XML parser. Use the reported XML position to inspect the export encoding/control characters.';
   if(errorCodes.includes('XML_UNDEFINED_ENTITY'))return 'The response contains an undefined XML entity. Check escaping in the source export at the reported XML position.';
@@ -62,7 +64,7 @@ async function exportXml(config,{collection,company,body,createParser,phase='exp
     ...(config.scope?{from:config.scope.from,to:config.scope.to}:{})};
   let stage='connect',status=null,bytes=0,recordsReceived=0,recordsProcessed=0,xml,contentType,charset,decoder;
   const snapshot=()=>({...context,stage,httpStatus:status,bytesReceived:bytes,recordsReceived,recordsProcessed,durationMs:Date.now()-started,contentType,charset,...xml?.diagnostics?.(),
-    ...(decoder?.count?{encodingCompatibility:decoder.diagnostics()}:{})});
+    ...(decoder?.count?{encodingCompatibility:decoder.diagnostics()}:{}),...decoder?.failure});
   log({event:'tally_export_started',...context,timeoutMs:config.requestTimeoutMs,requestBytes:Buffer.byteLength(body)});
   const heartbeat=setInterval(()=>log({event:'tally_export_progress',...snapshot()}),10000);
   heartbeat.unref?.();
@@ -93,7 +95,8 @@ async function exportXml(config,{collection,company,body,createParser,phase='exp
     log({event:'tally_export_finished',...snapshot()});return bytes;
   } catch(error) {
     const errorCodes=codes(error);
-    const diagnostic={...snapshot(),errorCodes,...error.xmlDiagnostic,...(error.tallyMessage?{tallyMessage:safeText(error.tallyMessage)}:{}),action:hint(errorCodes,stage,status)};
+    const diagnostic={...snapshot(),errorCodes,...error.xmlDiagnostic,...(error.tallyMessage?{tallyMessage:safeText(error.tallyMessage)}:{}),
+      ...(Number.isSafeInteger(error.limitBytes)?{limitBytes:error.limitBytes,actualBytes:error.actualBytes}:{}),action:hint(errorCodes,stage,status)};
     error.exportDiagnostic=diagnostic;
     log({event:'tally_export_failed',...diagnostic});throw error;
   } finally {clearInterval(heartbeat);}

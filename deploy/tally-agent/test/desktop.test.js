@@ -8,11 +8,11 @@ const {deliver}=require('../outbox');
 const {withLock}=require('../launcher');
 const envelope=rows=>`<ENVELOPE><BODY><DATA><COLLECTION>${rows}</COLLECTION></DATA></BODY></ENVELOPE>`;
 const company=(id,name)=>`<COMPANY NAME="${name}"><NAME>${name}</NAME><GUID>${id}</GUID></COMPANY>`;
-const diagnostics=(url,options)=>String(url).endsWith('/diagnostics')?new Response(JSON.stringify({ok:true,ids:JSON.parse(options.body).events.map(e=>e.id)})):null;
+const diagnostics=(url,options)=>String(url).endsWith('/capabilities')?new Response('',{status:404}):String(url).endsWith('/diagnostics')?new Response(JSON.stringify({ok:true,ids:JSON.parse(options.body).events.map(e=>e.id)})):null;
 
 test('desktop failure stops at the first collection without contacting another company or uploading',async()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'finance-fail-fast-')),original=global.fetch,calls=[];
-  global.fetch=async(url,options)=>{const ack=diagnostics(url,options);if(ack)return ack;calls.push(options.body);if(String(url).startsWith('https:'))throw new Error('Unexpected upload');if(options.body.includes('<TYPE>Group</TYPE>'))throw new Error('Synthetic busy Tally');return new Response(envelope(company('a','Alpha')+company('b','Beta')));};
+  global.fetch=async(url,options)=>{if(String(url).endsWith('/capabilities'))return new Response(JSON.stringify({protocol:1,maxSnapshotBytes:1024**3}));const ack=diagnostics(url,options);if(ack)return ack;calls.push(options.body);if(String(url).startsWith('https:'))throw new Error('Unexpected upload');if(options.body.includes('<TYPE>Group</TYPE>'))throw new Error('Synthetic busy Tally');return new Response(envelope(company('a','Alpha')+company('b','Beta')));};
   try {
     const result=await run(path.join(dir,'unused.json'),false,{config:{apiUrl:'https://example.invalid',tallyUrl:'http://localhost:9000',stopOnFailure:true},token:'x'.repeat(40),selectedCompanyIds:['a','b'],quiet:true});
     assert.equal(result,1);assert.equal(calls.length,3);
@@ -22,7 +22,7 @@ test('desktop failure stops at the first collection without contacting another c
 
 test('period baseline check fails before any collection export and never retries',async()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'finance-period-preflight-')),original=global.fetch,calls=[];
-  global.fetch=async(url,options)=>{const ack=diagnostics(url,options);if(ack)return ack;calls.push(String(url));return String(url).startsWith('https:')?new Response('{}',{status:409}):new Response(envelope(company('a','Alpha')));};
+  global.fetch=async(url,options)=>{if(String(url).endsWith('/capabilities'))return new Response(JSON.stringify({protocol:1,maxSnapshotBytes:1024**3}));const ack=diagnostics(url,options);if(ack)return ack;calls.push(String(url));return String(url).startsWith('https:')?new Response('{}',{status:409}):new Response(envelope(company('a','Alpha')));};
   try {
     const events=[];
     assert.equal(await run(path.join(dir,'unused.json'),false,{config:{apiUrl:'https://example.invalid',tallyUrl:'http://localhost:9000',stopOnFailure:true,scope:{kind:'period',from:'2026-09-01',to:'2026-09-15'}},token:'x'.repeat(40),selectedCompanyIds:['a'],quiet:true,onEvent:e=>events.push(e)}),1);
@@ -35,7 +35,7 @@ test('an explicitly stale period is retained but cannot trap every subsequent ma
   const id='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',pending=path.join(dir,'state','source-outbox',id),scope={kind:'period',from:'2026-09-01',to:'2026-09-15'};
   fs.mkdirSync(pending,{recursive:true});fs.writeFileSync(path.join(pending,'manifest.json'),JSON.stringify({batchId:id,profile:'company-business-v1',scope,company:{externalId:'a',name:'Alpha'}}));
   const calls=[],options={config:{apiUrl:'https://example.invalid',tallyUrl:'http://localhost:9000',scope,stopOnFailure:true,uploadAttempts:1},token:'x'.repeat(40),selectedCompanyIds:['a'],quiet:true};
-  global.fetch=async(url,request)=>{
+  global.fetch=async(url,request)=>{if(String(url).endsWith('/capabilities'))return new Response(JSON.stringify({protocol:1,maxSnapshotBytes:1024**3}));
     calls.push(String(url));
     if(String(url).endsWith('/preflight'))return new Response(JSON.stringify({ok:true,companyExternalId:'a',baselineBatchId:'newer'}));
     if(String(url).startsWith('https:'))return new Response(JSON.stringify({code:'PERIOD_CAPTURE_STALE'}),{status:409});
@@ -58,7 +58,7 @@ test('desktop selection excludes unchecked companies from capture and durable re
   const pending=path.join(dir,'state','source-outbox','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
   fs.mkdirSync(pending,{recursive:true});
   fs.writeFileSync(path.join(pending,'manifest.json'),JSON.stringify({company:{externalId:'b',name:'Beta'}}));
-  global.fetch=async(url,options)=>{
+  global.fetch=async(url,options)=>{if(String(url).endsWith('/capabilities'))return new Response(JSON.stringify({protocol:1,maxSnapshotBytes:1024**3}));
     if(String(url).startsWith('https:')){uploads.push(url);throw new Error('Unselected upload attempted');}
     assert.ok(!options.body.includes('<SVCURRENTCOMPANY>Beta</SVCURRENTCOMPANY>'));
     return new Response(envelope(options.body.includes('<TYPE>Company</TYPE>')||options.body.includes('<ID>FinanceAgent</ID>')?company('a','Alpha')+company('b','Beta'):''));
@@ -68,7 +68,7 @@ test('desktop selection excludes unchecked companies from capture and durable re
     assert.equal(result,0);
     assert.deepEqual(events.filter(e=>e.event==='source_preview').map(e=>e.company),['Alpha']);
     // Live run retries only the selected Alpha capture, never pending Beta.
-    global.fetch=async(url,options)=>{
+    global.fetch=async(url,options)=>{if(String(url).endsWith('/capabilities'))return new Response(JSON.stringify({protocol:1,maxSnapshotBytes:1024**3}));
       const ack=diagnostics(url,options);if(ack)return ack;
       if(String(url).startsWith('https:')) {
         const body=JSON.parse(options.body);uploads.push(body);
@@ -85,7 +85,7 @@ test('desktop selection excludes unchecked companies from capture and durable re
 test('empty selection and disappeared selected GUID fail before uploads',async()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'finance-desktop-missing-'));
   const original=global.fetch;let uploads=0;
-  global.fetch=async(url,options)=>{const ack=diagnostics(url,options);if(ack)return ack;if(String(url).startsWith('https:'))uploads++;return new Response(envelope(company('b','Beta')));};
+  global.fetch=async(url,options)=>{if(String(url).endsWith('/capabilities'))return new Response(JSON.stringify({protocol:1,maxSnapshotBytes:1024**3}));const ack=diagnostics(url,options);if(ack)return ack;if(String(url).startsWith('https:'))uploads++;return new Response(envelope(company('b','Beta')));};
   const options={config:{apiUrl:'https://example.invalid',tallyUrl:'http://localhost:9000'},token:'x'.repeat(40),quiet:true};
   try {
     await assert.rejects(()=>run(path.join(dir,'unused.json'),false,{...options,selectedCompanyIds:[]}),/select|selection/i);
@@ -99,7 +99,7 @@ test('empty selection and disappeared selected GUID fail before uploads',async()
 test('cancellation during extraction never uploads a partial cancelled snapshot',async()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'finance-desktop-stop-'));
   const original=global.fetch,controller=new AbortController();let uploads=0;
-  global.fetch=async(url,options)=>{
+  global.fetch=async(url,options)=>{if(String(url).endsWith('/capabilities'))return new Response(JSON.stringify({protocol:1,maxSnapshotBytes:1024**3}));
     const ack=diagnostics(url,options);if(ack)return ack;
     if(String(url).startsWith('https:'))uploads++;
     if(options.body.includes('<TYPE>Ledger</TYPE>'))controller.abort();

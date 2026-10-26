@@ -1,6 +1,28 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
+
+test('invalid-byte and capacity metadata survive durable queuing and API validation without source text',async()=>{
+  const {diagnosticQueue}=require('../diagnostic-outbox');
+  const {validateEvent}=require('../../../api/src/sourceDiagnostics');
+  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'finance-byte-diagnostic-'));
+  try {
+    const queue=diagnosticQueue(directory,{apiUrl:'https://finance.invalid',requestTimeoutMs:1000},()=>{});
+    queue.add({event:'source_collection_failed',error:'Invalid UTF-8',diagnostic:{
+      invalidByteOffset:93863932,invalidByteValue:255,utf8FailureReason:'invalid_leading_byte',
+      utf8LeadingByte:226,utf8SequenceStartOffset:93863930,utf8ExpectedContinuationBytes:2,
+      actualBytes:600000000,limitBytes:524288000,errorCodes:['ERR_ENCODING_INVALID_ENCODED_DATA'],
+      narration:'PRIVATE ACCOUNTING TEXT',rawResponse:'PRIVATE XML',
+    }});
+    const payload=fs.readFileSync(path.join(directory,fs.readdirSync(directory)[0]),'utf8');
+    const details=validateEvent(JSON.parse(payload)).details;
+    assert.equal(details.invalidByteOffset,93863932);
+    assert.equal(details.invalidByteValue,255);
+    assert.equal(details.utf8FailureReason,'invalid_leading_byte');
+    assert.equal(details.limitBytes,524288000);
+    assert.ok(!payload.includes('PRIVATE'));
+  } finally {fs.rmSync(directory,{recursive:true});}
+});
 test('diagnostics survive API outage and retry the identical event without exporting again',async()=>{
   const {diagnosticQueue}=require('../diagnostic-outbox');
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'finance-diagnostics-'));

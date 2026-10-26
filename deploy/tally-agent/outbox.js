@@ -50,6 +50,8 @@ async function deliver(config, token, directory, manifest, log, fetcher=fetch, s
           const {safeText}=require('./export-diagnostics');
           const error=Object.assign(new Error(`API ${operation}: HTTP ${response.status}${typeof detail?.error==='string'?' - '+safeText(detail.error):''}`),
             {retryable:response.status===429 || response.status>=500,uploadDiagnostic:{operation,stage:'upload',httpStatus:response.status,attempt:attempt+1,
+              ...(['SOURCE_SNAPSHOT_LIMIT','SOURCE_STAGING_LIMIT'].includes(detail?.code)?{errorCodes:[detail.code]}:{}),
+              ...(Number.isSafeInteger(detail?.limitBytes)&&Number.isSafeInteger(detail?.actualBytes)?{limitBytes:detail.limitBytes,actualBytes:detail.actualBytes}:{}),
               ...(typeof detail?.diagnosticId==='string'?{serverDiagnosticId:detail.diagnosticId}:{})}});
           if(!response.bodyUsed)await response.body?.cancel(); throw error;
         }

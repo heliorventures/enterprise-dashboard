@@ -4,6 +4,7 @@ const {validateSnapshot}=require('./ingest');
 const period=require('./sourcePeriod');
 const diagnostics=require('./sourceDiagnostics');
 const {scalarField}=require('./sourceTree');
+const sourceLimits=require('./sourceLimits');
 const COLLECTIONS=['COMPANY','GROUP','LEDGER','VOUCHERTYPE','CURRENCY','COSTCATEGORY','COSTCENTRE','STOCKGROUP','STOCKCATEGORY','STOCKITEM','UNIT','GODOWN','VOUCHER'];
 const fail=(message,status=400)=>{throw Object.assign(new Error(message),{status});};
 // JSONB changes object key order, so hashes must be independent of key order.
@@ -112,9 +113,10 @@ async function chunk(input,mode='full') {
       const coverage=upload.manifest.collections.find(c=>c.name===row.collection);
       if(coverage.status!=='success'||row.ordinal>=coverage.count) fail('Record outside declared source coverage');
     }
-    if(Number(upload.bytes)+bytes>512*1024**2) fail('Source snapshot exceeds 512 MiB',413);
+    const limits=sourceLimits.fromEnvironment();
+    sourceLimits.assertBudget(Number(upload.bytes)+bytes,limits.maxSnapshotBytes);
     const {total}=(await client.query('SELECT coalesce(sum(bytes),0) AS total FROM tally_source_uploads WHERE result IS NULL')).rows[0];
-    if(Number(total)+bytes>2*1024**3) fail('Source staging capacity reached',429);
+    sourceLimits.assertBudget(Number(total)+bytes,limits.maxStagingBytes,true);
     await client.query('INSERT INTO tally_source_chunks VALUES($1,$2,$3,$4)',[input.batchId,input.index,checksum,JSON.stringify(records)]);
     await client.query('UPDATE tally_source_uploads SET bytes=bytes+$2,updated_at=now() WHERE batch_id=$1',[input.batchId,bytes]);
     return {ok:true,batchId:input.batchId,index:input.index};

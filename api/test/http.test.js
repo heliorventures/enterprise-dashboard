@@ -11,6 +11,21 @@ const siteForHost = db.siteForHost;
 db.siteForHost = async hostname => hostname === '127.0.0.1' ? { id: 1, hostname } : undefined;
 let server;
 
+test('source capabilities authenticate the sender independently of browser website mapping', async () => {
+  const local = app.listen(0, '127.0.0.1');
+  await new Promise(resolve => local.once('listening', resolve));
+  const url = `http://127.0.0.1:${local.address().port}/api/ingest/tally/source/capabilities`;
+  try {
+    assert.equal((await fetch(url)).status, 401);
+    const response = await fetch(url, { headers: { Authorization: 'Bearer ' + process.env.TALLY_INGEST_TOKEN } });
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.equal(result.protocol, 1);
+    assert.equal(result.maxSnapshotBytes, 1024 * 1024 ** 2);
+    assert.equal(response.headers.get('cache-control'), 'private, no-store');
+  } finally { await new Promise(resolve => local.close(resolve)); }
+});
+
 test('saved exports succeed independently of automatic sync validation, including retries', async () => {
   const archive = require('../src/sourceArchive');
   const sync = require('../src/sourceSync');

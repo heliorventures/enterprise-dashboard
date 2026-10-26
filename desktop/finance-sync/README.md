@@ -1,5 +1,8 @@
 # Helior Finance Sync
 
+Version 1.4.1 coordinates full snapshot capacity with the API and adds exact UTF-8
+failure diagnostics. Deploy the matching API first; see [capture fixes and rollout](../../deploy/docs/finance-sync-capture-fixes-2026-10-26.md).
+
 Windows 10/11 Intel/AMD x64 desktop app and unsigned EXE installer. It reuses `deploy/tally-agent`. All data uses `/api/ingest/tally/source/{begin,chunk,complete}`; period replacement uses `/api/ingest/tally/source-period-replace/{preflight,begin,chunk,complete}`. Deploy the updated API, migration `013_period_source_identity.sql`, and Finance UI/Caddy before period replacement. The installer alone does not deploy the backend.
 
 ## Accountant workflow
@@ -46,7 +49,7 @@ Then build:
 npm run build
 ```
 
-This creates `release/Helior-Finance-Sync-1.2.0-Setup.exe` for the current version. It builds only; it does not upload or deploy anything. The build fails before packaging if configuration is missing or invalid. No production credential is read from another project or an API environment file. The installer includes your configuration automatically.
+This creates `release/Helior-Finance-Sync-1.4.1-Setup.exe` for the current version. It builds only; it does not upload or deploy anything. The build fails before packaging if configuration is missing or invalid. No production credential is read from another project or an API environment file. The installer includes your configuration automatically.
 
 ### Release versions and upgrades
 

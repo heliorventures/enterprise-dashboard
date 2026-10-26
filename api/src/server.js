@@ -34,6 +34,11 @@ const sourceArchive = require('./sourceArchive');
 const sourceUnpack = require('./sourceUnpack');
 const sourceSync = require('./sourceSync');
 const sourceDiagnostics = require('./sourceDiagnostics');
+const sourceLimits = require('./sourceLimits');
+app.get('/api/ingest/tally/source/capabilities', authenticateSender, (_req, res) => {
+  res.set('Cache-Control', 'private, no-store').json({ protocol: 1,
+    maxSnapshotBytes: sourceLimits.fromEnvironment().maxSnapshotBytes });
+});
 app.post('/api/ingest/tally/diagnostics',authenticateSender,express.json({limit:'512kb'}),async(req,res)=>{
   try {res.json(await sourceDiagnostics.save(req.body));}
   catch(error){res.status(error.status||503).json({error:error.status?error.message:'Diagnostics could not be saved; retain and retry the same events'});}
@@ -73,7 +78,9 @@ for (const mode of ['full','period','period-replace']) for (const operation of [
       try {diagnosticId=await sourceDiagnostics.recordApiFailure(error,{operation:mode+'/'+operation,body:req.body});}
       catch(diagnosticError){console.error('Source diagnostic persistence failed:',diagnosticError.code||diagnosticError.name);}
       if(status===500) console.error('Source archive failed:',error.code || error.name);
-      res.status(status).json({error:status===500?'Source archive failed; retry the same batch':error.code==='23505'?'Duplicate source record identity':error.message,diagnosticId,...(error.code==='PERIOD_CAPTURE_STALE'?{code:error.code}:{})});
+      res.status(status).json({error:status===500?'Source archive failed; retry the same batch':error.code==='23505'?'Duplicate source record identity':error.message,diagnosticId,
+        ...(['PERIOD_CAPTURE_STALE','SOURCE_SNAPSHOT_LIMIT','SOURCE_STAGING_LIMIT'].includes(error.code)?{code:error.code}:{}),
+        ...(Number.isSafeInteger(error.limitBytes)?{limitBytes:error.limitBytes,actualBytes:error.actualBytes}:{})});
     }
   });
 }
@@ -264,6 +271,7 @@ app.use(async(error, req, res, _next) => {
 });
 
 async function start() {
+  sourceLimits.fromEnvironment(); // Fail configuration validation before serving any requests.
   if (config.production && config.ingestToken.length < 32) throw new Error('TALLY_INGEST_TOKEN must contain at least 32 characters');
   auth.validateConfiguration();
   await db.migrate();

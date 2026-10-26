@@ -7,6 +7,21 @@ const config=require('../src/config');
 const {pendingSummary,validateSelection}=require('../src/state');
 const {publicEvent,explainError}=require('../src/events');
 
+test('capture capacity and UTF-8 failures receive specific messages without exposing source text',()=>{
+  assert.match(explainError({error:'Source snapshot exceeds capture limits',diagnostic:{errorCodes:['SOURCE_SNAPSHOT_LIMIT']}}),/size|limit/i);
+  assert.match(explainError({diagnostic:{errorCodes:['ERR_ENCODING_INVALID_ENCODED_DATA']}}),/UTF-8|encoding/i);
+  const event=publicEvent({event:'source_capture_failed',error:'private narration',diagnostic:{errorCodes:['SOURCE_SNAPSHOT_LIMIT'],limitBytes:1024,actualBytes:1025}});
+  assert.ok(!JSON.stringify(event).includes('private narration'));
+  assert.doesNotMatch(event.message,/network/i);
+  assert.match(explainError({diagnostic:{errorCodes:['SOURCE_STAGING_LIMIT']}}),/staging is full/i);
+  const encoding=publicEvent({event:'tally_export_failed',invalidByteOffset:93863932,invalidByteValue:255,
+    utf8FailureReason:'invalid_leading_byte',rawResponse:'PRIVATE SOURCE',errorCodes:['ERR_ENCODING_INVALID_ENCODED_DATA']});
+  assert.equal(encoding.invalidByteOffset,93863932);
+  assert.equal(encoding.invalidByteValue,255);
+  assert.equal(encoding.utf8FailureReason,'invalid_leading_byte');
+  assert.ok(!JSON.stringify(encoding).includes('PRIVATE'));
+});
+
 test('build config fails closed on absent tokens, insecure API URLs and remote Tally',()=>{
   const valid={FINANCE_API_URL:'https://finance.example',TALLY_INGEST_TOKEN:'a'.repeat(40),TALLY_URL:'http://localhost:9000'};
   assert.equal(config.fromEnvironment(valid).apiUrl,'https://finance.example');

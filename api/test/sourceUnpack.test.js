@@ -106,7 +106,7 @@ test('invalid complete archive cannot mutate reporting data even when previously
     if (sql.includes('FROM tally_source_snapshots')) return { rows: [{ batch_id: 'bad', coverage_status: 'complete' }] };
     if (sql.includes('INSERT INTO source_validation_issues')) return { rows: [] };
     if (sql.includes('FROM tally_ingestions')) return { rows: [{ company_id: 1 }] };
-    if (sql.includes('FROM tally_source_records')) return { rows: [{ collection: 'VOUCHER', ordinal: 0, payload: voucher() }] };
+    if (sql.includes('FROM tally_source_records')) return { rows: sql.includes("collection = 'VOUCHER'") ? [{ collection: 'VOUCHER', ordinal: 0, payload: voucher() }] : [] };
     throw new Error('Unexpected database operation');
   };
   try {
@@ -129,7 +129,7 @@ test('publishing never implicitly forces an old ingestion receipt into the curre
     db.query = async sql => {
       if (sql.includes('FROM tally_source_snapshots')) return { rows: [{ batch_id: 'saved',
         company_external_id: 'company', company_name: 'Company', captured_at: '2026-09-15T00:00:00Z', coverage_status: 'complete' }] };
-      if (sql.includes('FROM tally_source_records')) return { rows: [{ collection: 'LEDGER', ordinal: 0,
+      if (sql.includes('FROM tally_source_records')) return { rows: sql.includes("collection = 'VOUCHER'") ? [] : [{ collection: 'LEDGER', ordinal: 0,
         payload: ledger('Bank', 'Bank Accounts', '10') }] };
       if (sql.includes('FROM tally_ingestions')) return { rows: [{ company_id: 1 }] };
       if (sql.includes('FROM finance_snapshots') || sql.includes('INSERT INTO source_validation_issues')) return { rows: [] };

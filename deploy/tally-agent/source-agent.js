@@ -10,6 +10,7 @@ const {validateScope,calendarDate}=require('./scope');
 const {readiness,reconciliation}=require('./source-readiness');
 const {diagnosticQueue,exporterIdentity}=require('./diagnostic-outbox');
 const {safeText,codes}=require('./export-diagnostics');
+const sourceLimits=require('./source-limits');
 
 async function preflight(config,token,company) {
   const replacement=config.periodMode==='replace';
@@ -24,11 +25,12 @@ async function preflight(config,token,company) {
   if(result.ok!==true||result.companyExternalId!==company.externalId||(replacement?result.periodMode!=='replace':typeof result.baselineBatchId!=='string'))throw new Error('Invalid period preflight acknowledgement');
 }
 
-async function pack(directory,collections) {
+async function pack(directory,collections,config={}) {
   let records=[],bytes=0,chunkCount=0,recordCount=0;
   const flush=()=>{
     const payload={records};bytes+=Buffer.byteLength(JSON.stringify(payload));
-    if(bytes>500*1024**2||chunkCount>=10000) throw new Error('Source snapshot exceeds transfer limits');
+    sourceLimits.assertBudget(bytes,config);
+    if(chunkCount>=10000) throw Object.assign(new Error('Source snapshot exceeds chunk count limit'),{code:'SOURCE_CHUNK_LIMIT'});
     saveJson(path.join(directory,`${chunkCount++}.json`),payload);records=[];
   };
   let size=0;
@@ -88,7 +90,8 @@ async function capture(config,company,directory,log) {
         reconcile.add(collection,payload,count);
         const line=JSON.stringify(row)+'\n';
         storedBytes+=Buffer.byteLength(line);
-        if(storedBytes>500*1024**2||count>=5000000) throw new Error('Source snapshot exceeds capture limits');
+        sourceLimits.assertBudget(storedBytes,config);
+        if(count>=5000000) throw Object.assign(new Error('Source collection exceeds record count limit'),{code:'SOURCE_RECORD_LIMIT'});
         buffered.push(line);bufferedBytes+=Buffer.byteLength(line);if(bufferedBytes>=65536)flush();count++;
       });
       flush();
@@ -108,7 +111,7 @@ async function capture(config,company,directory,log) {
       log({event:'source_collection_failed',company:company.name,collection,error:error.message,
         discardedRecords:count,durationMs:Date.now()-collectionStarted,diagnostic:error.exportDiagnostic||null});
       if(config.stopOnFailure||config.voucherWindowDays!==undefined||config.ledgerBatchSize!==undefined)throw error;
-      if(storedBytes>500*1024**2) throw error;
+      if(error.code==='SOURCE_SNAPSHOT_LIMIT') throw error;
     }
   }
   let consistency='unavailable';
@@ -122,7 +125,7 @@ async function capture(config,company,directory,log) {
   } catch(error) {config.signal?.throwIfAborted();consistency='changed';log({event:'source_consistency_failed',company:company.name,error:error.message,diagnostic:error.exportDiagnostic||null});}
   log({event:'source_consistency_finished',company:company.name,consistency});
   if(consistency==='changed'&&(config.stopOnFailure||config.scope||config.voucherWindowDays!==undefined))throw new Error('Tally changed during the export. Try again when company data is stable.');
-  const stats=await pack(directory,collections);
+  const stats=await pack(directory,collections,config);
   const reconciliationResult=reconcile.result(collections.every(c=>c.status==='success')&&consistency!=='changed');
   if(reconciliationResult.warningCount)log({event:'source_readiness_warning',company:company.name,collection:'LEDGER',
     error:`Ledger reconciliation: ${reconciliationResult.warningCount} warnings. ${reconciliationResult.issues[0].message}`,...reconciliationResult});
@@ -189,6 +192,10 @@ async function run(configFile,dryRun=false,options={}) {
     token=dryRun ? '' : options.token!==undefined?options.token:config.tokenEnvironmentVariable ? (process.env[config.tokenEnvironmentVariable]||'').trim()
       : fs.readFileSync(path.resolve(base,config.tokenFile||'token.txt'),'utf8').trim();
     if(!dryRun&&(token.length<32||/[\r\n]/.test(token))) throw new Error('Token file must contain TALLY_INGEST_TOKEN');
+    if(!dryRun) {
+      Object.assign(config,await sourceLimits.negotiate(config,token));
+      log({event:'source_limits_negotiated',limitBytes:config.sourceSnapshotMaxBytes});
+    }
     await queue?.flush(token);
     const seen=new Set();
     // Interactive runs must revalidate selected identities before any delivery.
@@ -248,7 +255,8 @@ async function run(configFile,dryRun=false,options={}) {
       } catch(error) {
         if(fs.existsSync(directory)&&!fs.existsSync(path.join(directory,'manifest.json'))) fs.rmSync(directory,{recursive:true});
         config.signal?.throwIfAborted();
-        if(!error.failureRecorded){failed++;log({event:'source_capture_failed',companyExternalId:company.externalId,company:company.name,batchId:path.basename(directory),error:safeText(error.message),diagnostic:error.exportDiagnostic||{errorCodes:codes(error)}});error.failureRecorded=true;}
+        if(!error.failureRecorded){failed++;log({event:'source_capture_failed',companyExternalId:company.externalId,company:company.name,batchId:path.basename(directory),error:safeText(error.message),diagnostic:error.exportDiagnostic||{
+          errorCodes:codes(error),...(Number.isSafeInteger(error.limitBytes)?{limitBytes:error.limitBytes,actualBytes:error.actualBytes}:{})}});error.failureRecorded=true;}
         if(config.stopOnFailure)throw error;
       }
       await queue?.flush(token);

@@ -147,7 +147,7 @@ async function extract(config,collection,company,onRecord) {
       const date=voucherDate(payload);
       const start=origin+Math.floor((Date.parse(date)-origin)/width)*width;
       populated.set(start,(populated.get(start)||0)+1);
-      if(++discoveredCount>5000000)throw new Error('Source snapshot exceeds capture limits');
+      if(++discoveredCount>5000000)throw Object.assign(new Error('Source collection exceeds record count limit'),{code:'SOURCE_RECORD_LIMIT'});
     },true);
     windows=[...populated].sort(([a],[b])=>a-b).map(([start,count])=>({kind:'period',
       from:new Date(start).toISOString().slice(0,10),to:new Date(Math.min(end,start+width-86400000)).toISOString().slice(0,10),count}));

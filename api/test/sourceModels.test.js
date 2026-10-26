@@ -4,6 +4,23 @@ const { buildProjection, writeProjection } = require("../src/sourceModels");
 const unpack = require("../src/sourceUnpack");
 const { uniqueVoucherKey, ingestSnapshot } = require("../src/ingest");
 const db = require("../src/db");
+test('paged projection preserves all validation, identities and financial output', async () => {
+  const rows = fixture();
+  rows.push(row('GROUP', { NAME: 'Later parent', PARENT: 'Primary' }));
+  const seen = [], stages = [];
+  const readRows = async function* (stage) {
+    stages.push(stage);
+    for (const item of rows) {
+      if (stage === 'definitions' ? item.collection !== 'VOUCHER' : item.collection === (stage === 'ledgers' ? 'LEDGER' : 'VOUCHER')) {
+        yield structuredClone(item);
+      }
+    }
+  };
+  const result = await require('../src/sourceModels').buildProjectionFrom(readRows, adapters, item => seen.push(item));
+  assert.deepEqual(result, buildProjection(rows, adapters));
+  assert.deepEqual(stages, ['definitions', 'ledgers', 'vouchers']);
+  assert.equal(seen.length, rows.length); // Core projection sees each original record exactly once.
+});
 after(() => db.close());
 const node = (tag, fields = {}, content = []) => ({
   tag,
@@ -364,6 +381,11 @@ test(
     assert.equal(result.allocations[0].amount, "-10.00");
     assert.equal(result.postings[0].amount, "10.00");
     // Exercise the real authenticated HTTP/SQL contract used by the UI.
+    const site = (await db.query(`INSERT INTO dashboard_sites(hostname,display_name)
+      VALUES('127.0.0.1','Source model integration test')
+      ON CONFLICT(hostname) DO UPDATE SET enabled=true RETURNING id`)).rows[0];
+    await db.query(`INSERT INTO dashboard_site_companies(site_id,company_id) VALUES($1,$2)
+      ON CONFLICT DO NOTHING`, [site.id, first.companyId]);
     const { app } = require("../src/server");
     const server = app.listen(0, "127.0.0.1");
     await new Promise((resolve) => server.once("listening", resolve));

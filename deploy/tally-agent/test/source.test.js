@@ -121,6 +121,7 @@ test('source outbox resumes before Tally access and legacy pending batches remai
   const events=[];let offline=false,apiReady=false,manifest;
   console.log=line=>events.push(JSON.parse(line));
   global.fetch=async(url,options)=>{
+    if(String(url).endsWith('/capabilities'))return new Response('',{status:404});
     if(String(url).startsWith('https://example.invalid')) {
       if(!apiReady)return {status:401};
       const body=JSON.parse(options.body);

@@ -3,6 +3,21 @@ const assert=require('node:assert/strict');
 const {TallyUtf8Decoder}=require('../tally-encoding');
 const source=require('../source-export');
 
+test('malformed UTF-8 diagnostics identify original byte positions across all chunk boundaries',()=>{
+  const bytes=Buffer.concat([Buffer.from('private'),Buffer.from([0xe2,0x28,0xa1])]);
+  for(let split=0;split<=bytes.length;split++){
+    const decoder=new TallyUtf8Decoder();
+    assert.throws(()=>{decoder.decode(bytes.subarray(0,split),{stream:true});decoder.decode(bytes.subarray(split),{stream:true});decoder.decode();});
+    assert.deepEqual(decoder.failure,{invalidByteOffset:8,invalidByteValue:0x28,utf8LeadingByte:0xe2,
+      utf8SequenceStartOffset:7,utf8ExpectedContinuationBytes:2,utf8FailureReason:'invalid_continuation'});
+    assert.ok(!JSON.stringify(decoder.failure).includes('private'));
+  }
+  const decoder=new TallyUtf8Decoder();decoder.decode(Uint8Array.of(0xe2),{stream:true});
+  assert.throws(()=>decoder.decode());
+  assert.equal(decoder.failure.invalidByteOffset,1);
+  assert.equal(decoder.failure.utf8FailureReason,'incomplete_sequence');
+});
+
 test('standalone A0 becomes NBSP with original byte offsets, across every split',()=>{
   const bytes=Buffer.concat([Buffer.from('₹ café 😀 \u00a0 '),Buffer.from([0xa0]),Buffer.from(' end')]);
   for(let split=0;split<=bytes.length;split++){

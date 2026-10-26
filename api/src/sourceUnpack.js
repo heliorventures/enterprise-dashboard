@@ -1,6 +1,7 @@
 const db = require('./db');
 const { attachProjects, ingestSnapshot, uniqueVoucherKey } = require('./ingest');
-const { buildProjection, writeProjection } = require('./sourceModels');
+const { buildProjectionFrom, writeProjection } = require('./sourceModels');
+const { readRows } = require('./sourceRecordPages');
 const { isEmptyList, scalarField: field } = require('./sourceTree');
 
 function invalid(message, status = 400) {
@@ -121,7 +122,7 @@ function interpretVoucher(node) {
   return result;
 }
 
-function projectRecords(rows) {
+function createCoreProjection() {
   const ledgers = [];
   const vouchers = [];
   const projects = [];
@@ -130,21 +131,21 @@ function projectRecords(rows) {
   const skipped = { ledgers: 0, vouchers: 0, cancelled: 0 };
   const errors = [];
   const issues = [];
-  for (const row of rows) {
+  function add(row) {
     try {
       if (row.collection === 'LEDGER') {
         const ledger = interpretLedger(row.payload);
         const key = ledger.name.toLowerCase();
         if (seen.has(key)) {
           skipped.ledgers += 1;
-          continue;
+          return;
         }
         seen.add(key);
         ledgers.push(ledger);
       } else if (row.collection === 'COSTCENTRE') {
         const project = interpretCostCentre(row.payload);
         const key = project.name.toLowerCase();
-        if (seenProjects.has(key)) continue;
+        if (seenProjects.has(key)) return;
         seenProjects.add(key);
         projects.push(project);
       } else if (row.collection === 'VOUCHER') {
@@ -165,7 +166,13 @@ function projectRecords(rows) {
       if (errors.length < 20) errors.push(`${row.collection}#${row.ordinal}: ${error.message}`);
     }
   }
-  return { ledgers, vouchers, projects, skipped, errors, issues };
+  return { add, result: { ledgers, vouchers, projects, skipped, errors, issues } };
+}
+
+function projectRecords(rows) {
+  const projection = createCoreProjection();
+  for (const row of rows) projection.add(row);
+  return projection.result;
 }
 
 function assertPromotable({ skipped = {}, errors = [] }) {
@@ -188,15 +195,10 @@ async function unpackBatch(batchId, { force = false, itemId = null } = {}) {
   if (snapshot.coverage_status !== 'complete') {
     throw invalid('Partial source snapshot cannot replace reporting data; complete export required', 409);
   }
-  const records = await db.query(
-    `SELECT collection, ordinal, payload
-     FROM tally_source_records
-     WHERE batch_id = $1
-     ORDER BY collection, ordinal`,
-    [batchId]
-  );
-  const { ledgers, vouchers, projects, skipped, errors, issues } = projectRecords(records.rows);
-  const model = buildProjection(records.rows, { field, amount, date, interpretVoucher, voucherKey: uniqueVoucherKey });
+  const core = createCoreProjection();
+  const model = await buildProjectionFrom(stage => readRows(batchId, stage),
+    { field, amount, date, interpretVoucher, voucherKey: uniqueVoucherKey }, core.add);
+  const { ledgers, vouchers, projects, skipped, errors, issues } = core.result;
   model.issues.push(...issues);
   if (skipped.ledgers && !issues.some(x => x.collection === 'LEDGER')) model.issues.push({collection:'LEDGER',ordinal:null,field:'NAME',code:'DUPLICATE_LEDGER',severity:'error',message:'Duplicate ledger names must be resolved before publishing'});
   if (model.issues.length) await db.query(`INSERT INTO source_validation_issues(batch_id,item_id,collection,ordinal,field,severity,code,message)

@@ -42,10 +42,10 @@ function issueSamples(value) {
 function details(value={}) {
   if(!value||typeof value!=='object'||Array.isArray(value))bad();
   const result={};
-  for(const key of ['requestId','requestHash','phase','stage','endpoint','xmlPath','xmlCharacterReference','contentType','charset','action','tallyMessage','from','to','serverDiagnosticId','operation','sqlState','constraint','table','stackLocation']) {
+  for(const key of ['requestId','requestHash','phase','stage','endpoint','xmlPath','xmlCharacterReference','contentType','charset','action','tallyMessage','from','to','serverDiagnosticId','operation','sqlState','constraint','table','stackLocation','utf8FailureReason']) {
     if(value[key]!=null)result[key]=text(value[key]);
   }
-  for(const key of ['httpStatus','bytesReceived','recordsReceived','recordsProcessed','discardedRecords','durationMs','xmlLine','xmlColumn','xmlPosition','errorCount','warningCount','attempt','chunkIndex']) {
+  for(const key of ['httpStatus','bytesReceived','recordsReceived','recordsProcessed','discardedRecords','durationMs','xmlLine','xmlColumn','xmlPosition','errorCount','warningCount','attempt','chunkIndex','actualBytes','limitBytes','invalidByteOffset','invalidByteValue','utf8LeadingByte','utf8SequenceStartOffset','utf8ExpectedContinuationBytes']) {
     if(value[key]!=null){if(!Number.isSafeInteger(value[key])||value[key]<0)bad();result[key]=value[key];}
   }
   if(value.errorCodes!==undefined){if(!Array.isArray(value.errorCodes)||value.errorCodes.length>20||value.errorCodes.some(v=>typeof v!=='string'||!/^\w{1,64}$/.test(v)))bad();result.errorCodes=value.errorCodes;}
@@ -84,6 +84,7 @@ async function recordApiFailure(error,{operation,body}) {
   const detail={operation,stage:'api',errorCodes:[String(error.code||error.name||'Error').replace(/\W/g,'').slice(0,64)],
     stackLocation:String(error.stack||'').split('\n').slice(1).filter(line=>/^\s+at /.test(line)).slice(0,8).join('\n').slice(0,1800),
     ...(Number.isSafeInteger(body?.index)&&body.index>=0?{chunkIndex:body.index}:{}),
+    ...(Number.isSafeInteger(error.limitBytes)&&Number.isSafeInteger(error.actualBytes)?{limitBytes:error.limitBytes,actualBytes:error.actualBytes}:{}),
     ...(error.code?{sqlState:String(error.code).slice(0,80)}:{}),
     ...(error.constraint?{constraint:String(error.constraint).slice(0,200)}:{}),
     ...(error.table?{table:String(error.table).slice(0,200)}:{})};
