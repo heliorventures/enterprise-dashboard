@@ -12,7 +12,7 @@ const audit = require('../audit');
 const projects = require('../projects/service');
 const { stage, shouldPublish } = require('./publication');
 const decimal = require('../transform/decimal');
-const {basis,reconciliationSummary,publicBatch} = require('../currency');
+const {basis,reconciliationSummary,publicBatch,rowsWithCurrency} = require('../currency');
 
 async function rulesFor() {
   const result = await db.query(`SELECT key, value FROM intel_rules WHERE company_id IS NULL`);
@@ -537,16 +537,37 @@ async function getResults(id) {
       [batch.id, file.company_id]
     )
     : { rows: [] };
+  const accounts = batch ? (await db.query(
+    `SELECT a.id AS account_id,a.account_name,a.level_1_category,o.bill_amount,o.paid_amount,
+            o.pending_bill_debit,o.pending_bill_credit,r.source_amount,r.tally_amount,r.difference,
+            r.difference_pct,r.status,r.tally_ledger_id,r.tally_ledger_name,r.reporting_date,
+            r.tally_balance_date,r.comparison_available,r.import_batch_id
+     FROM intel_outstanding o
+     JOIN intel_accounts a ON a.id=o.account_id
+     LEFT JOIN intel_reconciliations r ON r.outstanding_id=o.id AND r.import_batch_id=o.import_batch_id
+     WHERE o.import_batch_id=$1
+     ORDER BY a.account_name`, [batch.id])).rows : [];
+  const tallyOnly = batch ? (await db.query(
+    `SELECT r.id AS reconciliation_id,r.tally_ledger_id,r.tally_ledger_name,r.tally_amount,
+            r.difference,r.status,r.reporting_date,r.tally_balance_date,r.comparison_available,
+            r.import_batch_id
+     FROM intel_reconciliations r
+     WHERE r.company_id=$2 AND r.import_batch_id=$1 AND r.outstanding_id IS NULL
+       AND r.status='MISSING_IN_SOURCE'
+     ORDER BY abs(COALESCE(r.tally_amount,0)) DESC,lower(r.tally_ledger_name)`,
+    [batch.id,file.company_id])).rows : [];
   const currencies=basis(batch?.frozen_inputs);
   return { file: summaryPayload(file), companyName: file.company_name, batch:publicBatch(batch),
     currency:currencies.source_currency,
-    reconciliation: reconciliationSummary(recon.rows,batch?.frozen_inputs) };
+    reconciliation: reconciliationSummary(recon.rows,batch?.frozen_inputs),
+    accounts: await rowsWithCurrency(db,accounts),
+    tallyOnly: await rowsWithCurrency(db,tallyOnly) };
   });
 }
 
 async function listImports() {
   const result = await db.query(`
-    SELECT f.id, f.file_name, f.status, f.uploaded_at, f.detected_company, c.name AS company_name, s.name AS source_name,
+    SELECT f.id, f.company_id, f.file_name, f.status, f.uploaded_at, f.detected_company, c.name AS company_name, s.name AS source_name,
            b.total_rows, b.successful_rows, b.failed_rows, b.warning_rows, b.detail_rows, b.source_total_status,
            b.progress_percent, b.progress_message
     FROM intel_import_files f

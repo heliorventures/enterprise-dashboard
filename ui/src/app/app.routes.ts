@@ -11,6 +11,7 @@ import { ImportProjectDetail } from './pages/imports/import-project-detail';
 import { ImportMissing } from './pages/imports/import-missing';
 import { ImportProjects } from './pages/imports/import-projects';
 import { ImportProjectSummary } from './pages/imports/import-project-summary';
+import { ImportCompare } from './pages/imports/import-compare';
 import { ImportSync } from './pages/imports/import-sync';
 import { ImportSyncDetail } from './pages/imports/import-sync-detail';
 import { ImportWizard } from './pages/imports/import-wizard';
@@ -35,6 +36,7 @@ export const routes: Routes = [
   { path: 'operations', component: Operations, canActivate: [authGuard] },
   { path: 'imports', component: Imports, canActivate: [authGuard] },
   { path: 'imports/new', component: ImportWizard, canActivate: [authGuard] },
+  { path: 'imports/compare', component: ImportCompare, canActivate: [authGuard] },
   { path: 'imports/results', component: ImportResults, canActivate: [authGuard] },
   { path: 'imports/projects', component: ImportProjects, canActivate: [authGuard] },
   { path: 'imports/missing', component: ImportMissing, canActivate: [authGuard] },

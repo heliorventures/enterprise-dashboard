@@ -4,6 +4,7 @@ import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
 import { ImportResults } from './import-results';
 import { ImportWizard } from './import-wizard';
+import { ImportCompare } from './import-compare';
 import { ImportSyncDetail } from './import-sync-detail';
 
 describe('Import workflow correctness', () => {
@@ -82,51 +83,77 @@ describe('Import workflow correctness', () => {
     expect(component.error()).toBe('');
   });
 
-  it('shows the selected account column and invalidates validation after a mapping change', () => {
-    const component = TestBed.createComponent(ImportWizard).componentInstance;
-    component.result.set({
-      file: { id: 'f', status: 'UPLOADED' },
-      analysis: {
-        columns: [
-          { index: 0, canonical: 'Particulars', target: null },
-          { index: 1, canonical: 'Party', target: 'account_name' },
-        ],
-        preview: [
-          {
-            sourceRowNumber: 1,
-            raw: { Particulars: 'Wrong name', Party: 'Selected name' },
-            rowType: 'data',
-          },
-        ],
-      },
-    });
-    expect(component.sampleNames()).toEqual(['Selected name']);
-    component.validation.set({ total: 1, valid: 1, warnings: 0, errors: 0, canProcess: true });
-    component.setAccountNameColumn({ target: { value: 'Particulars' } } as unknown as Event);
-    expect(component.validation()).toBeNull();
-    expect(component.sampleNames()).toEqual(['Wrong name']);
-  });
-
-  it('reserves one processing request and rejects validation with errors even if canProcess is true', () => {
+  it('stores the workbook without validating or processing it during upload', () => {
     const component = TestBed.createComponent(ImportWizard).componentInstance;
     const http = TestBed.inject(HttpTestingController);
-    component.result.set({
-      file: { id: 'f', status: 'UPLOADED' },
-      analysis: {
-        columns: [{ index: 0, canonical: 'Party', target: 'account_name' }],
-      },
+    http.expectOne('/api/companies').flush([{ id: '1', name: 'Company' }]);
+    component.onCompany({ target: { value: '1' } } as unknown as Event);
+    component.onFile({ target: { files: [new File(['workbook'], 'daily.xlsx')] } } as unknown as Event);
+    component.upload();
+    const upload = http.expectOne('/api/imports/upload');
+    expect(upload.request.body.get('companyId')).toBe('1');
+    upload.flush({
+      file: { id: 'file-1', fileName: 'daily.xlsx', status: 'ANALYZED' },
+      selectedCompany: { id: '1', name: 'Company' },
+      analysis: { period: {}, counts: { dataRows: 1 }, columns: [] },
     });
-    component.importFile();
-    component.importFile();
-    const mapping = http.match('/api/imports/f/mapping');
-    expect(mapping.length).toBe(1);
-    mapping[0].flush({});
-    http
-      .expectOne('/api/imports/f/validate')
-      .flush({ total: 1, valid: 0, errors: 1, warnings: 0, canProcess: true });
-    http.expectNone('/api/imports/f/process');
-    expect(component.busy()).toBe('');
-    expect(component.error()).toContain('need a fix');
+    expect(component.uploaded()).toBe(true);
+    http.expectNone('/api/imports/file-1/validate');
+    http.expectNone('/api/imports/file-1/process');
+  });
+
+  it('compares the selected uploaded file and displays its account-level results', () => {
+    const component = TestBed.createComponent(ImportCompare).componentInstance;
+    const http = TestBed.inject(HttpTestingController);
+    http.expectOne('/api/imports').flush([
+      { id: 'file-1', file_name: 'daily.xlsx', company_name: 'Company', status: 'ANALYZED', uploaded_at: '2026-10-27' },
+    ]);
+    component.compare();
+    http.expectOne('/api/imports/file-1').flush({ file: { id: 'file-1' }, companyName: 'Company' });
+    http.expectOne('/api/imports/file-1/validate').flush({
+      total: 1,
+      valid: 1,
+      warnings: 0,
+      errors: 0,
+      canProcess: true,
+    });
+    http.expectOne('/api/imports/file-1/process').flush({
+      fileId: 'file-1',
+      status: 'COMPLETED',
+      batchStatus: 'COMPLETED',
+      percent: 100,
+      message: 'Completed',
+    });
+    http.expectOne('/api/imports/file-1').flush({
+      file: { id: 'file-1', file_name: 'daily.xlsx' },
+      companyName: 'Company',
+      batch: { status: 'COMPLETED' },
+      accounts: [{ account_id: 'a1', account_name: 'Account', source_amount: '100.00', tally_amount: '90.00', difference: '10.00', status: 'AMOUNT_MISMATCH' }],
+      tallyOnly: [],
+    });
+    expect(component.accountRows()).toHaveLength(1);
+    expect(component.label(component.accountRows()[0]['status'])).toBe('Amount differs');
+    expect(component.busy()).toBe(false);
+  });
+
+  it('filters comparison accounts inline and clears all filters together', () => {
+    const component = TestBed.createComponent(ImportCompare).componentInstance;
+    const http = TestBed.inject(HttpTestingController);
+    http.expectOne('/api/imports').flush([]);
+    component.comparison.set({
+      file: { id: 'file-1' },
+      accounts: [
+        { account_id: 'a1', account_name: 'Alpha Cement', level_1_category: 'Expenses', status: 'AMOUNT_MISMATCH' },
+        { account_id: 'a2', account_name: 'Beta Steel', level_1_category: 'Expenses', status: 'MATCHED' },
+        { account_id: 'a3', account_name: 'Alpha Bank', level_1_category: 'Assets', status: 'MISSING_IN_TALLY' },
+      ],
+    });
+    component.accountSearch.set('alpha');
+    component.categoryFilter.set('Expenses');
+    component.differencesOnly.set(true);
+    expect(component.filteredRows().map((row) => row['account_id'])).toEqual(['a1']);
+    component.clearFilters();
+    expect(component.filteredRows()).toHaveLength(3);
   });
 
   it('cancels ledger search when the search input is cleared', () => {

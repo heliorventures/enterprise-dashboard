@@ -1,0 +1,162 @@
+<section class="grid-page file-flow compare-flow">
+  <app-page-header
+    title="Compare with Tally"
+    eyebrow="Step 2 of 2"
+    description="Select an uploaded workbook and review the account balances side by side."
+  />
+  <app-import-nav />
+
+  @if (error()) {
+    <p class="banner" role="alert">{{ error() }}</p>
+  }
+  @if (notice()) {
+    <p class="banner ok" role="status">{{ notice() }}</p>
+  }
+
+  <article class="grid-card">
+    <div class="grid-toolbar">
+      <div>
+        <h2>Select a workbook</h2>
+      </div>
+      <button type="button" class="btn ghost" (click)="loadFiles()" [disabled]="loadingFiles() || busy()">Refresh files</button>
+    </div>
+    <div class="wizard-copy">
+      <label class="field">
+        <span>Uploaded file</span>
+        <select [value]="selectedFileId()" (change)="selectFile($event)" [disabled]="loadingFiles() || busy()">
+          <option value="">{{ loadingFiles() ? 'Loading uploaded files…' : 'Select an uploaded file' }}</option>
+          @for (file of files(); track file.id) {
+            <option [value]="file.id">{{ fileLabel(file) }}</option>
+          }
+        </select>
+      </label>
+      @if (!loadingFiles() && !files().length) {
+        <p class="muted">No workbooks uploaded yet. <a routerLink="/imports/new">Upload a company file</a> first.</p>
+      }
+      <div class="filter-actions">
+        <button type="button" class="btn primary" [disabled]="!selectedFileId() || busy() || loadingFiles()" (click)="compare()">
+          <app-icon name="reports" /> {{ busy() ? 'Comparing…' : 'Compare file' }}
+        </button>
+      </div>
+    </div>
+    @if (progress(); as state) {
+      <div class="import-progress" role="status" [attr.aria-busy]="busy()">
+        <div class="import-progress-copy">
+          <strong>{{ state.message || 'Preparing comparison…' }}</strong>
+          <span>{{ state.percent }}%</span>
+        </div>
+        <div class="import-progress-track" role="progressbar" [attr.aria-valuenow]="state.percent" aria-valuemin="0" aria-valuemax="100">
+          <span class="import-progress-fill" [class.active]="busy()" [style.width.%]="state.percent"></span>
+        </div>
+      </div>
+    }
+  </article>
+
+  @if (validationIssues().length) {
+    <article class="grid-card">
+      <div class="grid-toolbar"><div><h2>Rows to correct</h2><p>The selected workbook was not processed.</p></div></div>
+      <div class="desktop-table">
+        <table>
+          <thead><tr><th>Row</th><th>Account</th><th>Issue</th></tr></thead>
+          <tbody>
+            @for (issue of validationIssues(); track $index) {
+              <tr>
+                <td>{{ issue.row ?? 'Column' }}</td>
+                <td>{{ issue.account || '—' }}</td>
+                <td>@for (item of issue.errors; track $index) { <span>{{ item.label || item.field || item.code.replaceAll('_', ' ') }}</span> }</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </article>
+  }
+
+  @if (comparison(); as data) {
+    <section class="kpi-grid">
+      <app-kpi-card label="Excel accounts" [value]="'' + accountRows().length" icon="ledgers" hint="Accounts in this workbook" />
+      @for (item of countByStatus(); track item.status) {
+        <app-kpi-card [label]="label(item.status)" [value]="'' + item.count" [icon]="item.status === 'MATCHED' ? 'check' : 'warning'" />
+      }
+    </section>
+
+    <article class="grid-card">
+      <div class="grid-toolbar">
+        <div>
+          <h2><app-icon name="ledgers" /> Account financial comparison</h2>
+          <p>{{ data.file['fileName'] || data.file['file_name'] }} · {{ data.companyName }} · Excel pending compared with Tally closing balance.</p>
+        </div>
+      </div>
+      @if (basisMessage(); as message) { <p class="banner" role="status">{{ message }}</p> }
+      <div class="comparison-filters" aria-label="Filter account comparison">
+        <label class="field account-filter-search">
+          <span>Account</span>
+          <input type="search" [value]="accountSearch()" (input)="setSearch($event)" placeholder="Search account or Tally ledger" />
+        </label>
+        <label class="field">
+          <span>Category</span>
+          <select [value]="categoryFilter()" (change)="setCategory($event)">
+            <option value="all">All categories</option>
+            @for (category of categories(); track category) { <option [value]="category">{{ category }}</option> }
+          </select>
+        </label>
+        <label class="field">
+          <span>Status</span>
+          <select [value]="statusFilter()" (change)="setStatus($event)">
+            <option value="all">All statuses</option>
+            @for (item of countByStatus(); track item.status) { <option [value]="item.status">{{ label(item.status) }}</option> }
+          </select>
+        </label>
+        <label class="difference-toggle">
+          <input type="checkbox" [checked]="differencesOnly()" (change)="toggleDifferences($event)" />
+          <span>Differences only</span>
+        </label>
+        @if (hasFilters) {
+          <button type="button" class="btn ghost clear-filters" (click)="clearFilters()">Clear</button>
+        }
+        <p class="filter-count" aria-live="polite">Showing {{ filteredRows().length }} of {{ accountRows().length }} accounts</p>
+      </div>
+      <div class="desktop-table comparison-table">
+        <table>
+          <thead>
+            <tr><th>Account</th><th>Category</th><th>Billed</th><th>Paid</th><th>Excel pending</th><th>Tally balance</th><th>Difference</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            @for (row of filteredRows(); track row['account_id']) {
+              <tr>
+                <td>{{ row['account_name'] }}</td>
+                <td>{{ row['level_1_category'] || '—' }}</td>
+                <td class="num">{{ money(row['bill_amount'], row['source_currency']) }}</td>
+                <td class="num">{{ money(row['paid_amount'], row['source_currency']) }}</td>
+                <td class="num">{{ money(row['source_amount'], row['source_currency']) }}</td>
+                <td class="num">{{ row['tally_amount'] == null ? '—' : money(row['tally_amount'], row['tally_currency']) }}</td>
+                <td class="num">{{ row['difference'] == null ? '—' : money(row['difference'], row['currency']) }}</td>
+                <td><span class="status-pill" [attr.data-status]="row['status']">{{ label(row['status']) }}</span></td>
+              </tr>
+            } @empty {
+              <tr><td colspan="8">{{ accountRows().length ? 'No accounts match these filters.' : 'No processed account results are available for this file.' }}</td></tr>
+            }
+          </tbody>
+        </table>
+      </div>
+      @if (data.tallyOnly?.length) {
+        <div class="section-copy"><h3>In Tally, not in Excel</h3></div>
+        <div class="desktop-table">
+          <table>
+            <thead><tr><th>Tally account</th><th>Tally balance</th><th>Difference</th><th>Status</th></tr></thead>
+            <tbody>
+              @for (row of data.tallyOnly; track row['reconciliation_id']) {
+                <tr>
+                  <td>{{ row['tally_ledger_name'] }}</td>
+                  <td class="num">{{ money(row['tally_amount'], row['tally_currency']) }}</td>
+                  <td class="num">{{ row['difference'] == null ? '—' : money(row['difference'], row['currency']) }}</td>
+                  <td><span class="status-pill" [attr.data-status]="row['status']">{{ label(row['status']) }}</span></td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+    </article>
+  }
+</section>

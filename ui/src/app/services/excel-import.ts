@@ -7,6 +7,7 @@ export interface ExcelImportRow {
   file_name: string;
   status: string;
   uploaded_at: string;
+  company_id?: string;
   detected_company?: string;
   company_name?: string;
   source_name?: string;
@@ -359,6 +360,8 @@ export class ExcelImportService {
       currency?: string | null;
       batch?: Record<string, unknown>;
       reconciliation?: ImportReconciliationSummary[];
+      accounts?: ImportRecord[];
+      tallyOnly?: ImportRecord[];
     }>('/api/imports/' + id);
   }
 

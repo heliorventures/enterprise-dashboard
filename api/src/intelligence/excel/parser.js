@@ -336,7 +336,9 @@ async function analyzeWorkbook(source) {
   const columns = refineColumnTargets(buildColumns(parentRow, childRow, colCount), valuesByRow, structure);
   const title = normalizeSpace(valuesByRow[structure.titleRow]?.[0] || '');
   const period = parsePeriod(valuesByRow[structure.periodRow]?.[0]);
-  const entity = parseEntity(valuesByRow[structure.entityRow]?.[0]);
+  const entity = structure.entityRow === structure.headerRow
+    ? parseEntity(null)
+    : parseEntity(valuesByRow[structure.entityRow]?.[0]);
   const currencyLabels = Object.values(valuesByRow).slice(0, structure.dataStartRow - 1).flat()
     .filter(value => typeof value === 'string').map(value => /^\s*(?:report\s+)?currency\s*:\s*([A-Za-z]{3})\s*$/i.exec(value)?.[1]).filter(Boolean);
   const currencies = [...new Set(currencyLabels.map(value => require('../../reportCurrency').currencyCode(value)))];

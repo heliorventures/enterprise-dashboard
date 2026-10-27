@@ -1,6 +1,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
+const ExcelJS = require('exceljs');
 const {
   analyzeWorkbook,
   parsePeriod,
@@ -42,6 +43,20 @@ describe('header helpers', () => {
 });
 
 describe('sample ageing outstanding workbook', () => {
+  it('does not treat the account header as a company banner', async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Worksheet');
+    sheet.addRow(['AGEING OUTSTANDING EXCEL REPORT']);
+    sheet.addRow(['From :-31/03/2024 To :-31/03/2027']);
+    sheet.addRow(['Particulars', 'Up to Date', null, 'Pending Bill']);
+    sheet.addRow([null, 'Bill Amount', 'Paid Amount', 'Dr Amt']);
+    sheet.addRow(['CURRENT ASSETS']);
+    sheet.addRow(['Bank Account', 100, 0, 100]);
+    const analysis = await analyzeWorkbook(await workbook.xlsx.writeBuffer());
+    assert.equal(analysis.entity.company, null);
+    assert.equal(analysis.columns.find((column) => column.target === 'account_name').canonical, 'Particulars');
+  });
+
   it('detects report structure and classifies rows', async () => {
     const analysis = await analyzeWorkbook(SAMPLE);
     assert.equal(analysis.title, 'AGEING OUTSTANDING EXCEL REPORT');

@@ -191,7 +191,7 @@ function registerExcelImportRoutes(app) {
   // Project-wise view of the same Excel data. Registered before /api/imports/:id.
   const projectCompany = async value => {
     if (!reports.company(value)) throw reports.bad('Select a company');
-    return intelCompanyId(value);
+    return (await imports.ensureCompany({ companyId: value })).id;
   };
   const tallyProjectId = value => (value === null || value === undefined ? value
     : reports.integer(value, 'tallyProjectId', undefined, 2147483647));

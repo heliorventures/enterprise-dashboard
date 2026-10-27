@@ -451,13 +451,15 @@ async function detail(companyId, projectId, { q, status, page = 1, pageSize = 10
     const rows = await db.query(
       `SELECT a.id AS account_id,a.account_name,a.project_source,a.level_1_category,o.import_batch_id,
               o.bill_amount,o.paid_amount,o.pending_bill_debit,o.pending_bill_credit,
-              r.id AS reconciliation_id,r.status,r.source_amount,r.tally_amount,r.difference,r.tally_ledger_id,r.tally_ledger_name
+              r.id AS reconciliation_id,r.status,r.source_amount,r.tally_amount,r.difference,r.tally_ledger_id,r.tally_ledger_name,
+              r.reporting_date,r.tally_balance_date,r.comparison_available
        ${base}
        ORDER BY abs(COALESCE(r.difference,0)) DESC,a.account_name LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
       [...params, size, offset]);
     const total = (await db.query(`SELECT count(*)::int AS n ${base}`, params)).rows[0].n;
     const tallyOnly = (await db.query(
-      `SELECT r.id AS reconciliation_id,r.tally_ledger_id,r.tally_ledger_name,r.tally_amount,r.difference,r.status,r.import_batch_id
+            `SELECT r.id AS reconciliation_id,r.tally_ledger_id,r.tally_ledger_name,r.tally_amount,r.difference,r.status,r.import_batch_id,
+              r.reporting_date,r.tally_balance_date,r.comparison_available
        FROM intel_current_reconciliations r
        WHERE r.company_id=$1 AND r.outstanding_id IS NULL AND r.status='MISSING_IN_SOURCE'
          AND ${RULE_PROJECT('r.tally_ledger_name', 'r.company_id')} IS NOT DISTINCT FROM $2::uuid
