@@ -58,6 +58,12 @@ test('discovery uses diagnostics and differentiates HTTP, decode, and record pro
   await scenario(async()=>new Response(envelope('<COMPANY NAME="Example"><GUID>g</GUID></COMPANY>')),async(config,events)=>{
     await assert.rejects(()=>tally.extract(config,'COMPANY',null,()=>{throw Object.assign(new Error('write failed'),{code:'ENOSPC'});}),/write failed/);
     const e=events.find(e=>e.event==='tally_export_failed');assert.equal(e.stage,'record_handler');assert.equal(e.recordsReceived,1);assert.equal(e.recordsProcessed,0);
+    assert.match(e.action,/disk space/i);
+  });
+  await scenario(async()=>new Response(envelope('<GROUP NAME="Example"></GROUP>')),async(config,events)=>{
+    await assert.rejects(()=>source.extract(config,'GROUP','Company',()=>{throw new Error('validation failed');}),/validation failed/);
+    const e=events.find(e=>e.event==='tally_export_failed');assert.equal(e.stage,'record_handler');
+    assert.doesNotMatch(e.action,/disk space|folder permissions/i);
   });
 });
 test('Tally server error reason and date window survive without logging credentials',async()=>{

@@ -1,5 +1,8 @@
 # Helior Finance Sync
 
+Version 1.4.2 corrects explicit ledger identity export and retains precise ledger
+error codes in diagnostics. See [ledger identity correction](../../deploy/docs/finance-sync-ledger-identities-2026-10-27.md).
+
 Version 1.4.1 coordinates full snapshot capacity with the API and adds exact UTF-8
 failure diagnostics. Deploy the matching API first; see [capture fixes and rollout](../../deploy/docs/finance-sync-capture-fixes-2026-10-26.md).
 
@@ -49,7 +52,7 @@ Then build:
 npm run build
 ```
 
-This creates `release/Helior-Finance-Sync-1.4.1-Setup.exe` for the current version. It builds only; it does not upload or deploy anything. The build fails before packaging if configuration is missing or invalid. No production credential is read from another project or an API environment file. The installer includes your configuration automatically.
+This creates `release/Helior-Finance-Sync-1.4.2-Setup.exe` for the current version. It builds only; it does not upload or deploy anything. The build fails before packaging if configuration is missing or invalid. No production credential is read from another project or an API environment file. The installer includes your configuration automatically.
 
 ### Release versions and upgrades
 

@@ -6,7 +6,8 @@ function explainError(error={}) {
   if(codes.includes('SOURCE_SNAPSHOT_LIMIT')||/Source snapshot exceeds (capture|transfer|configured)/.test(message))return 'This company exceeds the configured sync size limit. Ask your administrator to review Finance server capacity and the reported size budget.';
   if(codes.some(c=>['SOURCE_RECORD_LIMIT','SOURCE_CHUNK_LIMIT','SOURCE_COLLECTION_LIMIT'].includes(c)))return 'This company exceeds the supported export size or record limit. Share the diagnostic log with your administrator.';
   if(codes.includes('ERR_ENCODING_INVALID_ENCODED_DATA'))return 'Tally returned invalid UTF-8 encoding. Share the diagnostic log with your administrator; it identifies the failing byte position.';
-  if(message.includes('BATCH_LEDGER_'))return 'Tally returned an incomplete or changed ledger batch. No complete capture was uploaded. Check Tally and share the diagnostic log.';
+  if(codes.includes('BATCH_LEDGER_ID_REQUIRED')||message.includes('BATCH_LEDGER_ID_REQUIRED'))return 'Tally did not return a valid ledger identifier. Share the diagnostic log with your administrator.';
+  if(codes.some(code=>typeof code==='string'&&code.startsWith('BATCH_LEDGER_'))||message.includes('BATCH_LEDGER_'))return 'Tally returned an incomplete or changed ledger batch. No complete capture was uploaded. Check Tally and share the diagnostic log.';
   if(message.includes('PERIOD_CAPTURE_STALE'))return 'Finance already has newer data. This old capture is retained for investigation. Click Sync now again to take a fresh capture.';
   if(message.includes('PERIOD_BASELINE_REQUIRED'))return 'Run All data once for this company and resolve any Finance processing errors before using a shorter period.';
   if(message.includes('PERIOD_API_UPGRADE_REQUIRED'))return 'Finance needs a server update before period sync is available. Contact your administrator.';

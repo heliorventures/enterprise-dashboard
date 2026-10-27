@@ -82,8 +82,8 @@ async function capture(config,company,directory,log) {
         if(config.scope&&collection==='VOUCHER') {
           const raw=source.field(payload,'DATE'),guid=source.field(payload,'GUID');
           const date=typeof raw==='string'&&/^\d{8}$/.test(raw)?`${raw.slice(0,4)}-${raw.slice(4,6)}-${raw.slice(6)}`:raw;
-          if(!calendarDate(date)||date<config.scope.from||date>config.scope.to)throw new Error('PERIOD_VOUCHER_DATE_INVALID');
-          if(!guid||guid!==guid.trim())throw new Error('PERIOD_VOUCHER_GUID_REQUIRED');
+          if(!calendarDate(date)||date<config.scope.from||date>config.scope.to)throw Object.assign(new Error('PERIOD_VOUCHER_DATE_INVALID'),{code:'PERIOD_VOUCHER_DATE_INVALID'});
+          if(!guid||guid!==guid.trim())throw Object.assign(new Error('PERIOD_VOUCHER_GUID_REQUIRED'),{code:'PERIOD_VOUCHER_GUID_REQUIRED'});
         }
         const row={collection,ordinal:count,sourceId:identity(payload),payload};
         check.add(payload,count);
@@ -109,7 +109,7 @@ async function capture(config,company,directory,log) {
       collections.push({name:collection,status:'failed',count:0,diagnostic:{...error.exportDiagnostic,
         errorCodes:codes(error),discardedRecords:count,action:error.exportDiagnostic?.action||safeText(error.message)}});
       log({event:'source_collection_failed',company:company.name,collection,error:error.message,
-        discardedRecords:count,durationMs:Date.now()-collectionStarted,diagnostic:error.exportDiagnostic||null});
+        discardedRecords:count,durationMs:Date.now()-collectionStarted,diagnostic:error.exportDiagnostic||{errorCodes:codes(error)}});
       if(config.stopOnFailure||config.voucherWindowDays!==undefined||config.ledgerBatchSize!==undefined)throw error;
       if(error.code==='SOURCE_SNAPSHOT_LIMIT') throw error;
     }

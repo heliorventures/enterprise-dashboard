@@ -3,6 +3,7 @@ const {exportXml,xmlCode,xmlReference}=require('./export-diagnostics');
 const {setTimeout:delay}=require('node:timers/promises');
 const {calendarDate,dateWindows}=require('./scope');
 const escape=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
+const coded=code=>Object.assign(new Error(code),{code});
 const CATALOG=Object.freeze({COMPANY:'Company',GROUP:'Group',LEDGER:'Ledger',VOUCHERTYPE:'Voucher Type',
   CURRENCY:'Currency',COSTCATEGORY:'Cost Category',COSTCENTRE:'Cost Centre',STOCKGROUP:'Stock Group',
   STOCKCATEGORY:'Stock Category',STOCKITEM:'Stock Item',UNIT:'Unit',GODOWN:'Godown',VOUCHER:'Voucher'});
@@ -125,7 +126,7 @@ async function pause(config) {
 function voucherDate(payload) {
   const raw=field(payload,'DATE');
   const date=typeof raw==='string'&&/^\d{8}$/.test(raw)?`${raw.slice(0,4)}-${raw.slice(4,6)}-${raw.slice(6)}`:raw;
-  if(!calendarDate(date)||date<'1901-01-01')throw new Error('BATCH_VOUCHER_DATE_INVALID');
+  if(!calendarDate(date)||date<'1901-01-01')throw coded('BATCH_VOUCHER_DATE_INVALID');
   return date;
 }
 async function extractOnce(config,collection,company,onRecord,onlyDate=false) {
@@ -158,31 +159,38 @@ async function extract(config,collection,company,onRecord) {
     config.exportLog?.({event:'source_voucher_window_started',company,collection,from:window.from,to:window.to});
     bytes+=await extractOnce({...config,scope:window},collection,company,payload=>{
       const date=voucherDate(payload),guid=field(payload,'GUID');
-      if(date<window.from||date>window.to)throw new Error('BATCH_VOUCHER_DATE_INVALID');
-      if(typeof guid!=='string'||!guid||guid!==guid.trim()||guid.length>2000)throw new Error('BATCH_VOUCHER_GUID_REQUIRED');
+      if(date<window.from||date>window.to)throw coded('BATCH_VOUCHER_DATE_INVALID');
+      if(typeof guid!=='string'||!guid||guid!==guid.trim()||guid.length>2000)throw coded('BATCH_VOUCHER_GUID_REQUIRED');
       windowCount++;detailedCount++;
       onRecord(payload);
     });
-    if(window.count!==undefined&&windowCount!==window.count)throw new Error('BATCH_VOUCHER_COUNT_MISMATCH');
+    if(window.count!==undefined&&windowCount!==window.count)throw coded('BATCH_VOUCHER_COUNT_MISMATCH');
     config.exportLog?.({event:'source_voucher_window_finished',company,collection,from:window.from,to:window.to});
   }
-  if(discoveredCount!==null&&detailedCount!==discoveredCount)throw new Error('BATCH_VOUCHER_COUNT_MISMATCH');
+  if(discoveredCount!==null&&detailedCount!==discoveredCount)throw coded('BATCH_VOUCHER_COUNT_MISMATCH');
   return bytes;
 }
 function ledgerRequest(company,range) {
   let body=request('LEDGER',company);
-  if(!range)return body.replace(/<FETCH>[^<]*<\/FETCH>/,'<FETCH>MasterID</FETCH>').replace(/<NATIVEMETHOD>[^<]*<\/NATIVEMETHOD>/g,'');
-  return body.replace('<FETCH>','<FETCH>MasterID,')
-    .replace('</COLLECTION>','<FILTER>FinanceLedgerBatch</FILTER></COLLECTION>')
+  // Use the canonical XML native-method declaration. A FETCH-only request can
+  // return the default Ledger XML tree without its internal MasterID.
+  if(!range)return body.replace(/<NATIVEMETHOD>[^<]*<\/NATIVEMETHOD>/g,'')
+    .replace(/<FETCH>[^<]*<\/FETCH>/,'<NATIVEMETHOD>MasterID</NATIVEMETHOD>');
+  return body.replace('</COLLECTION>','<NATIVEMETHOD>MasterID</NATIVEMETHOD><FILTER>FinanceLedgerBatch</FILTER></COLLECTION>')
     .replace('</TDLMESSAGE>',`<SYSTEM TYPE="Formulae" NAME="FinanceLedgerBatch">$MasterID &gt;= ${range[0]} AND $MasterID &lt;= ${range[1]}</SYSTEM></TDLMESSAGE>`);
 }
 async function extractLedgers(config,company,onRecord) {
   const size=config.ledgerBatchSize;
   if(!Number.isInteger(size)||size<1||size>100)throw new Error('Invalid ledgerBatchSize');
+  const ledgerError=coded;
+  // Tally pads numeric identities, and an explicit declaration can repeat the
+  // default node. Copies must agree after padding; raw records stay unchanged.
   const idOf=row=>{
-    const raw=field(row,'MASTERID');
-    if(typeof raw!=='string'||!/^\d+$/.test(raw)||!Number.isSafeInteger(Number(raw)))throw new Error('BATCH_LEDGER_ID_REQUIRED');
-    return Number(raw);
+    const nodes=row.content.filter(c=>typeof c==='object'&&c.tag.toUpperCase()==='MASTERID');
+    const values=nodes.length?nodes.map(n=>n.content.every(c=>typeof c==='string')?n.content.join('').trim():null):[field(row,'MASTERID')?.trim()??null];
+    const [value]=values;
+    if(value===null||values.some(v=>v!==value)||!/^\d+$/.test(value)||!Number.isSafeInteger(Number(value)))throw ledgerError('BATCH_LEDGER_ID_REQUIRED');
+    return Number(value);
   };
   let bytes=0;
   const read=async(range,callback)=>{
@@ -191,7 +199,7 @@ async function extractLedgers(config,company,onRecord) {
   };
   const discover=async()=>{
     const ids=new Set();
-    await read(null,row=>{const id=idOf(row);if(ids.has(id)||ids.size>=1000000)throw new Error('BATCH_LEDGER_ID_DUPLICATE_OR_LIMIT');ids.add(id);});
+    await read(null,row=>{const id=idOf(row);if(ids.has(id)||ids.size>=1000000)throw ledgerError('BATCH_LEDGER_ID_DUPLICATE_OR_LIMIT');ids.add(id);});
     return ids;
   };
   const original=await discover(),ids=[...original].sort((a,b)=>a-b);
@@ -203,15 +211,15 @@ async function extractLedgers(config,company,onRecord) {
     await read([ids[start],ids[Math.min(start+size,ids.length)-1]],row=>{
       config.signal?.throwIfAborted();
       const id=idOf(row);
-      if(!expected.has(id)||seen.has(id))throw new Error('BATCH_LEDGER_UNEXPECTED_OR_DUPLICATE');
+      if(!expected.has(id)||seen.has(id))throw ledgerError('BATCH_LEDGER_UNEXPECTED_OR_DUPLICATE');
       seen.add(id);onRecord(row);
     });
-    if(seen.size!==expected.size)throw new Error('BATCH_LEDGER_COUNT_MISMATCH');
+    if(seen.size!==expected.size)throw ledgerError('BATCH_LEDGER_COUNT_MISMATCH');
     config.exportLog?.({event:'source_ledger_batch_finished',...progress,count:seen.size});
   }
   config.signal?.throwIfAborted();
   const final=await discover();
-  if(final.size!==original.size||[...final].some(id=>!original.has(id)))throw new Error('BATCH_LEDGER_IDENTITIES_CHANGED');
+  if(final.size!==original.size||[...final].some(id=>!original.has(id)))throw ledgerError('BATCH_LEDGER_IDENTITIES_CHANGED');
   return bytes;
 }
 module.exports={CATALOG,request,parser,field,extract,fetchList,pause,ledgerRequest};

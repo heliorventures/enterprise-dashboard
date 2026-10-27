@@ -7,6 +7,14 @@ const config=require('../src/config');
 const {pendingSummary,validateSelection}=require('../src/state');
 const {publicEvent,explainError}=require('../src/events');
 
+test('ledger identity errors stay specific in exported diagnostics without raw accounting values',()=>{
+  const event=publicEvent({event:'tally_export_failed',errorCodes:['BATCH_LEDGER_ID_REQUIRED','Error'],
+    rawRecord:{name:'PRIVATE LEDGER'},httpStatus:200,recordsReceived:1});
+  assert.ok(event.errorCodes.includes('BATCH_LEDGER_ID_REQUIRED'));
+  assert.match(event.message,/ledger identifier/i);
+  assert.ok(!JSON.stringify(event).includes('PRIVATE'));
+});
+
 test('capture capacity and UTF-8 failures receive specific messages without exposing source text',()=>{
   assert.match(explainError({error:'Source snapshot exceeds capture limits',diagnostic:{errorCodes:['SOURCE_SNAPSHOT_LIMIT']}}),/size|limit/i);
   assert.match(explainError({diagnostic:{errorCodes:['ERR_ENCODING_INVALID_ENCODED_DATA']}}),/UTF-8|encoding/i);

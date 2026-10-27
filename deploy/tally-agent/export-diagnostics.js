@@ -21,6 +21,8 @@ function codes(error) {
   visit(error);return [...found];
 }
 function hint(errorCodes,stage,status) {
+  if(errorCodes.includes('BATCH_LEDGER_ID_REQUIRED'))return 'Tally did not export an unambiguous numeric MasterID for a ledger. Check the explicit XML native-method declaration for MasterID.';
+  if(errorCodes.some(code=>code.startsWith('BATCH_LEDGER_')))return 'The ledger identities were missing, duplicated, unexpected or changed during capture. Inspect the exact ledger error code; keep the complete-batch checks enabled.';
   if(errorCodes.includes('SOURCE_SNAPSHOT_LIMIT'))return 'The complete company snapshot exceeds the configured size budget. Review the reported actualBytes/limitBytes and the Finance server capacity before retrying.';
   if(errorCodes.includes('SOURCE_RECORD_LIMIT')||errorCodes.includes('SOURCE_CHUNK_LIMIT'))return 'The complete snapshot exceeds the supported record or chunk count. Review its volume before retrying.';
   if(errorCodes.includes('XML_INVALID_CHARACTER_REFERENCE'))return 'The response contains a numeric character reference rejected by XML. Use xmlPath and xmlLine/xmlColumn to identify it; do not strip source characters.';
@@ -34,7 +36,8 @@ function hint(errorCodes,stage,status) {
   if(status===401||status===403)return 'Check permissions and authentication on the configured Tally HTTP endpoint.';
   if(status>=400)return 'The configured endpoint returned an HTTP error. Verify it points to Tally and check server/network logs.';
   if(stage==='decode')return 'The response could not be decoded as UTF-8. Check the reported content type and Tally export encoding.';
-  if(stage==='record_handler'||errorCodes.some(c=>['ENOSPC','EACCES','EPERM'].includes(c)))return 'Check free disk space and folder permissions for the task account; the record could not be processed or saved.';
+  if(errorCodes.some(c=>['ENOSPC','EACCES','EPERM'].includes(c)))return 'Check free disk space and folder permissions for the task account; the record could not be saved.';
+  if(stage==='record_handler')return 'A returned record failed validation or processing. Use the error codes, collection, XML path and records received to identify it.';
   return 'Use the collection, XML path, line/column and records received to locate the failing export. Check that this collection is available in the loaded company.';
 }
 function xmlCode(error) {
