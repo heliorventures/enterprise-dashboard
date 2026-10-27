@@ -1,5 +1,9 @@
 # Helior Finance Sync
 
+Version 1.4.3 resumes saved uploads from the parts the API already stored and
+automatically retries interrupted connections and HTTP 429/5xx responses. Deploy
+the matching API first so resumed uploads skip stored parts.
+
 Version 1.4.2 corrects explicit ledger identity export and retains precise ledger
 error codes in diagnostics. See [ledger identity correction](../../deploy/docs/finance-sync-ledger-identities-2026-10-27.md).
 
@@ -52,7 +56,7 @@ Then build:
 npm run build
 ```
 
-This creates `release/Helior-Finance-Sync-1.4.2-Setup.exe` for the current version. It builds only; it does not upload or deploy anything. The build fails before packaging if configuration is missing or invalid. No production credential is read from another project or an API environment file. The installer includes your configuration automatically.
+This creates `release/Helior-Finance-Sync-1.4.3-Setup.exe` for the current version. It builds only; it does not upload or deploy anything. The build fails before packaging if configuration is missing or invalid. No production credential is read from another project or an API environment file. The installer includes your configuration automatically.
 
 ### Release versions and upgrades
 
