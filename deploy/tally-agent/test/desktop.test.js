@@ -135,9 +135,18 @@ test('desktop and command-line calls share the state-directory lock',async()=>{
   try {assert.equal(await withLock({stateDirectory:path.join(dir,'state')},()=>withLock(file,()=>0)),2);}
   finally {fs.rmSync(dir,{recursive:true});}
 });
-test('manual upload makes one attempt and never automatically sleeps or retries',async()=>{
-  let calls=0;
-  await assert.rejects(()=>deliver({apiUrl:'https://example.invalid',requestTimeoutMs:1000,uploadAttempts:1},'test','unused',
-    {batchId:'test',profile:'company-business-v1',company:{name:'A'}},()=>{},async()=>{calls++;return {status:503};},async()=>{throw new Error('Unexpected retry');}),/HTTP 503/);
+test('transient upload failures retry with backoff while client errors fail immediately',async()=>{
+  const m={batchId:'test',profile:'company-business-v1',company:{name:'A'}},config={apiUrl:'https://example.invalid',requestTimeoutMs:1000};
+  let calls=0;const waits=[];
+  await assert.rejects(()=>deliver(config,'test','unused',m,()=>{},async()=>{calls++;return {status:503};},async ms=>{waits.push(ms);}),/HTTP 503/);
+  assert.equal(calls,4);assert.deepEqual(waits,[1000,2000,4000]);
+  calls=0;
+  await assert.rejects(()=>deliver(config,'test','unused',m,()=>{},async()=>{calls++;return {status:400};},async()=>{throw new Error('Unexpected retry');}),/HTTP 400/);
+  assert.equal(calls,1);
+});
+test('Stop during retry backoff ends the upload without another request',async()=>{
+  const controller=new AbortController();let calls=0;
+  await assert.rejects(()=>deliver({apiUrl:'https://example.invalid',requestTimeoutMs:1000,signal:controller.signal},'test','unused',
+    {batchId:'test',profile:'company-business-v1',company:{name:'A'}},()=>{},async()=>{calls++;setTimeout(()=>controller.abort(),20);throw new Error('connection reset');}),/abort/i);
   assert.equal(calls,1);
 });

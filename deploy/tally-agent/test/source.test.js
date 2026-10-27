@@ -114,6 +114,22 @@ test('source delivery uses its own routes and retries the exact persisted payloa
     assert.equal(result.reportingStatus,'unverified');
   } finally {fs.rmSync(directory,{recursive:true});}
 });
+test('resumed delivery sends only chunks the API has not stored',async()=>{
+  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'finance-source-skip-'));
+  try {
+    for(const index of [0,1,2])fs.writeFileSync(path.join(directory,`${index}.json`),JSON.stringify({records:[]}));
+    const m={batchId:'source-skip',profile:'company-business-v1',company:{name:'Company'},chunkCount:3,recordCount:0,consistency:'stable',collections:[{status:'success'}]};
+    const sent=[],events=[];
+    const result=await deliver({apiUrl:'https://example.invalid',requestTimeoutMs:1000},'token',directory,m,e=>events.push(e),async(url,options)=>{
+      if(url.endsWith('/chunk'))sent.push(JSON.parse(options.body).index);
+      const received=url.endsWith('/begin')?{received:[0,2,7,-1,'1']}:{};
+      return {status:200,json:async()=>({ok:true,batchId:m.batchId,recordCount:0,coverageStatus:'complete',...received})};
+    },async()=>{});
+    assert.deepEqual(sent,[1]);
+    assert.equal(result.chunksAcknowledged,3);
+    assert.equal(events.find(e=>e.event==='upload_started').chunksAcknowledged,2);
+  } finally {fs.rmSync(directory,{recursive:true});}
+});
 
 test('source outbox resumes before Tally access and legacy pending batches remain untouched',async()=>{
   const directory=fs.mkdtempSync(path.join(os.tmpdir(),'finance-source-resume-'));

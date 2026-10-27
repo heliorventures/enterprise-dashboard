@@ -41,6 +41,7 @@ test('JSONB source archive is atomic, company-isolated, lossless and retry-safe 
   const c0={batchId:m.batchId,index:0,records:[company]},c1={batchId:m.batchId,index:1,records:[voucher]};
   await api.chunk(c0);
   await assert.rejects(()=>api.complete({batchId:m.batchId}),/incomplete/);
+  assert.deepEqual((await api.begin(m)).received,[0]);
   assert.equal((await db.query('SELECT count(*)::int AS count FROM tally_source_snapshots')).rows[0].count,0);
   await api.chunk(c1);
   assert.equal((await api.chunk(c1)).duplicate,true);

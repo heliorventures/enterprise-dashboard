@@ -74,13 +74,14 @@ async function begin(input,mode='full') {
     if(prior) {
       if(digest(prior.manifest)!==digest(m)) fail('Source manifest conflict',409);
       await client.query('UPDATE tally_source_uploads SET updated_at=now() WHERE batch_id=$1',[m.batchId]);
-      return {ok:true,batchId:m.batchId,completed:!!prior.result};
+      const received=prior.result?[]:(await client.query('SELECT chunk_index FROM tally_source_chunks WHERE batch_id=$1 ORDER BY chunk_index',[m.batchId])).rows.map(r=>r.chunk_index);
+      return {ok:true,batchId:m.batchId,completed:!!prior.result,received};
     }
     const {count}=(await client.query('SELECT count(*)::int AS count FROM tally_source_uploads WHERE result IS NULL')).rows[0];
     if(count>=100) fail('Too many source uploads',429);
     if(m.scope)await period.baseline(client,m.company.externalId,m.capturedAt,m.periodMode==='replace');
     await client.query('INSERT INTO tally_source_uploads(batch_id,manifest) VALUES($1,$2)',[m.batchId,JSON.stringify(m)]);
-    return {ok:true,batchId:m.batchId,completed:false};
+    return {ok:true,batchId:m.batchId,completed:false,received:[]};
   });
 }
 async function chunk(input,mode='full') {

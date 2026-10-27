@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const {setTimeout:delay} = require('node:timers/promises');
 function saveJson(file, value) {
   const temporary = file + '.tmp';
   const fd = fs.openSync(temporary,'w',0o600);
@@ -27,7 +28,7 @@ function writer(directory) {
     finish() { if (rows || !chunkCount) flush(); return {chunkCount,bytes,ledgerCount,voucherCount}; }
   };
 }
-async function deliver(config, token, directory, manifest, log, fetcher=fetch, sleep=ms=>new Promise(r=>setTimeout(r,ms))) {
+async function deliver(config, token, directory, manifest, log, fetcher=fetch, sleep=ms=>delay(ms,undefined,{signal:config.signal})) {
   const sourceMode=manifest.profile==='company-business-v1';
   const endpoint=sourceMode ? manifest.periodMode==='replace'?'source-period-replace/':manifest.scope?'source-period/':'source/' : '';
   let retries=0, requestBytes=0, chunksAcknowledged=0;
@@ -68,8 +69,12 @@ async function deliver(config, token, directory, manifest, log, fetcher=fetch, s
     }
   }
   const begun = await post('begin',manifest);
-  log({event:'upload_started',company:manifest.company.name,batchId:manifest.batchId,chunkCount:manifest.chunkCount});
+  // Completion still verifies every chunk server-side; skipping only avoids resending stored ones.
+  const received=new Set(Array.isArray(begun.received)?begun.received.filter(i=>Number.isSafeInteger(i)&&i>=0&&i<manifest.chunkCount):[]);
+  chunksAcknowledged=received.size;
+  log({event:'upload_started',company:manifest.company.name,batchId:manifest.batchId,chunkCount:manifest.chunkCount,chunksAcknowledged});
   for (let index=0; !begun.completed && index<manifest.chunkCount; index++) {
+    if(received.has(index)) continue;
     const payload=JSON.parse(fs.readFileSync(path.join(directory,`${index}.json`),'utf8'));
     await post('chunk',{batchId:manifest.batchId,index,...payload}); chunksAcknowledged++;
     log({event:'upload_progress',company:manifest.company.name,batchId:manifest.batchId,chunksAcknowledged,chunkCount:manifest.chunkCount});
