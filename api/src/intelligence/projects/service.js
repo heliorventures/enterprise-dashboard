@@ -4,6 +4,7 @@ const decimal = require('../transform/decimal');
 const { basis, currentBasis, rowsWithCurrency } = require('../currency');
 const { currencyCode } = require('../../reportCurrency');
 const config = require('../config');
+const { balanceDateNotes } = require('../tally/balanceDate');
 
 function fail(message, status = 400) {
   return Object.assign(new Error(message), { status });
@@ -302,6 +303,7 @@ async function basisNotes(database, companyId) {
     `SELECT b.frozen_inputs->'analysis'->>'currency' AS currency,
             b.frozen_inputs->'analysis'->>'currencyAssumed' AS currency_assumed,
             b.frozen_inputs->'reference'->>'balanceDateAssumed' AS date_assumed,
+            b.frozen_inputs->'reference'->>'balanceDateSource' AS date_source,
             f.reporting_period_to::text AS reporting_date
      FROM intel_company_publications p
      JOIN intel_import_batches b ON b.id=p.import_batch_id
@@ -312,9 +314,7 @@ async function basisNotes(database, companyId) {
   if (row.currency_assumed === 'true' && row.currency) {
     notes.push(`The Excel states no currency, so ${row.currency} (the company currency) is used. No conversion is applied.`);
   }
-  if (row.date_assumed === 'true') {
-    notes.push(`Tally balances here carry no date, so they are treated as the same date as the Excel (${row.reporting_date}). A difference can be caused by timing as well as by a real mismatch.`);
-  }
+  notes.push(...balanceDateNotes({balanceDateAssumed:row.date_assumed === 'true',balanceDateSource:row.date_source},row.reporting_date));
   return notes;
 }
 

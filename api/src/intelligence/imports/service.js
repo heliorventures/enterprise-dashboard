@@ -7,6 +7,7 @@ const { analyzeWorkbook, classifyRow } = require('../excel/parser');
 const { loadMaps, resolveMaps, saveDetectedMaps } = require('../mapping/engine');
 const { netOutstanding, ageingEntries } = require('../transform/normalize');
 const tally = require('../tally/provider');
+const { balanceDateNotes } = require('../tally/balanceDate');
 const { reconcileAccounts } = require('../reconciliation/engine');
 const audit = require('../audit');
 const projects = require('../projects/service');
@@ -237,7 +238,7 @@ async function validateOnly(id) {
   });
 }
 
-async function claim(id, {username,reprocess=false,reference: frozenReference,inputs: frozenInputs}={}, database=db) {
+async function claim(id, {username,reprocess=false,reference: frozenReference,inputs: frozenInputs,accountMaps: frozenAccountMaps}={}, database=db) {
   return database.transaction(async client => {
     const owner=(await client.query('SELECT company_id FROM intel_import_files WHERE id=$1',[id])).rows[0];
     if (!owner) throw Object.assign(new Error('Import not found'),{status:404});
@@ -255,7 +256,7 @@ async function claim(id, {username,reprocess=false,reference: frozenReference,in
     const prepared = frozenInputs || await prepare(file,client);
     if (!prepared.validation.canProcess) throw Object.assign(new Error('Validation failed; correct required fields, duplicate accounts and invalid values before processing'),{status:400});
     const reference = frozenReference || await tally.snapshot((await client.query('SELECT tally_company_id FROM intel_companies WHERE id=$1',[file.company_id])).rows[0]?.tally_company_id,client);
-    const accountMaps = (await client.query('SELECT * FROM intel_account_maps WHERE company_id=$1',[file.company_id])).rows;
+    const accountMaps = frozenAccountMaps ?? (await client.query('SELECT * FROM intel_account_maps WHERE company_id=$1',[file.company_id])).rows;
     const token = randomUUID();
     const frozen = {columns:prepared.columns,rules:prepared.rules,validation:prepared.validation,totals:prepared.totals,
       staged:prepared.staged,analysis:prepared.analysis,reference,accountMaps,mappingVersion:frozenInputs?.mappingVersion ?? file.mapping_version,username};
@@ -559,6 +560,7 @@ async function getResults(id) {
   const currencies=basis(batch?.frozen_inputs);
   return { file: summaryPayload(file), companyName: file.company_name, batch:publicBatch(batch),
     currency:currencies.source_currency,
+    notes:balanceDateNotes(batch?.frozen_inputs?.reference,file.reporting_period_to),
     reconciliation: reconciliationSummary(recon.rows,batch?.frozen_inputs),
     accounts: await rowsWithCurrency(db,accounts),
     tallyOnly: await rowsWithCurrency(db,tallyOnly) };

@@ -24,6 +24,7 @@ interface ImportComparison {
   reconciliation?: ImportReconciliationSummary[];
   accounts?: ImportRecord[];
   tallyOnly?: ImportRecord[];
+  notes?: string[];
 }
 
 @Component({

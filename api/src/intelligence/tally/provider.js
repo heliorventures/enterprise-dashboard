@@ -2,6 +2,7 @@ const db = require('../db');
 const { normalizeSpace } = require('../excel/parser');
 const { scalarField } = require('../../sourceTree');
 const { currencyCode } = require('../../reportCurrency');
+const { balanceDateBasis } = require('./balanceDate');
 
 function normalizeName(name) {
   return normalizeSpace(name).replace(/[^a-zA-Z0-9]+/g, ' ').trim().toLowerCase();
@@ -86,7 +87,7 @@ async function snapshot(tallyCompanyId, database=db) {
         currency:currencyCode(ledger.currency) || currencyCode(row.currency),
         normalized:normalizeName(ledger.name),groupName:ledger.group_name,balance:String(ledger.balance)})) : await listLedgers(tallyCompanyId,database),
       currency:currencyCode(row.currency),uniformCurrency:row.coverage?.uniformCurrency===true,
-      batchId:row.batch_id, balanceDate:coherent ? require('../excel/parser').parseDate(row.manifest?.dateContext?.ledgers?.to) : null };
+      batchId:row.batch_id, ...(coherent ? balanceDateBasis(row.manifest?.dateContext?.ledgers?.to) : {balanceDate:null}) };
   };
   return database===db ? db.readSnapshot(read) : read();
 }

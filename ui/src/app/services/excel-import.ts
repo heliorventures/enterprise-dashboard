@@ -362,6 +362,7 @@ export class ExcelImportService {
       reconciliation?: ImportReconciliationSummary[];
       accounts?: ImportRecord[];
       tallyOnly?: ImportRecord[];
+      notes?: string[];
     }>('/api/imports/' + id);
   }
 

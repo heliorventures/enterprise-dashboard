@@ -11,7 +11,7 @@ module.exports = {
   sessionSecret: process.env.DASHBOARD_SESSION_SECRET || '',
   // Used when neither the Excel nor the Tally company states a currency. No conversion is ever applied.
   defaultCurrency: (process.env.DEFAULT_CURRENCY || 'INR').trim().toUpperCase(),
-  // The legacy Tally ledgers carry no balance date. When true they are treated as dated the same as the Excel.
+  // Undated legacy/full-history balances can be compared under a disclosed Excel-date assumption.
   assumeUndatedTallyBalances: !['false', '0', 'no'].includes(String(process.env.ASSUME_UNDATED_TALLY_BALANCES || 'true').toLowerCase()),
   trustedProxyHosts: (process.env.TRUSTED_PROXY_HOSTS || '').split(',').map(value => value.trim()).filter(Boolean),
   db: {

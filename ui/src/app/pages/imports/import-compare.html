@@ -88,6 +88,9 @@
         </div>
       </div>
       @if (basisMessage(); as message) { <p class="banner" role="status">{{ message }}</p> }
+      @for (note of data.notes || []; track note) {
+        <p class="banner" role="note">{{ note }}</p>
+      }
       <div class="comparison-filters" aria-label="Filter account comparison">
         <label class="field account-filter-search">
           <span>Account</span>
