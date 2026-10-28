@@ -47,7 +47,7 @@ async function repairOne(candidate) {
       username, reprocess: true, inputs: original, reference, accountMaps: original.accountMaps,
     }, { transaction: work => work(client) });
     if (reserved.existing) throw new Error('Import claim changed; reload the correction candidates');
-    await imports.publishGeneration(client, reserved);
+    await imports.publishGeneration(client, reserved, { replacePublicationBatchId: current.batch_id });
     await client.query(`INSERT INTO intel_audit(username,action,entity,entity_id,old_value,new_value)
       VALUES($1,'BALANCE_DATE_CORRECTION','import_file',$2,$3,$4)`, [username, current.import_file_id,
       { batchId: current.batch_id, balanceDate: original.reference.balanceDate },

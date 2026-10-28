@@ -85,6 +85,31 @@ test('balance-date repair republishes frozen data atomically and preserves the o
     assert.equal((await repair.inspect()).filter(row => row.import_file_id === file).length, 0);
     assert.equal((await repair.repairOne(candidates[0])).status, 'skipped');
     assert.equal(await generations(), 2);
+
+    await t.test('repairing an older selected file cannot promote it over another publication for the same date', async () => {
+      const addFile = async () => (await db.query('INSERT INTO intel_import_files(company_id,source_system_id,file_name,stored_path,file_hash,file_size,status,reporting_period_to,analysis) VALUES($1,$2,\'duplicate-period.xlsx\',$3,$4,1,\'ANALYZED\',\'2027-03-31\',\'{}\') RETURNING id',
+        [company, source, stored, randomUUID()])).rows[0].id;
+      const olderFile = await addFile();
+      await imports.processFile(olderFile, { username: 'test', inputs: original.frozen_inputs,
+        reference: oldReference, accountMaps: original.frozen_inputs.accountMaps });
+      const activeFile = await addFile();
+      const activeInputs = structuredClone(original.frozen_inputs);
+      activeInputs.staged.find(item => item.row.rowType === 'DETAIL').mapped.gst_number = 'CURRENT-METADATA';
+      await imports.processFile(activeFile, { username: 'test', inputs: activeInputs,
+        reference: { ...oldReference, balanceDate: '2027-03-31' }, accountMaps: original.frozen_inputs.accountMaps });
+      const active = (await selectedPublication()).import_batch_id;
+      const candidate = (await repair.inspect()).find(row => row.import_file_id === olderFile);
+      assert.ok(candidate);
+      const correction = await repair.repairOne(candidate);
+      assert.equal(correction.status, 'corrected');
+      assert.equal((await selectedPublication()).import_batch_id, active);
+      assert.equal((await db.query('SELECT gst_number FROM intel_accounts WHERE id=$1', [account])).rows[0].gst_number, 'CURRENT-METADATA');
+      assert.equal((await imports.getResults(olderFile)).accounts[0].tally_balance_date, null);
+    });
+
+    async function selectedPublication() {
+      return (await db.query('SELECT import_batch_id FROM intel_company_publications WHERE company_id=$1', [company])).rows[0];
+    }
   } finally {
     config.assumeUndatedTallyBalances = originalPolicy;
     for (const table of ['intel_project_snapshots', 'intel_company_publications', 'intel_exceptions', 'intel_reconciliations', 'intel_outstanding', 'intel_import_files', 'intel_account_maps', 'intel_accounts']) {

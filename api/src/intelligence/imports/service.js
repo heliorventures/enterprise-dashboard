@@ -287,7 +287,7 @@ async function processFile(id, options = {}) {
   }
 }
 
-async function publishGeneration(client,reserved) {
+async function publishGeneration(client,reserved,{replacePublicationBatchId}={}) {
   const {file,batch,token}=reserved;
   const id=file.id,batchId=batch.id;
   await client.query('SELECT pg_advisory_xact_lock(61009,hashtext($1))',[file.company_id]);
@@ -296,7 +296,11 @@ async function publishGeneration(client,reserved) {
   if (!owned.rowCount) throw Object.assign(new Error('Import claim is no longer active'),{status:409});
   await client.query('SELECT id FROM intel_companies WHERE id=$1 FOR UPDATE',[file.company_id]);
   const previousPublication = (await client.query('SELECT * FROM intel_company_publications WHERE company_id=$1',[file.company_id])).rows[0];
-  const publishEligible = !previousPublication || shouldPublish(previousPublication.reporting_date,file.reporting_period_to);
+  // Maintenance of a saved generation must not promote a different file that
+  // happens to have the same reporting date as the company's current report.
+  const publishEligible = replacePublicationBatchId === undefined
+    ? !previousPublication || shouldPublish(previousPublication.reporting_date,file.reporting_period_to)
+    : previousPublication?.import_batch_id === replacePublicationBatchId;
   const {staged,columns,rules:rulebook,analysis,totals,reference,accountMaps} = batch.frozen_inputs;
   const successful = staged.filter(item => item.row.rowType==='DETAIL').length;
   const warning = staged.filter(item => item.status==='WARNING').length;
