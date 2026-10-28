@@ -2,6 +2,8 @@ const db = require('../db');
 const audit = require('../audit');
 const decimal = require('../transform/decimal');
 const { basis, currentBasis, rowsWithCurrency } = require('../currency');
+const { currencyCode } = require('../../reportCurrency');
+const config = require('../config');
 
 function fail(message, status = 400) {
   return Object.assign(new Error(message), { status });
@@ -16,7 +18,9 @@ const RULE_PROJECT = (nameExpr, companyExpr) => `(
   ORDER BY ru.priority, length(ru.keyword) DESC, ru.id LIMIT 1)`;
 
 async function companyRecord(database, companyId) {
-  const company = (await database.query('SELECT id,name,tally_company_id FROM intel_companies WHERE id=$1', [companyId])).rows[0];
+  const company = (await database.query(
+    `SELECT ic.id,ic.name,ic.tally_company_id,c."Currency" AS currency
+     FROM intel_companies ic LEFT JOIN "Companies" c ON c."CompanyID"=ic.tally_company_id WHERE ic.id=$1`, [companyId])).rows[0];
   if (!company) throw fail('Upload and process an Excel file for this company first', 404);
   return company;
 }
@@ -263,7 +267,13 @@ async function assignAccount(accountId, projectId, username) {
  * Why amounts are not compared, in words a user can act on. Amounts are only compared
  * when the Excel and Tally have the same confirmed currency; no conversion is applied.
  */
-function unavailableReason(inputs) {
+function unavailableReason(inputs, companyCurrency) {
+  // An absent publication has no comparison basis; it says nothing about
+  // whether the company's Tally snapshot or currency is available.
+  if (!inputs) {
+    const currency = currencyCode(companyCurrency) || currencyCode(config.defaultCurrency);
+    return `No Excel comparison has been published for this company yet.${currency ? ` Company currency: ${currency}.` : ''} Upload and process an Excel file to compare amounts with Tally.`;
+  }
   const parts = [];
   if (!inputs?.source_currency) parts.push('the Excel file does not state a currency');
   if (!inputs?.tally_currency) parts.push('Tally has no confirmed single currency for this company yet (its latest balance snapshot is missing)');
@@ -409,7 +419,7 @@ async function summary(companyId) {
       company: { id: company.id, name: company.name, tallyCompanyId: company.tally_company_id },
       currency,
       monetaryAvailable: Boolean(currency),
-      currencyMessage: currency ? null : unavailableReason(basis.companies.get(companyId)),
+      currencyMessage: currency ? null : unavailableReason(basis.companies.get(companyId), company.currency),
       projects: shaped,
       unassigned,
       tallyProjects: (await db.query('SELECT "ProjectID" AS id,"ProjectName" AS name FROM "Projects" WHERE "CompanyID"=$1 ORDER BY "ProjectName"', [company.tally_company_id])).rows,
