@@ -28,6 +28,19 @@ function explainError(error={}) {
   if(error.event==='source_upload_failed')return 'The upload could not finish. Check your internet connection and try again. The captured data is saved locally for retry.';
   return 'The operation could not finish. Check Tally and your network, then try again. Share the diagnostic log if this continues.';
 }
+const TEMPORARY_CODES=new Set(['ECONNRESET','ECONNREFUSED','ECONNABORTED','EPIPE','ETIMEDOUT','EHOSTUNREACH','ENETUNREACH','ENOTFOUND','EAI_AGAIN',
+  'TimeoutError','UND_ERR_CONNECT_TIMEOUT','UND_ERR_HEADERS_TIMEOUT','UND_ERR_BODY_TIMEOUT','UND_ERR_SOCKET','SOURCE_STAGING_LIMIT',
+  'BATCH_LEDGER_IDENTITIES_CHANGED','PERIOD_CAPTURE_STALE']);
+const FAILURE_EVENTS=new Set(['source_upload_failed','source_capture_failed','run_failure','tally_export_failed']);
+// Temporary failures clear on their own (network, server load, Tally closed or busy); everything else needs attention.
+function failureKind(event={}) {
+  const diagnostic=event.diagnostic||event,codes=Array.isArray(diagnostic.errorCodes)?diagnostic.errorCodes:[];
+  const message=String(event.error||event.message||'');
+  if(codes.some(code=>TEMPORARY_CODES.has(code)))return 'temporary';
+  if(diagnostic.httpStatus===429||diagnostic.httpStatus>=500)return 'temporary';
+  if(event.code==='NO_COMPANIES'||/fetch failed|Tally changed during|selected company is no longer available|No source companies|API [a-z-]+: HTTP (?:429|5\d\d)/i.test(message))return 'temporary';
+  return 'data';
+}
 function publicEvent(event) {
   const result={};
   for(const key of ['event','at','runId','company','companyExternalId','collection','batchId','count','records','bytesReceived','recordsReceived','durationMs','chunkCount','chunksAcknowledged','succeeded','failed','cancelled','coverageStatus','reportingStatus','periodUpdate','consistency','attempt','from','to','batchNumber','batchCount','totalLedgers']) {
@@ -41,6 +54,8 @@ function publicEvent(event) {
     if(Number.isSafeInteger(d[key])&&d[key]>=0)result[key]=d[key];
   }
   if(['invalid_leading_byte','invalid_continuation','incomplete_sequence'].includes(d.utf8FailureReason))result.utf8FailureReason=d.utf8FailureReason;
+  if(['temporary','data'].includes(event.failureKind))result.failureKind=event.failureKind;
+  else if(FAILURE_EVENTS.has(event.event))result.failureKind=failureKind(event);
   return result;
 }
-module.exports={publicEvent,explainError};
+module.exports={publicEvent,explainError,failureKind};

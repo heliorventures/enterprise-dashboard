@@ -21,7 +21,7 @@ else {
     // A newly configured installer rotates the local protected credential automatically.
     if(stored?.fingerprint!==fingerprint){stored={fingerprint,token:config.token};fs.writeFileSync(file+'.tmp',safeStorage.encryptString(JSON.stringify(stored)));fs.renameSync(file+'.tmp',file);}
     config.token=stored.token;
-    desktop=await createDesktop({config,stateDirectory:path.join(data,config.testBuild?'test-state':'state')});
+    desktop=await createDesktop({config,stateDirectory:path.join(data,config.testBuild?'test-state':'state'),show:!process.argv.includes('--hidden'),tray:true});
   }).catch(()=>{dialog.showErrorBox('Finance Sync could not start','The installation configuration or Windows credential storage is unavailable. Ask your administrator to rebuild or reinstall Helior Finance Sync.');app.quit();});
   app.on('window-all-closed',()=>app.quit());
 }

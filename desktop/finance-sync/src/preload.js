@@ -7,5 +7,7 @@ contextBridge.exposeInMainWorld('financeSync',Object.freeze({
   sync:(ids,mode)=>ipcRenderer.invoke('finance:sync',ids,mode),
   cancel:()=>ipcRenderer.invoke('finance:cancel'),
   exportDiagnostics:()=>ipcRenderer.invoke('finance:export'),
+  saveSchedule:settings=>ipcRenderer.invoke('finance:saveSchedule',settings),
+  resumeSchedule:externalId=>ipcRenderer.invoke('finance:resumeSchedule',externalId),
   onState:callback=>{const listener=(_event,state)=>callback(state);ipcRenderer.on('finance:state',listener);return()=>ipcRenderer.removeListener('finance:state',listener);}
 }));

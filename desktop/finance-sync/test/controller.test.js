@@ -102,3 +102,62 @@ test('a run-level readiness error remains visible after the worker reports compl
     assert.match(c.snapshot().message,/selected company is no longer available/);
   } finally {close();}
 });
+
+const {Scheduler}=require('../src/scheduler');
+const {validateSchedule,inWindow,nextRunAt}=require('../src/schedule');
+const weekdays={enabled:true,period:'today',startTime:'11:00',endTime:'17:00',days:[1,2,3,4,5],frequencyMinutes:10,companies:[{externalId:'a',name:'Alpha'}]};
+test('schedule windows follow configured days and times, including overnight windows',()=>{
+  assert.equal(inWindow(weekdays,new Date(2026,9,27,12,0)),true);
+  assert.equal(inWindow(weekdays,new Date(2026,9,27,17,0)),false);
+  assert.equal(inWindow(weekdays,new Date(2026,9,31,12,0)),false);
+  const overnight={...weekdays,startTime:'23:00',endTime:'05:00',days:[5]};
+  assert.equal(inWindow(overnight,new Date(2026,9,30,23,30)),true);
+  assert.equal(inWindow(overnight,new Date(2026,9,31,2,0)),true);
+  assert.equal(inWindow(overnight,new Date(2026,9,31,23,30)),false);
+  assert.deepEqual(nextRunAt(weekdays,new Date(2026,9,30,16,55).toISOString(),new Date(2026,9,30,17,5)),new Date(2026,10,2,11,0));
+});
+test('schedule settings reject unsupported periods, frequencies, times and empty selections',()=>{
+  for(const change of [{period:'full'},{frequencyMinutes:7},{startTime:'11:00',endTime:'11:00'},{startTime:'25:00'},{companies:[]},{days:[]},{days:[1,1]}])
+    assert.throws(()=>validateSchedule({...weekdays,...change}));
+  assert.deepEqual(validateSchedule({...weekdays,enabled:false,companies:[],days:[]}).companies,[]);
+});
+function scheduled(companies) {
+  const context=setup();let clock=new Date(2026,9,27,12,0);
+  const scheduler=new Scheduler({controller:context.controller,stateDirectory:context.controller.stateDirectory,now:()=>clock,timers:{setInterval:()=>1,clearInterval:()=>{}}});
+  return {...context,scheduler,advance:minutes=>{clock=new Date(clock.getTime()+minutes*60000);},
+    save:()=>scheduler.save({...weekdays,startTime:'00:00',endTime:'23:59',days:[0,1,2,3,4,5,6],companies})};
+}
+function finish(worker,outcome) {
+  const id=worker.sent.selectedCompanyIds[0];
+  if(outcome==='saved')worker.emit('message',{type:'event',event:{event:'source_snapshot_saved',companyExternalId:id,coverageStatus:'complete',reportingStatus:'validated',periodUpdate:true,records:1}});
+  else worker.emit('message',{type:'event',event:{event:'source_capture_failed',companyExternalId:id,error:outcome,diagnostic:{errorCodes:[outcome]}}});
+  worker.emit('message',{type:'done',code:outcome==='saved'?0:1});worker.emit('exit',0);
+}
+test('scheduled companies run separately; failures move on and only data failures pause a company',()=>{
+  const {workers,scheduler,advance,save,close}=scheduled([{externalId:'a',name:'Alpha'},{externalId:'b',name:'Beta'}]);
+  try {
+    save();
+    assert.deepEqual(workers[0].sent.selectedCompanyIds,['a']);assert.equal(workers[0].sent.config.scope.kind,'period');
+    finish(workers[0],'BATCH_LEDGER_ID_REQUIRED');
+    assert.deepEqual(workers[1].sent.selectedCompanyIds,['b']);finish(workers[1],'saved');
+    assert.equal(scheduler.running,false);
+    scheduler.tick();assert.equal(workers.length,2);
+    advance(10);scheduler.tick();finish(workers[2],'BATCH_LEDGER_ID_REQUIRED');finish(workers[3],'ECONNRESET');
+    let b=scheduler.snapshot().companies[1];assert.equal(b.last.status,'retry');assert.equal(b.dataFailures,0);
+    advance(10);scheduler.tick();finish(workers[4],'BATCH_LEDGER_ID_REQUIRED');finish(workers[5],'saved');
+    assert.equal(scheduler.snapshot().companies[0].paused,true);
+    advance(10);scheduler.tick();
+    assert.equal(workers.length,7);assert.deepEqual(workers[6].sent.selectedCompanyIds,['b']);finish(workers[6],'saved');
+    assert.equal(scheduler.resume('a').companies[0].paused,false);
+  } finally {close();}
+});
+test('Stop during a scheduled run cancels the remaining queue and blocks overlapping manual work',()=>{
+  const {controller:c,workers,scheduler,save,close}=scheduled([{externalId:'a',name:'Alpha'},{externalId:'b',name:'Beta'}]);
+  try {
+    save();
+    assert.equal(c.snapshot().busy,true);assert.equal(c.snapshot().schedule.current,'Alpha');
+    assert.throws(()=>c.check(),/progress|scheduled/i);
+    c.cancel();workers[0].emit('exit',1);
+    assert.equal(workers.length,1);assert.equal(scheduler.running,false);assert.equal(c.snapshot().phase,'stopped');
+  } finally {close();}
+});

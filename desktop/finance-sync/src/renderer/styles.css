@@ -3,4 +3,7 @@
 select { font: inherit; color: inherit; background: white; border: 1px solid #ccd8ed; border-radius: 8px; padding: 10px 14px; margin-left: 18px; }
 select:focus-visible { outline: 3px solid #759ce9; outline-offset: 2px; }
 
+.schedule-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin:16px 0}.schedule-grid label{display:flex;flex-direction:column;gap:6px;font-size:13px}.schedule-grid select{margin-left:0}.schedule-grid input{padding:10px;border:1px solid #ccd8ed;border-radius:8px;color:inherit;background:white;font:inherit}
+.schedule-days,.schedule-companies{border:1px solid #edf0f5;border-radius:8px;padding:10px 14px;margin:0 0 14px}.schedule-days legend,.schedule-companies legend{font-size:12px;font-weight:600;color:#566983;padding:0 6px}.schedule-days label{display:inline-flex;gap:6px;align-items:center;margin-right:16px;font-size:13px}.schedule-days input{accent-color:#2864db}
+.schedule-actions{display:flex;align-items:center;gap:14px;margin-top:14px}.schedule-actions p{font-size:12px;color:#566983;margin:0}.result button{min-height:32px;padding:5px 12px;font-size:12px}
 #custom-range:not([hidden]){display:flex;flex-wrap:wrap;gap:16px;margin-top:16px}#custom-range label{display:flex;flex-direction:column;gap:6px;font-size:13px}#custom-range input{padding:10px;border:1px solid #ccd8ed;border-radius:8px;color:inherit;background:white}

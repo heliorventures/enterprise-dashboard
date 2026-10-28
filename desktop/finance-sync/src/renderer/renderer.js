@@ -83,9 +83,58 @@ function render(next){
     row.append(info,node('span',labels[result.status]||result.status,`badge ${result.status}`));$('results').append(row);
   }
   $('history').replaceChildren();
-  for(const item of state.history){const names=item.results.map(r=>r.company).join(', ');$('history').append(node('div',`${date(item.at)} · ${phases[item.phase]||item.phase} · ${names}`,'history-row'));}
+  for(const item of state.history){const names=item.results.map(r=>r.company).join(', ');$('history').append(node('div',`${date(item.at)} · ${item.origin==='schedule'?'Scheduled · ':''}${phases[item.phase]||item.phase} · ${names}`,'history-row'));}
   $('footer-note').textContent=state.phase==='ready'?`${selection.size} selected · Tally data stays unchanged`:!state.busy&&state.results.length?'Check again to choose companies for your next sync.':'No changes are made to your Tally data.';
+  renderSchedule();
 }
+let scheduleSignature='',scheduleCompanyIds='',scheduleSelection=new Set();
+const scheduleLabels={complete:'Synced',retry:'Will retry',failed:'Failed',paused:'Paused'};
+function scheduleCompanies(){
+  const companies=new Map((state.schedule?.settings.companies||[]).map(c=>[c.externalId,c.name]));
+  for(const company of state.companies)companies.set(company.externalId,company.name);
+  return [...companies].map(([externalId,name])=>({externalId,name}));
+}
+function renderSchedule(){
+  const schedule=state.schedule;if(!schedule)return;
+  const settings=schedule.settings,signature=JSON.stringify(settings);
+  // Refill the form only when saved settings change, so background updates never discard unsaved edits.
+  if(signature!==scheduleSignature){
+    scheduleSignature=signature;scheduleSelection=new Set(settings.companies.map(c=>c.externalId));scheduleCompanyIds='';
+    $('schedule-enabled').checked=settings.enabled;$('schedule-period').value=settings.period;
+    $('schedule-start').value=settings.startTime;$('schedule-end').value=settings.endTime;$('schedule-frequency').value=String(settings.frequencyMinutes);
+    for(const input of $('schedule-days').querySelectorAll('input'))input.checked=settings.days.includes(Number(input.value));
+  }
+  const companies=scheduleCompanies(),ids=JSON.stringify(companies.map(c=>c.externalId));
+  if(ids!==scheduleCompanyIds){
+    scheduleCompanyIds=ids;const container=$('schedule-companies');container.replaceChildren();
+    if(!companies.length)container.append(node('div','Use Check connection to list your Tally companies.','empty'));
+    for(const company of companies){
+      const label=node('label','','company'),input=document.createElement('input');input.type='checkbox';input.value=company.externalId;input.checked=scheduleSelection.has(company.externalId);
+      input.addEventListener('change',()=>{if(input.checked)scheduleSelection.add(company.externalId);else scheduleSelection.delete(company.externalId);});
+      label.append(input,node('span',company.name,'company-name'));container.append(label);
+    }
+  }
+  for(const element of document.querySelectorAll('#schedule-enabled,#schedule-period,#schedule-start,#schedule-end,#schedule-frequency,#schedule-days input,#schedule-companies input,#schedule-save'))element.disabled=state.testBuild;
+  $('schedule-status').textContent=state.testBuild?'Not available in test build':!settings.enabled?'Off':schedule.running?`Running${schedule.current?` · ${schedule.current}`:''}`:schedule.nextRunAt?`Next run ${date(schedule.nextRunAt)}`:'On';
+  $('schedule-limit').textContent=schedule.dataFailureLimit;
+  $('schedule-rows').replaceChildren();
+  for(const company of schedule.companies){
+    if(!company.last&&!company.paused)continue;
+    const status=company.paused?'paused':company.last.status,row=node('div','','result'),info=document.createElement('div');
+    info.append(node('strong',company.name),node('p',[company.last?date(company.last.at):'',company.last?.message].filter(Boolean).join(' · ')));
+    row.append(info);
+    if(company.paused){const button=node('button','Resume','secondary');button.addEventListener('click',()=>invoke('resumeSchedule',company.externalId));row.append(button);}
+    row.append(node('span',scheduleLabels[status]||status,`badge ${status==='complete'?'complete':status==='retry'?'waiting':'failed'}`));
+    $('schedule-rows').append(row);
+  }
+}
+$('schedule-save').addEventListener('click',async()=>{
+  const settings={enabled:$('schedule-enabled').checked,period:$('schedule-period').value,startTime:$('schedule-start').value,endTime:$('schedule-end').value,
+    frequencyMinutes:Number($('schedule-frequency').value),days:[...$('schedule-days').querySelectorAll('input')].filter(input=>input.checked).map(input=>Number(input.value)),
+    companies:scheduleCompanies().filter(company=>scheduleSelection.has(company.externalId))};
+  const result=await window.financeSync.saveSchedule(settings);
+  $('schedule-result').textContent=result.ok?'Schedule saved.':result.error;
+});
 function chosenPeriod(){return $('period').value==='custom'?{kind:'custom',fromMonth:$('from-month').value,toMonth:$('to-month').value}:$('period').value;}
 $('period').addEventListener('change',()=>{$('custom-range').hidden=$('period').value!=='custom';});
 $('check').addEventListener('click',()=>invoke('check'));

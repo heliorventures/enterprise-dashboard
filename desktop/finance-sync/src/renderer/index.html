@@ -33,6 +33,21 @@
       <label id="all-row" class="select-all" hidden><input id="select-all" type="checkbox"> Select all companies</label>
       <div id="companies" class="companies"><div class="empty">Your companies will appear here after checking Tally.</div></div>
     </section>
+    <section class="card" aria-labelledby="schedule-title">
+      <div class="section-heading"><div><h3 id="schedule-title">Automatic sync</h3><p>Runs while Finance Sync is open or in the system tray, and starts with Windows while it is on. Tally must be open with the companies loaded.</p></div><span id="schedule-status" class="count">Off</span></div>
+      <label class="select-all"><input id="schedule-enabled" type="checkbox"> Turn on automatic sync</label>
+      <div class="schedule-grid">
+        <label>Data to sync<select id="schedule-period"><option value="today">Today</option><option value="current-month">Current month</option></select></label>
+        <label>Start time<input id="schedule-start" type="time" required></label>
+        <label>End time<input id="schedule-end" type="time" required></label>
+        <label>Every<select id="schedule-frequency"><option value="10">10 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option><option value="120">2 hours</option></select></label>
+      </div>
+      <fieldset id="schedule-days" class="schedule-days"><legend>Days</legend><label><input type="checkbox" value="1"> Mon</label><label><input type="checkbox" value="2"> Tue</label><label><input type="checkbox" value="3"> Wed</label><label><input type="checkbox" value="4"> Thu</label><label><input type="checkbox" value="5"> Fri</label><label><input type="checkbox" value="6"> Sat</label><label><input type="checkbox" value="0"> Sun</label></fieldset>
+      <fieldset class="schedule-companies"><legend>Companies</legend><div id="schedule-companies" class="companies"></div></fieldset>
+      <p class="note">Each company syncs separately; a failure moves on to the next company. Connection, server and Tally availability problems retry at the next run. Other problems pause that company after <span id="schedule-limit">3</span> failed runs in a row.</p>
+      <div id="schedule-rows" class="results"></div>
+      <div class="schedule-actions"><button id="schedule-save" class="secondary">Save schedule</button><p id="schedule-result" role="status"></p></div>
+    </section>
     <section id="progress-card" class="card" aria-labelledby="progress-title" hidden>
       <div class="section-heading"><h3 id="progress-title">Sync progress</h3><span id="elapsed" class="muted"></span></div>
       <p id="activity" role="status" aria-live="polite"></p>

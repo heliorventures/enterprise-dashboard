@@ -5,7 +5,18 @@ const os=require('node:os');
 const path=require('node:path');
 const config=require('../src/config');
 const {pendingSummary,validateSelection}=require('../src/state');
-const {publicEvent,explainError}=require('../src/events');
+const {publicEvent,explainError,failureKind}=require('../src/events');
+
+test('failures split into temporary connection/availability problems and data or application problems',()=>{
+  for(const event of [{diagnostic:{errorCodes:['TypeError','ECONNRESET']}},{diagnostic:{operation:'chunk',httpStatus:503}},{event:'run_failure',error:'fetch failed'},
+    {event:'run_failure',error:'API capabilities: HTTP 502'},{event:'run_failure',error:'A selected company is no longer available. Load it in Tally and check again.'}])
+    assert.equal(failureKind(event),'temporary');
+  for(const event of [{diagnostic:{errorCodes:['BATCH_LEDGER_ID_REQUIRED']}},{diagnostic:{operation:'chunk',httpStatus:409}},{event:'run_failure',error:'Finance processing was not validated.'},{}])
+    assert.equal(failureKind(event),'data');
+  const published=publicEvent({event:'source_upload_failed',error:'fetch failed',diagnostic:{errorCodes:['ECONNRESET']}});
+  assert.equal(published.failureKind,'temporary');
+  assert.equal(publicEvent(published).failureKind,'temporary');
+});
 
 test('ledger identity errors stay specific in exported diagnostics without raw accounting values',()=>{
   const event=publicEvent({event:'tally_export_failed',errorCodes:['BATCH_LEDGER_ID_REQUIRED','Error'],

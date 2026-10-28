@@ -12,19 +12,23 @@ class SyncController extends EventEmitter {
     this.history=readHistory(stateDirectory);this.startedAt=null;this.current=null;this.discoveryVersion=0;
   }
   snapshot() {
-    return {phase:this.phase,busy:!!this.worker,message:this.message,companies:this.companies,results:this.results,current:this.current,
-      discoveryVersion:this.discoveryVersion,startedAt:this.startedAt,scope:this.scope||null,testBuild:this.config.testBuild===true,
-      pending:pendingSummary(this.stateDirectory),history:this.history.map(({at,phase,results})=>({at,phase,results})).slice(-10).reverse(),
-      lastSuccessfulSync:[...this.history].reverse().find(h=>h.phase==='complete')?.at||null};
+    return {phase:this.phase,busy:!!this.worker||!!this.schedule?.running,message:this.message,companies:this.companies,results:this.results,current:this.current,
+      discoveryVersion:this.discoveryVersion,startedAt:this.startedAt,scope:this.scope||null,testBuild:this.config.testBuild===true,origin:this.origin||null,
+      pending:pendingSummary(this.stateDirectory),history:this.history.map(({at,phase,results,origin})=>({at,phase,results,origin})).slice(-10).reverse(),
+      lastSuccessfulSync:[...this.history].reverse().find(h=>h.phase==='complete')?.at||null,schedule:this.schedule?.snapshot()||null};
   }
   changed(){this.emit('state',this.snapshot());}
+  idle() {
+    if(this.worker)throw new Error('An operation is already in progress.');
+    if(this.schedule?.running)throw new Error('A scheduled sync is running. Wait for it to finish or press Stop.');
+  }
   start(mode='full') {
     if(this.config.testBuild)throw new Error('This is a test build. Use Check connection only.');
-    if(this.worker)throw new Error('An operation is already in progress.');
+    this.idle();
     this.scope=scopeFor(mode);this.check(true);
   }
   check(autoSync=false) {
-    if(this.worker)throw new Error('An operation is already in progress.');
+    this.idle();
     this.autoSync=autoSync;this.events=[];
     this.results=[];this.current=null;this.startedAt=null;
     this.companies=[];this.phase='checking';this.message='Checking Tally for accessible companies…';
@@ -32,7 +36,7 @@ class SyncController extends EventEmitter {
   }
   sync(ids,mode) {
     if(this.config.testBuild)throw new Error('This is a test build. Ask your administrator for a configured installer to sync data.');
-    if(this.worker)throw new Error('An operation is already in progress.');
+    this.idle();
     if(this.phase!=='ready')throw new Error('Check the Tally connection again before starting another sync.');
     const selectedCompanyIds=validateSelection(ids,this.companies);
     if(mode!==undefined)this.scope=scopeFor(mode);
@@ -40,8 +44,24 @@ class SyncController extends EventEmitter {
     this.events=[];this.current=null;this.runFailureMessage=null;this.startedAt=new Date().toISOString();this.phase='syncing';this.message='Checking selected companies before synchronization…';
     this.launch('sync',selectedCompanyIds);
   }
-  launch(type,selectedCompanyIds) {
-    this.cancelRequested=false;this.completed=false;this.operation=type;
+  // The engine revalidates the company against Tally, so no prior Check connection is required.
+  syncScheduled(company,mode) {
+    if(this.config.testBuild)throw new Error('This is a test build. Ask your administrator for a configured installer to sync data.');
+    if(this.worker)throw new Error('An operation is already in progress.');
+    this.scope=scopeFor(mode);
+    this.results=[{externalId:company.externalId,company:company.name,status:'waiting'}];
+    this.events=[];this.current=null;this.runFailureMessage=null;this.startedAt=new Date().toISOString();this.phase='syncing';this.message=`Scheduled sync: ${company.name}…`;
+    this.launch('sync',[company.externalId],'schedule');
+  }
+  failureKind() {
+    if(this.phase==='complete')return null;
+    if(this.lastCode===2)return 'temporary';
+    const failures=this.events.filter(e=>e.failureKind);
+    const company=failures.filter(e=>['source_upload_failed','source_capture_failed'].includes(e.event)).at(-1);
+    return (company||failures.filter(e=>e.event==='run_failure').at(-1))?.failureKind||'data';
+  }
+  launch(type,selectedCompanyIds,origin='manual') {
+    this.cancelRequested=false;this.completed=false;this.operation=type;this.origin=origin;this.lastCode=null;
     let worker;
     try {
       const logs=path.join(this.stateDirectory,'logs');fs.mkdirSync(logs,{recursive:true});
@@ -60,10 +80,11 @@ class SyncController extends EventEmitter {
       if(type==='check'&&this.autoSync&&this.completed&&this.phase==='ready'&&!this.cancelRequested){this.autoSync=false;this.sync(this.companies.map(c=>c.externalId));return;}
       if(type==='sync'||this.phase==='error'||this.phase==='stopped') {
         for(const row of this.results)if(row.status==='waiting'||row.status==='working')row.status=this.cancelRequested?'stopped':'failed';
-        try {this.history=saveHistory(this.stateDirectory,{at:new Date().toISOString(),phase:this.phase,results:this.results,events:this.events});}
+        try {this.history=saveHistory(this.stateDirectory,{at:new Date().toISOString(),phase:this.phase,results:this.results,events:this.events,origin});}
         catch {this.message+=' Unable to save local history. Contact your administrator.';}
       }
       this.changed();
+      this.emit('finished',{type,origin,phase:this.phase,failureKind:this.failureKind(),message:this.results[0]?.message||this.message});
     });
     this.changed();
     worker.postMessage({type,config:{...this.config,scope:this.scope},stateDirectory:this.stateDirectory,selectedCompanyIds});
@@ -92,7 +113,7 @@ class SyncController extends EventEmitter {
       if(event.event==='run_failure'){this.runFailureMessage=event.message;this.message=event.message;}
       if(event.event==='run_cancelled')this.cancelRequested=true;
     } else if(data.type==='done') {
-      this.completed=true;
+      this.completed=true;this.lastCode=data.code;
       this.phase=this.cancelRequested?'stopped':data.code===0&&this.results.length&&this.results.every(r=>r.status==='complete')?'complete':'attention';
       this.message=this.phase==='complete'?'All selected companies were uploaded and dashboard processing was validated.':this.phase==='stopped'?'Sync stopped. Completed captures are retained for retry.':data.code===2?'Another sync is already using this data folder. Wait for it to finish.':this.runFailureMessage||'Sync finished with items that need attention. Review each company below.';
     }
@@ -100,7 +121,8 @@ class SyncController extends EventEmitter {
     this.changed();
   }
   cancel() {
-    if(!this.worker)return;
+    const queueStopped=this.schedule?.cancelQueue();
+    if(!this.worker){if(queueStopped)this.changed();return;}
     this.autoSync=false;
     if(this.cancelRequested){this.writeJournal({event:'force_stop_requested'});this.worker.kill();return;}
     this.cancelRequested=true;this.phase='stopping';this.message='Stopping safely. Saved uploads will be kept for retry…';

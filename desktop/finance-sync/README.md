@@ -17,8 +17,8 @@ Windows 10/11 Intel/AMD x64 desktop app and unsigned EXE installer. It reuses `d
 1. Install the configured EXE. It bundles Electron and the agent dependencies; no Node.js, npm, terminal, or configuration editing is needed on the accountant's computer.
 2. Open Tally on that computer, load the required companies and complete their login. The configured local HTTP/XML server must be enabled.
 3. Open **Helior Finance Sync** from its desktop or Start menu shortcut.
-4. Opening the app only loads local history. It does not connect, discover companies, upload or retry. Choose **All data**, **Today**, **Current month**, or **Last month**, then **Sync now**. This discovers loaded companies and processes them sequentially. To skip companies, first use **Check connection**, then uncheck them before Sync.
-5. Review the per-company results. **Stop sync** aborts our network work; **Force stop** immediately terminates our worker. There is also a two-second termination fallback. A failure stops the desktop run; it does not automatically retry or proceed to the next company.
+4. Opening the app only loads local history; it connects on its own only when **Automatic sync** is on. Choose **All data**, **Today**, **Current month**, or **Last month**, then **Sync now**. This discovers loaded companies and processes them sequentially. To skip companies, first use **Check connection**, then uncheck them before Sync.
+5. Review the per-company results. **Stop sync** aborts our network work; **Force stop** immediately terminates our worker. There is also a two-second termination fallback. A failure stops a manual run without proceeding to the next company. Interrupted upload requests and HTTP 429/5xx responses are retried up to four times; a later sync resumes from the parts Finance already stored.
 
 No initial full sync is required. All data reconciles the complete imported Tally dataset; Today, Current month and Last month replace vouchers only in their selected dates. A successful empty period removes previously imported vouchers from that period. Other dates and manually created Finance entries are preserved. Current month and Last month cover the entire calendar month, including future-dated vouchers in the current month. Dates use the computer's local calendar and are frozen on click. Masters are refreshed separately in full-date context to preserve ledger balance semantics.
 
@@ -30,7 +30,17 @@ Each collection is requested separately, with a 500 ms interruptible pause betwe
 
 If Finance explicitly rejects a saved period as stale, its directory is retained with `held.json` for investigation. It is excluded from future retries, allowing the next manual sync to take a fresh capture. No accounting files are deleted by this recovery action.
 
-The app does not collect Tally passwords, sign into Tally, load companies, write to Tally, or install a scheduler/service. It cannot distinguish an unloaded company from a login requirement without evidence from Tally. Connection status describes Tally access; API credentials and availability are checked during upload. Accountants do not need to configure the Finance connection.
+## Automatic sync
+
+The **Automatic sync** card configures background runs: Today or Current month, start and end time, days of the week, frequency (10, 15, 30, 60 or 120 minutes) and companies. Settings are saved in the local state folder (`schedule.json`); per-company results are kept in `schedule-state.json`. Nothing is hard-coded except the defaults (11:00–17:00, Monday–Friday, every 10 minutes). An end time earlier than the start time defines an overnight window that belongs to its start day.
+
+- Closing the window keeps the app in the system tray; **Quit Finance Sync** in the tray menu exits. While automatic sync is on, the installed app starts hidden in the tray when the Windows user signs in. It does not run as a service; the user must be signed in with Tally open.
+- Each company is synced as a separate run, one after another. A failed company never stops the remaining companies.
+- Connection, server-capacity (429/5xx) and Tally-availability failures, plus data that changed during capture, retry at the next scheduled run without limit.
+- Other failures (validation, identity, size limits, rejected uploads, unverified processing) pause that company after three consecutive failed runs. **Resume** in the card clears the pause.
+- A run that is still in progress when the next one is due is not duplicated; manual Check and Sync wait for the scheduled run, and **Stop sync** cancels the remaining queue.
+
+The app does not collect Tally passwords, sign into Tally, load companies, write to Tally, or install a Windows service. It cannot distinguish an unloaded company from a login requirement without evidence from Tally. Connection status describes Tally access; API credentials and availability are checked during upload. Accountants do not need to configure the Finance connection.
 
 ## Build a configured installer (administrator/developer only)
 
